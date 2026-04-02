@@ -45,8 +45,8 @@ export function OrderDetail() {
         const client = CLIENTS.find(c => c.id === project?.clientId);
 
         return (
-          <Card key={order.id} className="p-6 border border-border">
-            <div className="flex items-start justify-between mb-6">
+          <Card key={order.id} className="p-4 md:p-6 border border-border">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-6">
               <div>
                 <p className="text-sm text-muted-foreground">Orden: {order.id}</p>
                 <h3 className="text-lg font-semibold">{project?.name}</h3>
@@ -79,7 +79,7 @@ export function OrderDetail() {
                     <p className="text-xs text-muted-foreground mt-1">{item.progress}% completado</p>
                   </div>
 
-                  <div className="grid grid-cols-5 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
                     {item.phases.map((phase) => {
                       const phaseInfo = PRODUCTION_PHASES.find(p => p.id === phase.name);
                       return (
@@ -108,7 +108,7 @@ export function OrderDetail() {
             </div>
 
             <div className="mt-6 pt-6 border-t border-border">
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <p className="text-xs text-muted-foreground">Inicio</p>
                   <p className="font-semibold text-sm">{order.startDate.toLocaleDateString('es-BO')}</p>
@@ -125,7 +125,7 @@ export function OrderDetail() {
                     </>
                   )}
                 </div>
-                <div className="text-right">
+                <div className="text-left sm:text-right lg:text-right">
                   <Button variant="outline" size="sm" disabled={order.status === 'completed'}>
                     Actualizar
                   </Button>
