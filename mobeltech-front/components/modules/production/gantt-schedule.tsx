@@ -39,6 +39,8 @@ interface DayInfo {
 type ScheduleItem = (typeof PROJECT_SCHEDULES)[number];
 
 const WEEKDAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const LEFT_COL_WIDTH = 170;
+const DAY_COL_WIDTH = 28;
 
 export function GanttSchedule() {
   const [selectedMonth, setSelectedMonth] = useState<Date | null>(null);
@@ -80,19 +82,7 @@ export function GanttSchedule() {
       const clientMatch = !filterClient || schedule.clientName === filterClient;
       const contractorMatch = !filterContractor || schedule.contractorName === filterContractor;
 
-      // Machine filter only applies to corte and canteado phases
-      let phaseMatch = true;
-      if (filterPhase) {
-        if (filterPhase === 'corte') {
-          phaseMatch = schedule.phases.some((p) => p.phase === 'corte');
-        } else if (filterPhase === 'corte-2') {
-          phaseMatch = schedule.phases.some((p) => p.phase === 'corte');
-        } else if (filterPhase === 'canteado') {
-          phaseMatch = schedule.phases.some((p) => p.phase === 'canteado');
-        } else if (filterPhase === 'canteado-2') {
-          phaseMatch = schedule.phases.some((p) => p.phase === 'canteado');
-        }
-      }
+      const phaseMatch = !filterPhase || schedule.phases.some((p) => p.phase === filterPhase);
 
       return clientMatch && contractorMatch && phaseMatch;
     });
@@ -171,23 +161,77 @@ export function GanttSchedule() {
   }, [calendarDays, selectedMonth]);
 
   const monthStart = selectedMonth ? new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), 1) : null;
-  // Extend the visible range to cover two months
   const monthEnd = selectedMonth ? new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 2, 0) : null;
 
+  const timelineDays = useMemo(() => {
+    if (!monthStart || !monthEnd) return [];
+
+    const days: Date[] = [];
+    const cursor = new Date(monthStart.getFullYear(), monthStart.getMonth(), monthStart.getDate());
+
+    while (cursor.getTime() <= monthEnd.getTime()) {
+      days.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return days;
+  }, [monthStart, monthEnd]);
+
+  const weekSegments = useMemo(() => {
+    if (timelineDays.length === 0) return [];
+
+    const segments: { startIdx: number; length: number; label: string }[] = [];
+    let i = 0;
+
+    while (i < timelineDays.length) {
+      const day = timelineDays[i];
+      const dayOfWeek = (day.getDay() + 6) % 7; // Monday = 0
+      const remainingToWeekEnd = 7 - dayOfWeek;
+      const length = Math.min(remainingToWeekEnd, timelineDays.length - i);
+      const start = timelineDays[i];
+      const end = timelineDays[i + length - 1];
+      const label = `${start.getDate()}/${start.getMonth() + 1}-${end.getDate()}/${end.getMonth() + 1}`;
+
+      segments.push({ startIdx: i, length, label });
+      i += length;
+    }
+
+    return segments;
+  }, [timelineDays]);
+
   const getPhaseWidth = (startDate: Date, endDate: Date) => {
-    if (!monthStart || !monthEnd) return 0;
-    const start = Math.max(startDate.getTime(), monthStart.getTime());
-    const end = Math.min(endDate.getTime(), monthEnd.getTime());
-    const phaseDays = (end - start) / (1000 * 60 * 60 * 24);
-    const totalDays = (monthEnd.getTime() - monthStart.getTime()) / (1000 * 60 * 60 * 24);
-    return Math.round((phaseDays / totalDays) * 100 * 10000) / 10000; // Round to 4 decimals
+    if (!monthStart || !monthEnd || timelineDays.length === 0) return 0;
+
+    const start = normalizeDate(startDate).getTime();
+    const end = normalizeDate(endDate).getTime();
+    const visibleStart = normalizeDate(monthStart).getTime();
+    const visibleEnd = normalizeDate(monthEnd).getTime();
+
+    if (end < visibleStart || start > visibleEnd) return 0;
+
+    const clampedStart = Math.max(start, visibleStart);
+    const clampedEnd = Math.min(end, visibleEnd);
+    const dayMs = 1000 * 60 * 60 * 24;
+    const startIdx = Math.floor((clampedStart - visibleStart) / dayMs);
+    const endIdx = Math.floor((clampedEnd - visibleStart) / dayMs);
+    const spanDays = Math.max(1, endIdx - startIdx + 1);
+
+    return (spanDays / timelineDays.length) * 100;
   };
 
   const getPhaseOffset = (startDate: Date) => {
-    if (!monthStart || !monthEnd) return 0;
-    const offset = Math.max(0, (startDate.getTime() - monthStart.getTime()) / (1000 * 60 * 60 * 24));
-    const totalDays = (monthEnd.getTime() - monthStart.getTime()) / (1000 * 60 * 60 * 24);
-    return Math.round((offset / totalDays) * 100 * 10000) / 10000; // Round to 4 decimals
+    if (!monthStart || !monthEnd || timelineDays.length === 0) return 0;
+
+    const visibleStart = normalizeDate(monthStart).getTime();
+    const visibleEnd = normalizeDate(monthEnd).getTime();
+    const start = normalizeDate(startDate).getTime();
+    const dayMs = 1000 * 60 * 60 * 24;
+
+    if (start <= visibleStart) return 0;
+    if (start > visibleEnd) return 100;
+
+    const startIdx = Math.floor((start - visibleStart) / dayMs);
+    return (startIdx / timelineDays.length) * 100;
   };
 
   const formatDate = (date?: Date) => {
@@ -497,10 +541,11 @@ export function GanttSchedule() {
           className="w-full px-3 py-2 text-sm border rounded bg-background focus:outline-none focus:ring-2 focus:ring-primary"
         >
           <option value="">Todos los procesos</option>
-          <option value="corte">Corte (Maquina 1)</option>
-          <option value="corte-2">Corte (Maquina 2)</option>
-          <option value="canteado">Canteado (Maquina 1)</option>
-          <option value="canteado-2">Canteado (Maquina 2)</option>
+          <option value="corte">Corte</option>
+          <option value="canteado">Canteado</option>
+          <option value="ensamblado">Ensamblado</option>
+          <option value="instalacion">Instalación</option>
+          <option value="entrega">Entrega</option>
         </select>
       </div>
     </div>
@@ -640,44 +685,41 @@ export function GanttSchedule() {
 
       {/* Desktop Gantt Container */}
       <div className="hidden lg:block print:block overflow-x-auto border border-border rounded-lg bg-background gantt-print-wrapper">
-        <div className="min-w-full">
+        <div style={{ minWidth: `${LEFT_COL_WIDTH * 3 + timelineDays.length * DAY_COL_WIDTH}px` }}>
           {/* Header */}
           <div className="flex border-b border-border bg-muted/30">
             {/* Left columns */}
-            <div className="border-r border-border p-2 font-semibold min-w-32">Mueble</div>
-            <div className="border-r border-border p-2 font-semibold min-w-32">Cliente</div>
-            <div className="border-r border-border p-2 font-semibold min-w-32">Contratista</div>
+            <div className="border-r border-border p-2 font-semibold shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}>Mueble</div>
+            <div className="border-r border-border p-2 font-semibold shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}>Cliente</div>
+            <div className="border-r border-border p-2 font-semibold shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}>Contratista</div>
 
             {/* Weeks header */}
-            {weeks.map((week, idx) => (
+            {weekSegments.map((segment, idx) => (
               <div
                 key={`week-${idx}`}
                 className="border-r border-border p-2 text-center font-semibold text-xs bg-muted/50 shrink-0"
-                style={{ width: `${(100 / calendarDays.length) * week.length}%` }}
+                style={{ width: `${segment.length * DAY_COL_WIDTH}px` }}
               >
-                S{idx + 1}
+                S{idx + 1} ({segment.label})
               </div>
             ))}
           </div>
 
           {/* Days header */}
           <div className="flex border-b border-border bg-muted/20 text-xs">
-            <div className="border-r border-border min-w-32" style={{ width: '96px' }}></div>
-            <div className="border-r border-border min-w-32" style={{ width: '96px' }}></div>
-            <div className="border-r border-border min-w-32" style={{ width: '96px' }}></div>
+            <div className="border-r border-border shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}></div>
+            <div className="border-r border-border shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}></div>
+            <div className="border-r border-border shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}></div>
 
-            {weeks.map((week, weekIdx) =>
-              week.map((day, dayIdx) => (
+            {timelineDays.map((day, dayIdx) => (
                 <div
-                  key={`day-${weekIdx}-${dayIdx}`}
-                  className={`border-r border-border p-1 text-center shrink-0 ${!day.isCurrentMonth ? 'bg-muted/20 text-muted-foreground' : ''
-                    }`}
-                  style={{ width: `${100 / calendarDays.length}%` }}
+                  key={`day-${dayIdx}`}
+                  className="border-r border-border p-1 text-center shrink-0"
+                  style={{ width: `${DAY_COL_WIDTH}px` }}
                 >
-                  {day.isCurrentMonth ? day.date.getDate() : ''}
+                  {day.getDate()}
                 </div>
-              ))
-            )}
+              ))}
           </div>
 
           {/* Body - Schedule rows */}
@@ -686,98 +728,76 @@ export function GanttSchedule() {
               No hay cronogramas que coincidan con los filtros seleccionados
             </div>
           ) : (
-            filteredSchedules.map((schedule, scheduleIdx) => (
-              <div key={schedule.projectId}>
-                {/* Combined Planned and Actual timeline row */}
-                <div className="flex border-b border-border hover:bg-muted/30 h-12">
-                  {scheduleIdx === 0 ? (
-                    <>
-                      <div className="border-r border-border p-1 font-semibold text-xs bg-muted/10 min-w-32 overflow-hidden flex items-center">
-                        {schedule.furnitureName}
-                      </div>
-                      <div className="border-r border-border p-1 text-xs bg-muted/10 min-w-32 overflow-hidden flex items-center">
-                        {schedule.clientName}
-                      </div>
-                      <div className="border-r border-border p-1 text-xs bg-muted/10 min-w-32 overflow-hidden flex items-center">
-                        {schedule.contractorName}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="border-r border-border min-w-32"></div>
-                      <div className="border-r border-border min-w-32"></div>
-                      <div className="border-r border-border min-w-32"></div>
-                    </>
+            filteredSchedules.map((schedule) => (
+              <div key={schedule.projectId} className="flex border-b border-border hover:bg-muted/20 h-16">
+                <div className="border-r border-border px-2 py-1 shrink-0 flex flex-col justify-center" style={{ width: `${LEFT_COL_WIDTH}px` }}>
+                  <p className="font-semibold text-xs truncate" title={schedule.furnitureName}>{schedule.furnitureName}</p>
+                  {isAdmin && (
+                    <button
+                      onClick={() => handleProjectPdfDownload(schedule)}
+                      className="mt-1 px-2 py-0.5 text-[10px] border rounded hover:bg-muted w-fit print:hidden"
+                    >
+                      PDF
+                    </button>
                   )}
-
-                  {/* Container for both planned and actual bars */}
-                  <div className="flex-1 relative ml-4">
-                    {/* Planned bars - top */}
-                    <div className="absolute top-1 left-0 right-0 flex items-center h-2">
-                      {schedule.phases.map((phase, idx) => {
-                        const width = getPhaseWidth(phase.plannedStart, phase.plannedEnd);
-                        const offset = idx === 0 ? getPhaseOffset(phase.plannedStart) : 0;
-
-                        return (
-                          <div
-                            key={`planned-${phase.phase}`}
-                            className="h-2 bg-gray-300 border border-gray-400 opacity-60 rounded-sm shrink-0"
-                            suppressHydrationWarning
-                            style={{
-                              width: `calc(${width}%)`,
-                              marginLeft: idx === 0 ? `calc(${offset}%)` : '1px',
-                            }}
-                            title={`${PHASE_LABELS[phase.phase]} (Planeado)`}
-                          />
-                        );
-                      })}
-                    </div>
-
-                    {/* Actual bars - bottom */}
-                    <div className="absolute bottom-1 left-0 right-0 flex items-center h-2">
-                      {schedule.phases
-                        .filter((p) => p.actualStart)
-                        .map((phase, idx) => {
-                          const width = getPhaseWidth(
-                            phase.actualStart!,
-                            phase.actualEnd || new Date()
-                          );
-                          const offset = idx === 0 ? getPhaseOffset(phase.actualStart!) : 0;
-
-                          return (
-                            <div
-                              key={`actual-${phase.phase}`}
-                              className="h-2 rounded-sm shrink-0"
-                              suppressHydrationWarning
-                              style={{
-                                backgroundColor: PHASE_COLORS[phase.phase as keyof typeof PHASE_COLORS],
-                                width: `calc(${width}%)`,
-                                marginLeft: idx === 0 ? `calc(${offset}%)` : '1px',
-                              }}
-                              title={`${PHASE_LABELS[phase.phase]} (Real)`}
-                            />
-                          );
-                        })}
-                    </div>
-                  </div>
+                </div>
+                <div className="border-r border-border px-2 py-1 text-xs shrink-0 flex items-center" style={{ width: `${LEFT_COL_WIDTH}px` }}>
+                  <span className="truncate" title={schedule.clientName}>{schedule.clientName}</span>
+                </div>
+                <div className="border-r border-border px-2 py-1 text-xs shrink-0 flex items-center" style={{ width: `${LEFT_COL_WIDTH}px` }}>
+                  <span className="truncate" title={schedule.contractorName}>{schedule.contractorName}</span>
                 </div>
 
-                {isAdmin && (
-                  <div className="flex border-b border-border bg-muted/5 print:hidden">
-                    <div className="border-r border-border p-1 text-xs font-semibold min-w-32 flex items-center">Exportar</div>
-                    <div className="border-r border-border min-w-32"></div>
-                    <div className="border-r border-border min-w-32"></div>
-                    <div className="flex-1 p-2">
-                      <button
-                        onClick={() => handleProjectPdfDownload(schedule)}
-                        className="px-3 py-1 text-xs border rounded hover:bg-muted"
-                      >
-                        Descargar PDF de este proyecto
-                      </button>
-                    </div>
+                <div className="relative shrink-0" style={{ width: `${timelineDays.length * DAY_COL_WIDTH}px` }}>
+                  <div className="absolute inset-0 flex pointer-events-none">
+                    {timelineDays.map((_, idx) => (
+                      <div key={`grid-${schedule.projectId}-${idx}`} className="border-r border-border/60 h-full" style={{ width: `${DAY_COL_WIDTH}px` }} />
+                    ))}
                   </div>
-                )}
 
+                  {schedule.phases.map((phase) => {
+                    const width = getPhaseWidth(phase.plannedStart, phase.plannedEnd);
+                    const offset = getPhaseOffset(phase.plannedStart);
+
+                    if (width <= 0) return null;
+
+                    return (
+                      <div
+                        key={`planned-${schedule.projectId}-${phase.phase}`}
+                        className="absolute top-3 h-2 bg-gray-300 border border-gray-400 opacity-70 rounded-sm"
+                        suppressHydrationWarning
+                        style={{
+                          width: `${width}%`,
+                          left: `${offset}%`,
+                        }}
+                        title={`${PHASE_LABELS[phase.phase]} (Planeado)`}
+                      />
+                    );
+                  })}
+
+                  {schedule.phases
+                    .filter((phase) => phase.actualStart)
+                    .map((phase) => {
+                      const width = getPhaseWidth(phase.actualStart!, phase.actualEnd || new Date());
+                      const offset = getPhaseOffset(phase.actualStart!);
+
+                      if (width <= 0) return null;
+
+                      return (
+                        <div
+                          key={`actual-${schedule.projectId}-${phase.phase}`}
+                          className="absolute bottom-3 h-2 rounded-sm"
+                          suppressHydrationWarning
+                          style={{
+                            backgroundColor: PHASE_COLORS[phase.phase as keyof typeof PHASE_COLORS],
+                            width: `${width}%`,
+                            left: `${offset}%`,
+                          }}
+                          title={`${PHASE_LABELS[phase.phase]} (Real)`}
+                        />
+                      );
+                    })}
+                </div>
               </div>
             ))
           )}
