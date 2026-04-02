@@ -36,17 +36,69 @@ export function OrdersList() {
     return new Date() > estimatedDate;
   };
 
+  const ordersWithMeta = PRODUCTION_ORDERS.map((order) => {
+    const project = PROJECTS.find((p) => p.id === order.projectId);
+    const client = CLIENTS.find((c) => c.id === project?.clientId);
+    const delayed = isDelayed(order.estimatedDeliveryDate) && order.status !== 'completed';
+
+    return {
+      order,
+      project,
+      client,
+      delayed,
+    };
+  });
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-xl font-semibold">Órdenes de Producción</h2>
-        <Button size="sm" className="gap-2">
+        <Button size="sm" className="gap-2 w-full sm:w-auto">
           <Plus className="w-4 h-4" />
           Nueva Orden
         </Button>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="space-y-3 lg:hidden">
+        {ordersWithMeta.map(({ order, project, client, delayed }) => (
+          <Card key={`order-mobile-${order.id}`} className="p-4 border border-border">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1 min-w-0">
+                <p className="font-mono text-xs font-semibold">{order.id}</p>
+                <p className="font-semibold text-sm truncate">{project?.name || 'N/A'}</p>
+                <p className="text-xs text-muted-foreground truncate">{client?.name || 'N/A'}</p>
+              </div>
+              <Badge className={getStatusColor(delayed ? 'delayed' : order.status)}>
+                {delayed ? 'Retrasado' : getStatusLabel(order.status)}
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-4 text-xs">
+              <div>
+                <p className="text-muted-foreground">Inicio</p>
+                <p className="font-medium">{order.startDate.toLocaleDateString('es-BO')}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Entrega Est.</p>
+                <div className="flex items-center gap-1">
+                  <p className="font-medium">{order.estimatedDeliveryDate.toLocaleDateString('es-BO')}</p>
+                  {delayed && <AlertCircle className="w-3.5 h-3.5 text-red-600" />}
+                </div>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Ítems</p>
+                <p className="font-medium">{order.items.length}</p>
+              </div>
+            </div>
+
+            <Button variant="ghost" size="sm" className="mt-3 w-full">
+              Ver Detalles
+            </Button>
+          </Card>
+        ))}
+      </div>
+
+      <div className="hidden lg:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
@@ -61,10 +113,7 @@ export function OrdersList() {
             </tr>
           </thead>
           <tbody>
-            {PRODUCTION_ORDERS.map((order) => {
-              const project = PROJECTS.find(p => p.id === order.projectId);
-              const client = CLIENTS.find(c => c.id === project?.clientId);
-              const delayed = isDelayed(order.estimatedDeliveryDate) && order.status !== 'completed';
+            {ordersWithMeta.map(({ order, project, client, delayed }) => {
 
               return (
                 <tr key={order.id} className="border-b border-border hover:bg-muted/50">

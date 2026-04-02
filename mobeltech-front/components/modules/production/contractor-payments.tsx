@@ -6,11 +6,85 @@ import { CONTRACTORS, PRODUCTION_ORDERS } from '@/lib/mock-data';
 import { DollarSign, CheckCircle } from 'lucide-react';
 
 export function ContractorPayments() {
+  const paymentsSummary = CONTRACTORS.map((contractor) => {
+    const order = PRODUCTION_ORDERS.find((o) => o.assignedContractorId === contractor.id);
+    const totalPaid =
+      (contractor.advances.advance1 || 0) +
+      (contractor.advances.advance2 || 0) +
+      (contractor.advances.advance3 || 0);
+    const totalAmount = totalPaid + (contractor.advances.balance || 0);
+    const isPaid = contractor.advances.balance === 0 || contractor.advances.balance <= 0;
+
+    return {
+      contractor,
+      order,
+      totalPaid,
+      totalAmount,
+      isPaid,
+    };
+  });
+
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-semibold">Pagos a Contratistas</h2>
 
-      <div className="overflow-x-auto">
+      <div className="space-y-3 lg:hidden">
+        {paymentsSummary.map(({ contractor, totalPaid, totalAmount, isPaid }) => (
+          <Card key={`payment-mobile-${contractor.id}`} className="p-4 border border-border">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold text-sm">{contractor.name}</p>
+                <p className="text-xs text-muted-foreground">{contractor.specialization}</p>
+                <p className="text-xs text-muted-foreground">{contractor.phone}</p>
+              </div>
+              <Badge
+                className={
+                  isPaid
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-orange-100 text-orange-800'
+                }
+              >
+                {isPaid ? 'Pagado' : 'Pendiente'}
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-4 text-xs">
+              <div>
+                <p className="text-muted-foreground">Anticipo 1</p>
+                <p className="font-mono">Bs. {(contractor.advances.advance1 || 0).toLocaleString('es-BO')}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Anticipo 2</p>
+                <p className="font-mono">Bs. {(contractor.advances.advance2 || 0).toLocaleString('es-BO')}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Anticipo 3</p>
+                <p className="font-mono">Bs. {(contractor.advances.advance3 || 0).toLocaleString('es-BO')}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Balance</p>
+                <p
+                  className="font-mono"
+                  style={{ color: contractor.advances.balance > 0 ? '#ef4444' : '#10b981' }}
+                >
+                  Bs. {(contractor.advances.balance || 0).toLocaleString('es-BO')}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Total pagado</span>
+              <span className="font-mono">Bs. {totalPaid.toLocaleString('es-BO')}</span>
+            </div>
+            <div className="mt-1 flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Total</span>
+              <span className="font-mono font-semibold">Bs. {totalAmount.toLocaleString('es-BO')}</span>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      <div className="hidden lg:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
@@ -25,14 +99,7 @@ export function ContractorPayments() {
             </tr>
           </thead>
           <tbody>
-            {CONTRACTORS.map((contractor) => {
-              const order = PRODUCTION_ORDERS.find(o => o.assignedContractorId === contractor.id);
-              const totalPaid =
-                (contractor.advances.advance1 || 0) +
-                (contractor.advances.advance2 || 0) +
-                (contractor.advances.advance3 || 0);
-              const totalAmount = totalPaid + (contractor.advances.balance || 0);
-              const isPaid = contractor.advances.balance === 0 || contractor.advances.balance <= 0;
+            {paymentsSummary.map(({ contractor, totalAmount, isPaid }) => {
 
               return (
                 <tr key={contractor.id} className="border-b border-border hover:bg-muted/50">
