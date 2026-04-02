@@ -1,7 +1,9 @@
 'use client';
 
 import { useRole } from '@/hooks/use-role-context';
-import { Bell } from 'lucide-react';
+import { useSidebar } from '@/hooks/use-sidebar';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { Bell, Menu } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,28 +19,36 @@ import { useState } from 'react';
 
 export function AppHeader() {
   const { currentRole, setCurrentRole, userName } = useRole();
+  const { toggleMobile } = useSidebar();
+  const isMobile = useIsMobile();
   const [showNotifications, setShowNotifications] = useState(false);
 
   return (
-    <header className="border-b border-border bg-background px-6 py-4 flex items-center justify-between">
+    <header className="border-b border-border bg-background px-3 md:px-6 py-3 md:py-4 flex items-center justify-between gap-3">
       <div className="flex items-center gap-4">
+        {isMobile && (
+          <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={toggleMobile}>
+            <Menu className="w-5 h-5" />
+          </Button>
+        )}
+
         <div className="flex items-center gap-2">
           <div
-            className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
+            className="w-9 h-9 md:w-10 md:h-10 rounded-lg flex items-center justify-center text-lg md:text-xl"
             style={{ backgroundColor: '#2e2e2e' }}
           >
             🛋️
           </div>
           <div>
-            <h1 className="text-xl font-bold" style={{ color: '#2e2e2e' }}>
+            <h1 className="text-base md:text-xl font-bold" style={{ color: '#2e2e2e' }}>
               MobelTech
             </h1>
-            <p className="text-xs text-muted-foreground">Sistema Administrativo</p>
+            {!isMobile && <p className="text-xs text-muted-foreground">Sistema Administrativo</p>}
           </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-2 md:gap-6">
         {/* Notification Bell */}
         <div className="relative">
           <Button variant="ghost" size="sm" className="relative h-10 w-10 p-0" onClick={() => setShowNotifications(!showNotifications)}>
@@ -49,7 +59,7 @@ export function AppHeader() {
           </Button>
           
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 bg-background border border-border rounded-lg shadow-lg z-50">
+            <div className="absolute right-0 mt-2 w-[min(90vw,20rem)] bg-background border border-border rounded-lg shadow-lg z-50">
               <div className="p-4 border-b border-border">
                 <h3 className="font-semibold">Notificaciones</h3>
               </div>
@@ -75,7 +85,7 @@ export function AppHeader() {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="text-right">
+          <div className="text-right hidden sm:block">
             <p className="text-sm font-medium">{userName}</p>
             <p className="text-xs text-muted-foreground">{ROLE_PERMISSIONS[currentRole].label}</p>
           </div>
@@ -87,7 +97,7 @@ export function AppHeader() {
           </div>
         </div>
 
-        <div className="w-40">
+        <div className="w-32 md:w-40 hidden md:block">
           <Select value={currentRole} onValueChange={(value) => setCurrentRole(value as UserRole)}>
             <SelectTrigger>
               <SelectValue placeholder="Seleccionar rol" />
