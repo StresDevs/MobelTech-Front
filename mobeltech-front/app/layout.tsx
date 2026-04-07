@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { RoleProvider } from '@/lib/contexts/RoleContext'
 import { SidebarProvider } from '@/lib/contexts/SidebarContext'
+import { ThemeProvider } from '@/components/theme-provider'
 import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -37,13 +38,15 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="es">
+    <html lang="es" suppressHydrationWarning>
       <body className="font-sans antialiased">
-        <RoleProvider>
-          <SidebarProvider>
-            {children}
-          </SidebarProvider>
-        </RoleProvider>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+          <RoleProvider>
+            <SidebarProvider>
+              {children}
+            </SidebarProvider>
+          </RoleProvider>
+        </ThemeProvider>
         <Analytics />
       </body>
     </html>

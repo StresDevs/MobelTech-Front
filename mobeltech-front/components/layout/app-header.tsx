@@ -1,7 +1,7 @@
 'use client';
 
 import { useRole } from '@/hooks/use-role-context';
-import { Bell } from 'lucide-react';
+import { Bell, Moon, Sun } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -13,11 +13,18 @@ import {
 } from '@/components/ui/select';
 import { ROLE_PERMISSIONS } from '@/lib/constants';
 import { UserRole } from '@/lib/types';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useTheme } from 'next-themes';
 
 export function AppHeader() {
   const { currentRole, setCurrentRole, userName } = useRole();
   const [showNotifications, setShowNotifications] = useState(false);
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   return (
     <header className="border-b border-border bg-background px-6 py-4 flex items-center justify-between">
@@ -25,12 +32,12 @@ export function AppHeader() {
         <div className="flex items-center gap-2">
           <div
             className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
-            style={{ backgroundColor: '#2e2e2e' }}
+            style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
           >
             🛋️
           </div>
           <div>
-            <h1 className="text-xl font-bold" style={{ color: '#2e2e2e' }}>
+            <h1 className="text-xl font-bold text-foreground">
               MobelTech
             </h1>
             <p className="text-xs text-muted-foreground">Sistema Administrativo</p>
@@ -38,12 +45,23 @@ export function AppHeader() {
         </div>
       </div>
 
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-4">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-10 gap-2"
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          aria-label="Cambiar modo claro/oscuro"
+        >
+          {mounted && theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          <span className="hidden md:inline">{mounted && theme === 'dark' ? '' : ''}</span>
+        </Button>
+
         {/* Notification Bell */}
         <div className="relative">
           <Button variant="ghost" size="sm" className="relative h-10 w-10 p-0" onClick={() => setShowNotifications(!showNotifications)}>
             <Bell className="w-5 h-5" />
-            <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0" style={{ backgroundColor: '#d6a85a' }}>
+            <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0" style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
               3
             </Badge>
           </Button>
@@ -81,7 +99,7 @@ export function AppHeader() {
           </div>
           <div
             className="w-8 h-8 rounded-full flex items-center justify-center text-base"
-            style={{ backgroundColor: '#d6a85a' }}
+            style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
           >
             👤
           </div>
