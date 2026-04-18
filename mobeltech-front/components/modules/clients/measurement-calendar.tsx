@@ -2,325 +2,517 @@
 
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { MEASUREMENTS, CLIENTS } from '@/lib/mock-data';
-import { ChevronLeft, ChevronRight, ExternalLink, Plus } from 'lucide-react';
+import { Measurement } from '@/lib/types';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  FileDown,
+  Phone,
+  MapPin,
+  Mail,
+  Clock,
+  Search,
+  UserPlus,
+} from 'lucide-react';
 import { useState, useMemo } from 'react';
-import { ClientDetailsModal } from './client-details-modal';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 
 const SLOTS_PER_DAY = 4;
+const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+/* ────────────────────── helpers ────────────────────── */
+
+function getDaysInMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+}
+function getFirstDayOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1).getDay();
+}
+function isToday(date: Date) {
+  const now = new Date();
+  return (
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  );
+}
+
+/* ══════════════════════  MAIN COMPONENT  ══════════════════════ */
 
 export function MeasurementCalendar() {
-  const [currentDate, setCurrentDate] = useState(new Date('2024-05-01'));
-  const [selectedEmptySlot, setSelectedEmptySlot] = useState<{ day: number; slotIndex: number } | null>(null);
-  const [newClientData, setNewClientData] = useState({
+  const [currentDate, setCurrentDate] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+
+  /* modal state */
+  const [newMeasurementSlot, setNewMeasurementSlot] = useState<{
+    day: number;
+    slotIndex: number;
+  } | null>(null);
+  const [clientDetailId, setClientDetailId] = useState<string | null>(null);
+
+  /* form state */
+  const [clientSearchQuery, setClientSearchQuery] = useState('');
+  const [formData, setFormData] = useState({
+    clientId: '',
     name: '',
     phone: '',
     address: '',
     email: '',
+    time: '09:00',
+    furnitureItems: '',
+    notes: '',
   });
-
-  // Group measurements by date
-  const measurementsByDay = useMemo(() => {
-    return MEASUREMENTS.reduce((acc, m) => {
-      const dateKey = m.date.toDateString();
-      if (!acc[dateKey]) acc[dateKey] = [];
-      acc[dateKey].push(m);
-      return acc;
-    }, {} as Record<string, typeof MEASUREMENTS>);
-  }, []);
-
-  // Get days in current month
-  const getDaysInMonth = (date: Date) => {
-    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-  };
-
-  const getFirstDayOfMonth = (date: Date) => {
-    return new Date(date.getFullYear(), date.getMonth(), 1).getDay();
-  };
 
   const daysInMonth = getDaysInMonth(currentDate);
   const firstDay = getFirstDayOfMonth(currentDate);
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-
-  const handlePrevMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
-  };
-
-  const handleNextMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1));
-  };
 
   const monthName = currentDate.toLocaleDateString('es-ES', {
     month: 'long',
     year: 'numeric',
   });
 
-  const getDayString = (day: number) => {
-    const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
-    return date.toDateString();
-  };
-
-  const getMeasurementsForDay = (day: number) => {
-    return measurementsByDay[getDayString(day)] || [];
-  };
+  /* group measurements by day number */
+  const measurementsByDay = useMemo(() => {
+    const map: Record<number, Measurement[]> = {};
+    MEASUREMENTS.forEach((m) => {
+      if (
+        m.date.getFullYear() === currentDate.getFullYear() &&
+        m.date.getMonth() === currentDate.getMonth()
+      ) {
+        const day = m.date.getDate();
+        if (!map[day]) map[day] = [];
+        map[day].push(m);
+      }
+    });
+    return map;
+  }, [currentDate]);
 
   const getSlots = (day: number) => {
-    const measurements = getMeasurementsForDay(day);
-    const slots = Array.from({ length: SLOTS_PER_DAY }, (_, i) => {
-      return measurements[i] || null;
-    });
-    return slots;
+    const ms = measurementsByDay[day] || [];
+    return Array.from({ length: SLOTS_PER_DAY }, (_, i) => ms[i] ?? null);
   };
 
-  const handleEmptySlotClick = (day: number, slotIndex: number) => {
-    setSelectedEmptySlot({ day, slotIndex });
-    setNewClientData({ name: '', phone: '', address: '', email: '' });
+  /* navigation */
+  const goMonth = (delta: number) =>
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + delta, 1));
+  const goToday = () => {
+    const now = new Date();
+    setCurrentDate(new Date(now.getFullYear(), now.getMonth(), 1));
   };
 
-  const handleAddMeasurement = () => {
-    if (!newClientData.name.trim() || !newClientData.phone.trim() || !newClientData.address.trim()) {
-      alert('Por favor completa todos los campos requeridos');
-      return;
-    }
-    console.log('Medición agendada para:', {
-      day: selectedEmptySlot?.day,
-      slotIndex: selectedEmptySlot?.slotIndex,
-      clientData: newClientData,
-    });
-    setSelectedEmptySlot(null);
+  /* open new-measurement modal */
+  const openNewMeasurement = (day: number, slotIndex: number) => {
+    setNewMeasurementSlot({ day, slotIndex });
+    setFormData({ clientId: '', name: '', phone: '', address: '', email: '', time: '09:00', furnitureItems: '', notes: '' });
+    setClientSearchQuery('');
+  };
+  const closeNewMeasurement = () => setNewMeasurementSlot(null);
+
+  const handleSelectExistingClient = (clientId: string) => {
+    const c = CLIENTS.find((cl) => cl.id === clientId);
+    if (!c) return;
+    setFormData((prev) => ({ ...prev, clientId: c.id, name: c.name, phone: c.phone, address: c.address, email: c.email }));
   };
 
+  const handleSubmitMeasurement = () => {
+    if (!formData.name.trim() || !formData.phone.trim() || !formData.address.trim()) return;
+    console.log('Medición agendada:', { day: newMeasurementSlot?.day, slotIndex: newMeasurementSlot?.slotIndex, ...formData });
+    closeNewMeasurement();
+  };
+
+  const filteredClients = CLIENTS.filter(
+    (c) => c.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) || c.phone.includes(clientSearchQuery),
+  );
+
+  const detailClient = clientDetailId ? CLIENTS.find((c) => c.id === clientDetailId) : null;
+
+  /* ────────────────── RENDER ────────────────── */
   return (
-    <div className="space-y-6">
-      {/* Month Navigation */}
+    <div className="space-y-5">
+      {/* ── Month nav ── */}
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold capitalize">{monthName}</h2>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handlePrevMonth}>
+        <div className="flex items-center gap-3">
+          <h2 className="text-xl sm:text-2xl font-bold capitalize">{monthName}</h2>
+          <Button variant="outline" size="sm" className="text-xs h-7" onClick={goToday}>
+            Hoy
+          </Button>
+        </div>
+        <div className="flex gap-1">
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => goMonth(-1)}>
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <Button variant="outline" size="sm" onClick={handleNextMonth}>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => goMonth(1)}>
             <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
       </div>
 
-      {/* Calendar Grid */}
-      <div className="grid grid-cols-7 gap-4">
-        {/* Day headers */}
-        {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((day) => (
-          <div key={day} className="text-center font-semibold text-sm py-2">
-            {day}
-          </div>
-        ))}
+      {/* ── Legend ── */}
+      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: '#eab676' }} />
+          Ocupado
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500" />
+          Disponible
+        </span>
+      </div>
 
-        {/* Empty cells for days before month starts */}
-        {Array.from({ length: firstDay }).map((_, i) => (
-          <div key={`empty-${i}`} className="h-auto" />
-        ))}
+      {/* ═══ DESKTOP grid (md+) ═══ */}
+      <div className="hidden md:block overflow-x-auto">
+        <div className="grid grid-cols-7 gap-1.5 mb-1.5 min-w-[900px]">
+          {DAY_NAMES.map((d) => (
+            <div key={d} className="text-center text-[10px] font-semibold uppercase tracking-wider text-muted-foreground py-1">
+              {d}
+            </div>
+          ))}
+        </div>
 
-        {/* Calendar days */}
-        {days.map((day) => {
-          const slots = getSlots(day);
-          const hasAnyMeasurement = slots.some(slot => slot !== null);
+        <div className="grid grid-cols-7 gap-1.5 min-w-[900px]">
+          {Array.from({ length: firstDay }).map((_, i) => (
+            <div key={`e-${i}`} />
+          ))}
 
-          return (
-            <div key={day} className="flex flex-col">
-              <Card className={`flex flex-col flex-1 p-3 ${
-                hasAnyMeasurement ? 'bg-amber-50 border-amber-200' : ''
-              }`}>
-                {/* Day number */}
-                <div className="text-lg font-bold text-foreground mb-3 pb-2 border-b">{day}</div>
+          {days.map((day) => {
+            const dateObj = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+            const today = isToday(dateObj);
+            const slots = getSlots(day);
 
-                {/* Column Headers */}
-                <div className="grid grid-cols-3 gap-2 mb-2 text-xs font-semibold text-foreground">
-                  <div className="text-center">Cliente</div>
-                  <div className="text-center">Fecha Entrega</div>
-                  <div className="text-center">Precotización</div>
+            return (
+              <Card key={day} className={`flex flex-col p-0 overflow-hidden ${today ? 'ring-2 ring-[#eab676]' : ''}`}>
+                {/* day header */}
+                <div className={`px-2 py-1 text-xs font-bold flex items-center justify-between ${today ? 'bg-[#eab676] text-[#1f1f1f]' : 'bg-muted/50 text-foreground'}`}>
+                  <span>{day}</span>
                 </div>
 
-                {/* Slots table */}
-                <div className="flex flex-col gap-2 flex-1">
-                  {slots.map((measurement, slotIndex) => (
-                    <div
-                      key={`slot-${slotIndex}`}
-                      className={`border rounded p-2 grid grid-cols-3 gap-2 items-center min-h-14 transition-colors ${
-                        measurement
-                          ? 'bg-white border-amber-300'
-                          : 'bg-muted/50 border-dashed border-muted-foreground/30 cursor-pointer hover:bg-muted hover:border-muted-foreground/50'
-                      }`}
-                      onClick={() => !measurement && handleEmptySlotClick(day, slotIndex)}
-                    >
-                      {measurement ? (
-                        <>
-                          {/* Column 1: Client Button */}
-                          <div className="flex items-center justify-center">
-                            <ClientDetailsModal clientId={measurement.clientId} />
-                          </div>
+                {/* col headers + slots share same container */}
+                <div className="flex flex-col gap-0.5 px-1 pt-1 pb-1 flex-1">
+                  {/* col headers */}
+                  <div className="grid grid-cols-[1fr_48px_32px] gap-px px-1 pb-0.5 text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    <span>Cliente</span>
+                    <span className="text-center">Fecha</span>
+                    <span className="text-center">Doc</span>
+                  </div>
 
-                          {/* Column 2: Delivery Date */}
-                          <div className="text-center">
-                            <span className="text-xs font-medium text-foreground bg-blue-50 rounded px-2 py-1 block">
-                              {measurement.quotationDeliveryDate
-                                ? new Date(measurement.quotationDeliveryDate).toLocaleDateString('es-ES', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                  })
-                                : '-'}
-                            </span>
-                          </div>
-
-                          {/* Column 3: PDF/Precotización Button */}
-                          <div className="flex justify-center">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="text-xs h-8 gap-1"
-                              onClick={() => {
-                                if (measurement.prequotationLink) {
-                                  window.location.href = measurement.prequotationLink;
-                                }
-                              }}
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              PDF
-                            </Button>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="col-span-3 w-full text-center text-muted-foreground text-xs flex items-center justify-center gap-1">
-                          <Plus className="w-3 h-3" />
-                          Click para agendar
-                        </div>
-                      )}
-                    </div>
+                  {/* slots */}
+                  {slots.map((m, idx) => (
+                    <DesktopSlot
+                      key={idx}
+                      measurement={m}
+                      onClickAvailable={() => openNewMeasurement(day, idx)}
+                      onClickClient={(id) => setClientDetailId(id)}
+                    />
                   ))}
                 </div>
               </Card>
-            </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ═══ MOBILE list (<md) ═══ */}
+      <div className="md:hidden space-y-2">
+        {days.map((day) => {
+          const dateObj = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+          const today = isToday(dateObj);
+          const slots = getSlots(day);
+          const hasAny = slots.some((s) => s !== null);
+          const dayName = dateObj.toLocaleDateString('es-ES', { weekday: 'short' });
+
+          return (
+            <Card key={day} className={`overflow-hidden ${today ? 'ring-2 ring-[#eab676]' : ''}`}>
+              <div className={`px-4 py-2 flex items-center justify-between ${today ? 'bg-[#eab676] text-[#1f1f1f]' : 'bg-muted/40 text-foreground'}`}>
+                <span className="font-bold text-sm capitalize">{dayName} {day}</span>
+                {hasAny && (
+                  <Badge className="text-[10px] px-1.5 h-5" style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
+                    {slots.filter((s) => s).length}/{SLOTS_PER_DAY}
+                  </Badge>
+                )}
+              </div>
+              <div className="divide-y divide-border">
+                {slots.map((m, idx) => (
+                  <MobileSlot
+                    key={idx}
+                    slotIndex={idx}
+                    measurement={m}
+                    onClickAvailable={() => openNewMeasurement(day, idx)}
+                    onClickClient={(id) => setClientDetailId(id)}
+                  />
+                ))}
+              </div>
+            </Card>
           );
         })}
       </div>
 
-      {/* Modal for new measurement */}
-      <Dialog open={!!selectedEmptySlot} onOpenChange={(open) => !open && setSelectedEmptySlot(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              Agendar Medición - {selectedEmptySlot && 
-                `${selectedEmptySlot.day} de ${monthName}`
-              }
+      {/* ══════════ NEW MEASUREMENT MODAL ══════════ */}
+      <Dialog open={!!newMeasurementSlot} onOpenChange={(o) => !o && closeNewMeasurement()}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-0">
+          <DialogHeader className="px-6 pt-6 pb-2">
+            <DialogTitle className="text-lg">
+              Agendar Medición
+              {newMeasurementSlot && (
+                <span className="font-normal text-sm text-muted-foreground ml-2">
+                  {newMeasurementSlot.day} de {monthName} · Slot {newMeasurementSlot.slotIndex + 1}
+                </span>
+              )}
             </DialogTitle>
           </DialogHeader>
 
-          <Tabs defaultValue="existing" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="existing">Cliente Existente</TabsTrigger>
-              <TabsTrigger value="new">Nuevo Cliente</TabsTrigger>
-            </TabsList>
+          <Tabs defaultValue={formData.clientId ? 'details' : 'existing'} className="w-full">
+            <div className="px-6">
+              <TabsList className="grid w-full grid-cols-2 h-9">
+                <TabsTrigger value="existing" className="text-xs">
+                  <Search className="w-3.5 h-3.5 mr-1.5" />
+                  Cliente Existente
+                </TabsTrigger>
+                <TabsTrigger value="new" className="text-xs">
+                  <UserPlus className="w-3.5 h-3.5 mr-1.5" />
+                  Nuevo Cliente
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
-            {/* Existing Client */}
-            <TabsContent value="existing" className="mt-4 space-y-3">
-              <p className="text-sm text-muted-foreground">Selecciona un cliente de la lista</p>
-              <div className="max-h-64 overflow-y-auto space-y-2">
-                {CLIENTS.map((client) => (
-                  <Button
-                    key={client.id}
-                    variant="outline"
-                    className="w-full justify-start h-auto py-2 text-left"
-                    onClick={() => {
-                      console.log('Cliente seleccionado:', client.id);
-                      setSelectedEmptySlot(null);
-                    }}
-                  >
-                    <div>
-                      <div className="font-medium text-sm">{client.name}</div>
-                      <div className="text-xs text-muted-foreground">{client.contactPhone}</div>
-                    </div>
-                  </Button>
-                ))}
+            {/* existing client picker */}
+            <TabsContent value="existing" className="mt-0 px-6 py-4 space-y-3">
+              <Input placeholder="Buscar por nombre o teléfono…" value={clientSearchQuery} onChange={(e) => setClientSearchQuery(e.target.value)} className="h-9" />
+              <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
+                {filteredClients.map((c) => {
+                  const selected = formData.clientId === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => handleSelectExistingClient(c.id)}
+                      className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors ${selected ? 'border-[#eab676] bg-[#eab676]/10' : 'border-border hover:border-[#eab676]/50 hover:bg-muted/50'}`}
+                    >
+                      <p className="text-sm font-medium">{c.name}</p>
+                      <p className="text-xs text-muted-foreground">{c.phone} · {c.address}</p>
+                    </button>
+                  );
+                })}
+                {filteredClients.length === 0 && (
+                  <p className="text-center text-xs text-muted-foreground py-6">No se encontraron clientes</p>
+                )}
               </div>
             </TabsContent>
 
-            {/* New Client */}
-            <TabsContent value="new" className="mt-4 space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name" className="text-xs">Nombre *</Label>
-                <Input
-                  id="name"
-                  placeholder="Nombre del cliente"
-                  value={newClientData.name}
-                  onChange={(e) => setNewClientData({ ...newClientData, name: e.target.value })}
-                  className="h-8 text-xs"
-                />
+            {/* new client form */}
+            <TabsContent value="new" className="mt-0 px-6 py-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Nombre *</Label>
+                  <Input placeholder="Nombre del cliente" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value, clientId: '' })} className="h-9" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Teléfono *</Label>
+                  <Input placeholder="+591-2-1234567" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className="h-9" />
+                </div>
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="phone" className="text-xs">Teléfono *</Label>
-                <Input
-                  id="phone"
-                  placeholder="+591-2-1234567"
-                  value={newClientData.phone}
-                  onChange={(e) => setNewClientData({ ...newClientData, phone: e.target.value })}
-                  className="h-8 text-xs"
-                />
+              <div className="space-y-1.5">
+                <Label className="text-xs">Dirección *</Label>
+                <Input placeholder="Calle y número, ciudad" value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} className="h-9" />
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="address" className="text-xs">Dirección *</Label>
-                <Input
-                  id="address"
-                  placeholder="Dirección"
-                  value={newClientData.address}
-                  onChange={(e) => setNewClientData({ ...newClientData, address: e.target.value })}
-                  className="h-8 text-xs"
-                />
+              <div className="space-y-1.5">
+                <Label className="text-xs">Email</Label>
+                <Input placeholder="email@ejemplo.com" type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className="h-9" />
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="email" className="text-xs">Email</Label>
-                <Input
-                  id="email"
-                  placeholder="email@example.com"
-                  type="email"
-                  value={newClientData.email}
-                  onChange={(e) => setNewClientData({ ...newClientData, email: e.target.value })}
-                  className="h-8 text-xs"
-                />
-              </div>
-
-              <Button
-                className="w-full text-xs h-8"
-                style={{ backgroundColor: '#d6a85a', color: '#ffffff' }}
-                onClick={handleAddMeasurement}
-              >
-                Agendar Medición
-              </Button>
             </TabsContent>
           </Tabs>
+
+          {/* common fields */}
+          <div className="border-t border-border px-6 py-4 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Hora de la medición *</Label>
+                <Input type="time" value={formData.time} onChange={(e) => setFormData({ ...formData, time: e.target.value })} className="h-9" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Mueble(s) a realizar *</Label>
+              <Textarea placeholder="Ej: Escritorio ejecutivo, 2 estanterías…" value={formData.furnitureItems} onChange={(e) => setFormData({ ...formData, furnitureItems: e.target.value })} rows={2} className="resize-none text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Notas adicionales</Label>
+              <Textarea placeholder="Referencias, indicaciones de acceso…" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} rows={2} className="resize-none text-sm" />
+            </div>
+          </div>
+
+          <DialogFooter className="px-6 pb-6 pt-0 gap-2">
+            <Button variant="outline" onClick={closeNewMeasurement} className="h-9">Cancelar</Button>
+            <Button
+              className="h-9"
+              style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
+              disabled={!formData.name.trim() || !formData.phone.trim() || !formData.address.trim() || !formData.furnitureItems.trim()}
+              onClick={handleSubmitMeasurement}
+            >
+              Agendar Medición
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Legend */}
-      <div className="flex gap-4 text-sm text-muted-foreground p-4 bg-muted rounded-lg">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-amber-50 border border-amber-200 rounded" />
-          <span>Día con mediciones</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-muted/50 border border-dashed border-muted-foreground/30 rounded" />
-          <span>Slot disponible</span>
-        </div>
+      {/* ══════════ CLIENT DETAIL MODAL ══════════ */}
+      <Dialog open={!!detailClient} onOpenChange={(o) => !o && setClientDetailId(null)}>
+        <DialogContent className="max-w-sm p-0 overflow-hidden">
+          <DialogTitle className="sr-only">Detalle del cliente</DialogTitle>
+          {detailClient && (
+            <>
+              <div className="px-6 pt-6 pb-4 flex flex-col items-center gap-3" style={{ background: 'linear-gradient(135deg, #eab676 0%, #d6a85a 100%)' }}>
+                <div className="w-14 h-14 rounded-full bg-white/20 backdrop-blur flex items-center justify-center text-xl font-bold text-white">
+                  {detailClient.name.charAt(0)}
+                </div>
+                <div className="text-center">
+                  <h3 className="text-base font-bold text-[#1f1f1f]">{detailClient.name}</h3>
+                  <Badge className="mt-1 text-[10px]" variant="secondary">
+                    {detailClient.status === 'active' ? 'Activo' : 'Inactivo'}
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="px-6 py-5 space-y-4">
+                <InfoRow icon={Phone} label="Teléfono" value={detailClient.phone} />
+                <InfoRow icon={MapPin} label="Dirección" value={detailClient.address} />
+                <InfoRow icon={Mail} label="Email" value={detailClient.email} />
+                <InfoRow icon={Clock} label="Registrado" value={detailClient.registrationDate.toLocaleDateString('es-BO', { year: 'numeric', month: 'long', day: 'numeric' })} />
+              </div>
+
+              <div className="px-6 pb-5">
+                <Button variant="outline" className="w-full h-9" onClick={() => setClientDetailId(null)}>Cerrar</Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/* ═══════════════════════  SUB-COMPONENTS  ═══════════════════════ */
+
+function InfoRow({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <Icon className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+      <div className="min-w-0">
+        <p className="text-[11px] text-muted-foreground">{label}</p>
+        <p className="text-sm text-foreground break-words">{value}</p>
       </div>
+    </div>
+  );
+}
+
+/* ─── Desktop slot ─── */
+
+function DesktopSlot({
+  measurement,
+  onClickAvailable,
+  onClickClient,
+}: {
+  measurement: Measurement | null;
+  onClickAvailable: () => void;
+  onClickClient: (id: string) => void;
+}) {
+  if (!measurement) {
+    return (
+      <button
+        onClick={onClickAvailable}
+        className="grid grid-cols-[1fr_48px_32px] items-center gap-px rounded border border-dashed border-emerald-400/50 bg-emerald-500/5 hover:bg-emerald-500/10 hover:border-emerald-400 transition-colors min-h-[28px] px-1 group"
+      >
+        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 group-hover:font-medium">
+          <Plus className="w-3 h-3" />
+          Agendar
+        </span>
+        <span />
+        <span />
+      </button>
+    );
+  }
+
+  const client = CLIENTS.find((c) => c.id === measurement.clientId);
+  const clientName = client?.name ?? 'Cliente';
+  const shortName = clientName.length > 14 ? clientName.slice(0, 13) + '…' : clientName;
+
+  return (
+    <div
+      className="grid grid-cols-[1fr_48px_32px] items-center gap-px rounded min-h-[28px] px-1"
+      style={{ backgroundColor: 'rgba(234,182,118,0.15)', border: '1px solid rgba(234,182,118,0.35)' }}
+    >
+      <button onClick={() => onClickClient(measurement.clientId)} className="text-left text-[10px] font-medium truncate hover:underline text-foreground" title={clientName}>
+        {shortName}
+      </button>
+      <span className="text-center text-[10px] text-muted-foreground">
+        {measurement.quotationDeliveryDate
+          ? measurement.quotationDeliveryDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })
+          : '—'}
+      </span>
+      <div className="flex justify-center">
+        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { if (measurement.prequotationLink) window.location.href = measurement.prequotationLink; }} title="Ver precotización">
+          <FileDown className="w-3 h-3" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Mobile slot ─── */
+
+function MobileSlot({
+  slotIndex,
+  measurement,
+  onClickAvailable,
+  onClickClient,
+}: {
+  slotIndex: number;
+  measurement: Measurement | null;
+  onClickAvailable: () => void;
+  onClickClient: (id: string) => void;
+}) {
+  if (!measurement) {
+    return (
+      <button onClick={onClickAvailable} className="flex items-center gap-2 px-4 py-2.5 w-full text-left hover:bg-emerald-500/5 transition-colors">
+        <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+        <span className="text-xs text-emerald-600 dark:text-emerald-400">Slot {slotIndex + 1} — Disponible</span>
+        <Plus className="w-3.5 h-3.5 ml-auto text-emerald-500" />
+      </button>
+    );
+  }
+
+  const client = CLIENTS.find((c) => c.id === measurement.clientId);
+
+  return (
+    <div className="px-4 py-2.5 flex items-center gap-3" style={{ backgroundColor: 'rgba(234,182,118,0.08)' }}>
+      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#eab676' }} />
+      <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+        <button onClick={() => onClickClient(measurement.clientId)} className="text-xs font-medium text-foreground hover:underline truncate max-w-[140px]">
+          {client?.name ?? 'Cliente'}
+        </button>
+        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+          {measurement.quotationDeliveryDate
+            ? measurement.quotationDeliveryDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })
+            : '—'}
+        </span>
+      </div>
+      <Button variant="outline" size="sm" className="h-7 text-[10px] px-2 shrink-0" onClick={() => { if (measurement.prequotationLink) window.location.href = measurement.prequotationLink; }}>
+        <FileDown className="w-3 h-3 mr-1" />
+        PDF
+      </Button>
     </div>
   );
 }

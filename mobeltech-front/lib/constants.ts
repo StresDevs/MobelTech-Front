@@ -29,6 +29,20 @@ export const MODULES = [
     roles: ['admin', 'manager', 'operator'],
   },
   {
+    id: 'prequotations',
+    label: 'Precotización',
+    path: '/prequotations',
+    icon: 'FileText',
+    roles: ['admin', 'manager'],
+  },
+  {
+    id: 'quotations',
+    label: 'Cotización',
+    path: '/quotations',
+    icon: 'ClipboardList',
+    roles: ['admin', 'manager'],
+  },
+  {
     id: 'production',
     label: 'Producción',
     path: '/production',

@@ -4,6 +4,7 @@ import { Analytics } from '@vercel/analytics/next'
 import { RoleProvider } from '@/lib/contexts/RoleContext'
 import { SidebarProvider } from '@/lib/contexts/SidebarContext'
 import { ThemeProvider } from '@/components/theme-provider'
+import AuthGate from '@/components/auth/AuthGate'
 import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -41,11 +42,13 @@ export default function RootLayout({
     <html lang="es" suppressHydrationWarning>
       <body className="font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-          <RoleProvider>
-            <SidebarProvider>
-              {children}
-            </SidebarProvider>
-          </RoleProvider>
+          <AuthGate>
+            <RoleProvider>
+              <SidebarProvider>
+                {children}
+              </SidebarProvider>
+            </RoleProvider>
+          </AuthGate>
         </ThemeProvider>
         <Analytics />
       </body>
