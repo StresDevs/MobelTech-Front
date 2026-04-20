@@ -234,3 +234,82 @@ export interface ProjectSchedule {
   contractorName: string;
   phases: SchedulePhase[];
 }
+
+export type FinancialInstallmentStatus = 'pending' | 'paid';
+
+export interface ClientInstallment {
+  id: string;
+  name: string;
+  amount: number;
+  estimatedPaymentDate: Date;
+  status: FinancialInstallmentStatus;
+}
+
+export interface ClientProjectPaymentPlan {
+  projectId: string;
+  clientId: string;
+  totalProjectAmount: number;
+  installments: ClientInstallment[];
+}
+
+export type ContractorPhaseStatus = 'pending' | 'paid';
+
+export interface ContractorPaymentPhase {
+  id: string;
+  name: string;
+  amount: number;
+  status: ContractorPhaseStatus;
+}
+
+export interface ContractorProjectPaymentPlan {
+  projectId: string;
+  contractorId: string;
+  totalAgreedAmount: number;
+  phases: ContractorPaymentPhase[];
+}
+
+export type FinanceMovementType = 'receivable' | 'payable';
+export type FinanceLineType = 'installment' | 'phase' | 'advance';
+
+export interface FinancePaymentRecord {
+  id: string;
+  type: FinanceMovementType;
+  projectId: string;
+  clientId?: string;
+  contractorId?: string;
+  lineType: FinanceLineType;
+  lineId: string;
+  lineName: string;
+  amount: number;
+  date: Date;
+  status: 'paid' | 'pending';
+}
+
+export interface FinanceChangeLog {
+  id: string;
+  type: FinanceMovementType;
+  projectId: string;
+  clientId?: string;
+  contractorId?: string;
+  field: string;
+  previousValue: string;
+  nextValue: string;
+  changedAt: Date;
+}
+
+export interface FinanceBalanceSummary {
+  totalAgreedAmount: number;
+  totalPaid: number;
+  remainingBalance: number;
+}
+
+export type DateRangePreset = 'day' | 'week' | 'month' | 'year' | 'custom';
+
+export interface FinanceHistoryFilter {
+  entityId?: string;
+  minAmount?: number;
+  maxAmount?: number;
+  datePreset?: DateRangePreset;
+  startDate?: Date;
+  endDate?: Date;
+}
