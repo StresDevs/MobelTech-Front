@@ -313,3 +313,40 @@ export interface FinanceHistoryFilter {
   startDate?: Date;
   endDate?: Date;
 }
+
+export type ContractorPaymentType = 'phase' | 'advance';
+
+export interface ContractorPaymentPdfSnapshot {
+  companyName: string;
+  title: string;
+  paymentDate: string;
+  paymentTime: string;
+  registeredBy: string;
+  contractorName: string;
+  projectName: string;
+  clientName?: string;
+  paymentType: ContractorPaymentType;
+  phaseName?: string;
+  amountPaid: number;
+  totalAgreedAmount: number;
+  totalPaidSoFar: number;
+  remainingBalance: number;
+  observations?: string;
+  snapshotCreatedAt: Date;
+}
+
+export interface ContractorInternalPaymentRecord {
+  id: string;
+  contractorId: string;
+  projectId: string;
+  paymentType: ContractorPaymentType;
+  phaseName?: string;
+  amount: number;
+  paymentDateTime: Date;
+  registeredBy: string;
+  observations?: string;
+  status: 'confirmed' | 'voided';
+  voidedAt?: Date;
+  voidedBy?: string;
+  pdfSnapshot: ContractorPaymentPdfSnapshot;
+}
