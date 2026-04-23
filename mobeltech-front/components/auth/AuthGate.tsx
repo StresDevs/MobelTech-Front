@@ -105,6 +105,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
               width={120}
               height={120}
               className="drop-shadow-2xl"
+              style={{ height: 'auto' }}
               priority
             />
           </div>
@@ -158,6 +159,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
               width={72}
               height={72}
               className="mb-4"
+              style={{ height: 'auto' }}
               priority
             />
             <h1 className="text-xl font-bold text-foreground tracking-wide">MöbelTech</h1>

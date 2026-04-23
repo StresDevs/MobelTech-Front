@@ -74,6 +74,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             width={36}
             height={36}
             className="shrink-0"
+            style={{ height: 'auto' }}
           />
         )}
         {!isCollapsed && (
