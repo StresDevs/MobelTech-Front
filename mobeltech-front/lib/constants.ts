@@ -91,6 +91,13 @@ export const MODULES = [
     icon: 'ShoppingCart',
     roles: ['operator'],
   },
+  {
+    id: 'my-finance',
+    label: 'Mis Finanzas',
+    path: '/my-finance',
+    icon: 'DollarSign',
+    roles: ['operator'],
+  },
 ];
 
 // Role definitions and permissions
@@ -108,7 +115,7 @@ export const ROLE_PERMISSIONS = {
   operator: {
     label: 'Contratista',
     description: 'Acceso para solicitar materiales',
-    modules: ['my-materials'],
+    modules: ['my-materials', 'my-finance'],
   },
   viewer: {
     label: 'Visualizador',

@@ -3,8 +3,7 @@
 import { useRole } from '@/hooks/use-role-context';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useSidebar } from '@/hooks/use-sidebar';
-import { Bell, Moon, Sun, LogOut, Menu, User } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { Bell, Moon, Sun, LogOut, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -20,7 +19,7 @@ import { useTheme } from 'next-themes';
 export function AppHeader() {
   const { currentRole, userName } = useRole();
   const { logout } = useAuth();
-  const { openMobile } = useSidebar();
+  const { toggleMobileOpen } = useSidebar();
   const [showNotifications, setShowNotifications] = useState(false);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -50,7 +49,7 @@ export function AppHeader() {
           variant="ghost"
           size="icon"
           className="md:hidden h-9 w-9"
-          onClick={openMobile}
+          onClick={toggleMobileOpen}
           aria-label="Abrir menú"
         >
           <Menu className="w-5 h-5" />
@@ -93,9 +92,9 @@ export function AppHeader() {
           </Button>
 
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 bg-popover border border-border rounded-xl shadow-xl z-50 overflow-hidden">
-              <div className="px-4 py-3 border-b border-border">
-                <h3 className="text-sm font-semibold">Notificaciones</h3>
+            <div className="absolute right-0 mt-2 w-[min(90vw,20rem)] bg-background border border-border rounded-lg shadow-lg z-50">
+              <div className="p-4 border-b border-border">
+                <h3 className="font-semibold">Notificaciones</h3>
               </div>
               <div className="max-h-80 overflow-y-auto divide-y divide-border">
                 <div className="px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors">

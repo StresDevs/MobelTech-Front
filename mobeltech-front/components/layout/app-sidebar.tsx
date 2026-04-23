@@ -5,10 +5,10 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { useRole } from '@/hooks/use-role-context';
-import { useSidebar } from '@/hooks/use-sidebar';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { useTheme } from 'next-themes';
+import { useSidebar } from '@/hooks/use-sidebar';
 import { MODULES, ROLE_PERMISSIONS } from '@/lib/constants';
+import { useTheme } from 'next-themes';
 import {
   BarChart3,
   Users,
@@ -27,6 +27,7 @@ import {
   LogOut,
   X,
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 const ICON_MAP = {
   BarChart3,
@@ -46,12 +47,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { currentRole, userName } = useRole();
   const { logout, user } = useAuth();
   const pathname = usePathname();
-  const { isCollapsed } = useSidebar();
+  const { isCollapsed, toggleCollapse } = useSidebar();
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  const [openFinance, setOpenFinance] = useState(pathname?.includes('/finance'));
+  const [openFinance, setOpenFinance] = useState(false);
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => { setMounted(true); }, []);
 
   const isDark = mounted && resolvedTheme === 'dark';
   const availableModules = MODULES.filter((m) => m.roles.includes(currentRole));
@@ -64,40 +65,23 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   ];
 
   return (
-    <div className="flex flex-col h-full">
-      {/* ── Brand header ── */}
-      <div className={`flex items-center gap-3 px-4 pt-5 pb-4 ${isCollapsed ? 'justify-center' : ''}`}>
-        {mounted && (
-          <Image
-            src={isDark ? '/mobeltech-dark.png' : '/mobeltech-light.png'}
-            alt="MobelTech"
-            width={36}
-            height={36}
-            className="shrink-0"
-            style={{ height: 'auto' }}
-          />
-        )}
-        {!isCollapsed && (
-          <div className="min-w-0">
-            <p className="text-sm font-bold text-foreground tracking-wide truncate">MöbelTech</p>
-            <p className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Muebles a medida</p>
-          </div>
-        )}
+    <aside className={`border-r border-border bg-background h-full flex flex-col gap-6 overflow-y-auto transition-all duration-300 ${
+      isCollapsed ? 'w-20' : 'w-64'
+    } p-4`}>
+      {/* Toggle Button */}
+      <div className="flex justify-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={toggleCollapse}
+          className="h-8 w-8 p-0"
+        >
+          {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+        </Button>
       </div>
 
-      {/* Accent line */}
-      <div className="mx-4 mb-4">
-        <div className="h-[1px]" style={{ background: 'linear-gradient(90deg, #eab676 0%, transparent 100%)' }} />
-      </div>
-
-      {/* ── Navigation ── */}
-      <nav className="flex-1 overflow-y-auto px-3 space-y-1">
-        {!isCollapsed && (
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-3 mb-2">
-            Navegación
-          </p>
-        )}
-
+      {/* Navigation */}
+      <nav className="flex-1 space-y-2">
         {availableModules.map((module) => {
           const IconComponent = ICON_MAP[module.icon as keyof typeof ICON_MAP];
           const isActive = module.id === 'finance'
@@ -166,10 +150,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             <Link
               key={module.id}
               href={module.path}
-              onClick={onNavigate}
-              title={isCollapsed ? module.label : undefined}
-              className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
-                isCollapsed ? 'justify-center' : ''
+              title={isCollapsed ? module.label : ''}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all justify-center md:justify-start ${
+                isCollapsed ? 'justify-center' : 'justify-start'
               } ${
                 isActive
                   ? 'text-[#1f1f1f]'
@@ -177,35 +160,31 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               }`}
               style={isActive ? { backgroundColor: '#eab676' } : undefined}
             >
-              {IconComponent && (
-                <IconComponent
-                  className={`w-[18px] h-[18px] shrink-0 ${isActive ? 'text-[#1f1f1f]' : 'text-muted-foreground group-hover:text-foreground'}`}
-                />
-              )}
-              {!isCollapsed && <span className="truncate">{module.label}</span>}
+              {IconComponent && <IconComponent className="w-5 h-5 flex-shrink-0" />}
+              {!isCollapsed && <span className="text-sm font-medium whitespace-nowrap">{module.label}</span>}
             </Link>
           );
         })}
       </nav>
 
-      {/* ── Bottom section ── */}
-      <div className="mt-auto px-3 pb-4 space-y-3">
-        {/* Divider */}
-        <div className="mx-1">
-          <div className="h-[1px] bg-border" />
-        </div>
-
-        {/* Status badge */}
-        {!isCollapsed && (
-          <div className="px-3 py-2 rounded-lg bg-muted/50">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[11px] text-muted-foreground">Sistema conectado</span>
+      {/* Info Section */}
+      {!isCollapsed && (
+        <div className="border-t border-border pt-4">
+          <p className="text-xs text-muted-foreground px-4 mb-3">INFORMACIÓN</p>
+          <div className="space-y-2 text-xs">
+            <div className="px-4 py-2 bg-muted rounded-lg">
+              <p className="font-medium text-foreground">Versión</p>
+              <p className="text-muted-foreground">1.0.0</p>
+            </div>
+            <div className="px-4 py-2 bg-muted rounded-lg">
+              <p className="font-medium text-foreground">Estado</p>
+              <p className="text-green-600">Conectado</p>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* User card + logout */}
+      {/* User card + logout */}
         <div
           className={`flex items-center gap-3 rounded-lg p-2.5 ${isCollapsed ? 'justify-center' : ''}`}
           style={{ backgroundColor: 'var(--muted)' }}
@@ -232,37 +211,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             </button>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Desktop sidebar ─── */
-function DesktopSidebar() {
-  const { isCollapsed, toggleCollapse } = useSidebar();
-
-  return (
-    <aside
-      className={`hidden md:flex flex-col h-full border-r border-border bg-sidebar transition-all duration-300 relative ${
-        isCollapsed ? 'w-[72px]' : 'w-64'
-      }`}
-    >
-      {/* Collapse toggle */}
-      <button
-        onClick={toggleCollapse}
-        className="absolute -right-3 top-7 z-10 w-6 h-6 rounded-full border border-border bg-sidebar flex items-center justify-center shadow-sm hover:bg-muted transition-colors"
-      >
-        {isCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
-      </button>
-
-      <SidebarContent />
     </aside>
   );
 }
 
 /* ─── Mobile sidebar (overlay drawer) ─── */
 function MobileSidebar() {
-  const { isMobileOpen, closeMobile } = useSidebar();
+  const { isMobileOpen, toggleMobileOpen } = useSidebar();
 
   if (!isMobileOpen) return null;
 
@@ -271,21 +226,30 @@ function MobileSidebar() {
       {/* Backdrop */}
       <div
         className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity"
-        onClick={closeMobile}
+        onClick={toggleMobileOpen}
       />
       {/* Drawer */}
       <aside className="md:hidden fixed inset-y-0 left-0 z-50 w-72 bg-sidebar border-r border-border shadow-2xl animate-in slide-in-from-left duration-300">
         {/* Close button */}
         <button
-          onClick={closeMobile}
+          onClick={toggleMobileOpen}
           className="absolute top-4 right-3 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         >
           <X className="w-5 h-5" />
         </button>
 
-        <SidebarContent onNavigate={closeMobile} />
+        <SidebarContent onNavigate={toggleMobileOpen} />
       </aside>
     </>
+  );
+}
+
+/* ─── Desktop sidebar ─── */
+function DesktopSidebar() {
+  return (
+    <div className="hidden md:flex">
+      <SidebarContent />
+    </div>
   );
 }
 

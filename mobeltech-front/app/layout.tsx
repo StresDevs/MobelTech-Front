@@ -5,6 +5,7 @@ import { RoleProvider } from '@/lib/contexts/RoleContext'
 import { SidebarProvider } from '@/lib/contexts/SidebarContext'
 import { ThemeProvider } from '@/components/theme-provider'
 import AuthGate from '@/components/auth/AuthGate'
+import { Toaster } from '@/components/ui/toaster'
 import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -42,14 +43,15 @@ export default function RootLayout({
     <html lang="es" suppressHydrationWarning>
       <body className="font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-          <AuthGate>
-            <RoleProvider>
-              <SidebarProvider>
+          <RoleProvider>
+            <SidebarProvider>
+              <AuthGate>
                 {children}
-              </SidebarProvider>
-            </RoleProvider>
-          </AuthGate>
+              </AuthGate>
+            </SidebarProvider>
+          </RoleProvider>
         </ThemeProvider>
+        <Toaster />
         <Analytics />
       </body>
     </html>

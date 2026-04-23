@@ -14,6 +14,13 @@ import {
   ProjectFinance,
   MaterialRequest,
   ProjectSchedule,
+  ClientProjectPaymentPlan,
+  ContractorProjectPaymentPlan,
+  FinancePaymentRecord,
+  FinanceChangeLog,
+  FinanceBalanceSummary,
+  FinanceHistoryFilter,
+  DateRangePreset,
 } from './types';
 
 // Demo user
@@ -812,3 +819,385 @@ export const PROJECT_SCHEDULES: ProjectSchedule[] = [
     ],
   },
 ];
+
+export const CLIENT_PROJECT_PAYMENT_PLANS: ClientProjectPaymentPlan[] = [
+  {
+    projectId: 'proj-1',
+    clientId: 'client-1',
+    totalProjectAmount: 45000,
+    installments: [
+      {
+        id: 'cli-proj-1-inst-1',
+        name: 'Anticipo 1',
+        amount: 15000,
+        estimatedPaymentDate: new Date('2026-05-03'),
+        status: 'paid',
+      },
+      {
+        id: 'cli-proj-1-inst-2',
+        name: 'Anticipo 2',
+        amount: 15000,
+        estimatedPaymentDate: new Date('2026-05-24'),
+        status: 'paid',
+      },
+      {
+        id: 'cli-proj-1-inst-3',
+        name: 'Anticipo 3',
+        amount: 15000,
+        estimatedPaymentDate: new Date('2026-06-15'),
+        status: 'pending',
+      },
+    ],
+  },
+  {
+    projectId: 'proj-3',
+    clientId: 'client-3',
+    totalProjectAmount: 28000,
+    installments: [
+      {
+        id: 'cli-proj-3-inst-1',
+        name: 'Anticipo 1',
+        amount: 10000,
+        estimatedPaymentDate: new Date('2026-04-21'),
+        status: 'paid',
+      },
+      {
+        id: 'cli-proj-3-inst-2',
+        name: 'Anticipo 2',
+        amount: 10000,
+        estimatedPaymentDate: new Date('2026-05-21'),
+        status: 'paid',
+      },
+      {
+        id: 'cli-proj-3-inst-3',
+        name: 'Anticipo 3',
+        amount: 8000,
+        estimatedPaymentDate: new Date('2026-06-20'),
+        status: 'pending',
+      },
+    ],
+  },
+  {
+    projectId: 'proj-4',
+    clientId: 'client-4',
+    totalProjectAmount: 55000,
+    installments: [
+      {
+        id: 'cli-proj-4-inst-1',
+        name: 'Anticipo 1',
+        amount: 18000,
+        estimatedPaymentDate: new Date('2026-03-20'),
+        status: 'paid',
+      },
+      {
+        id: 'cli-proj-4-inst-2',
+        name: 'Anticipo 2',
+        amount: 18000,
+        estimatedPaymentDate: new Date('2026-04-20'),
+        status: 'paid',
+      },
+      {
+        id: 'cli-proj-4-inst-3',
+        name: 'Anticipo 3',
+        amount: 19000,
+        estimatedPaymentDate: new Date('2026-05-20'),
+        status: 'paid',
+      },
+    ],
+  },
+];
+
+export const CONTRACTOR_PROJECT_PAYMENT_PLANS: ContractorProjectPaymentPlan[] = [
+  {
+    projectId: 'proj-1',
+    contractorId: 'contr-1',
+    totalAgreedAmount: 35000,
+    phases: [
+      { id: 'phase-cutting', name: 'Cortado', amount: 7000, status: 'paid' },
+      { id: 'phase-edging', name: 'Canteado', amount: 7000, status: 'paid' },
+      { id: 'phase-assembly', name: 'Ensamblado', amount: 7000, status: 'paid' },
+      { id: 'phase-installation', name: 'Instalación', amount: 7000, status: 'pending' },
+      { id: 'phase-delivery', name: 'Entrega', amount: 7000, status: 'pending' },
+    ],
+  },
+  {
+    projectId: 'proj-3',
+    contractorId: 'contr-2',
+    totalAgreedAmount: 20000,
+    phases: [
+      { id: 'phase-cutting', name: 'Cortado', amount: 4000, status: 'paid' },
+      { id: 'phase-edging', name: 'Canteado', amount: 4000, status: 'paid' },
+      { id: 'phase-assembly', name: 'Ensamblado', amount: 4000, status: 'paid' },
+      { id: 'phase-installation', name: 'Instalación', amount: 4000, status: 'paid' },
+      { id: 'phase-delivery', name: 'Entrega', amount: 4000, status: 'pending' },
+    ],
+  },
+  {
+    projectId: 'proj-4',
+    contractorId: 'contr-3',
+    totalAgreedAmount: 15000,
+    phases: [
+      { id: 'phase-cutting', name: 'Cortado', amount: 3000, status: 'paid' },
+      { id: 'phase-edging', name: 'Canteado', amount: 3000, status: 'paid' },
+      { id: 'phase-assembly', name: 'Ensamblado', amount: 3000, status: 'pending' },
+      { id: 'phase-installation', name: 'Instalación', amount: 3000, status: 'pending' },
+      { id: 'phase-delivery', name: 'Entrega', amount: 3000, status: 'pending' },
+    ],
+  },
+];
+
+export const FINANCE_PAYMENT_HISTORY: FinancePaymentRecord[] = [
+  {
+    id: 'fin-rec-1',
+    type: 'receivable',
+    projectId: 'proj-1',
+    clientId: 'client-1',
+    lineType: 'installment',
+    lineId: 'cli-proj-1-inst-1',
+    lineName: 'Anticipo 1',
+    amount: 15000,
+    date: new Date('2026-05-03'),
+    status: 'paid',
+  },
+  {
+    id: 'fin-rec-2',
+    type: 'receivable',
+    projectId: 'proj-1',
+    clientId: 'client-1',
+    lineType: 'installment',
+    lineId: 'cli-proj-1-inst-2',
+    lineName: 'Anticipo 2',
+    amount: 15000,
+    date: new Date('2026-05-24'),
+    status: 'paid',
+  },
+  {
+    id: 'fin-rec-3',
+    type: 'receivable',
+    projectId: 'proj-3',
+    clientId: 'client-3',
+    lineType: 'installment',
+    lineId: 'cli-proj-3-inst-1',
+    lineName: 'Anticipo 1',
+    amount: 10000,
+    date: new Date('2026-04-21'),
+    status: 'paid',
+  },
+  {
+    id: 'fin-rec-4',
+    type: 'payable',
+    projectId: 'proj-1',
+    contractorId: 'contr-1',
+    lineType: 'phase',
+    lineId: 'phase-cutting',
+    lineName: 'Cortado',
+    amount: 7000,
+    date: new Date('2026-05-06'),
+    status: 'paid',
+  },
+  {
+    id: 'fin-rec-5',
+    type: 'payable',
+    projectId: 'proj-1',
+    contractorId: 'contr-1',
+    lineType: 'advance',
+    lineId: 'special-advance',
+    lineName: 'Anticipo Especial',
+    amount: 5000,
+    date: new Date('2026-05-02'),
+    status: 'paid',
+  },
+  {
+    id: 'fin-rec-6',
+    type: 'payable',
+    projectId: 'proj-3',
+    contractorId: 'contr-2',
+    lineType: 'phase',
+    lineId: 'phase-installation',
+    lineName: 'Instalación',
+    amount: 4000,
+    date: new Date('2026-06-18'),
+    status: 'paid',
+  },
+];
+
+export const FINANCE_CHANGE_LOG: FinanceChangeLog[] = [
+  {
+    id: 'fin-log-1',
+    type: 'receivable',
+    projectId: 'proj-1',
+    clientId: 'client-1',
+    field: 'Anticipo 3 monto',
+    previousValue: '14000',
+    nextValue: '15000',
+    changedAt: new Date('2026-05-20'),
+  },
+  {
+    id: 'fin-log-2',
+    type: 'payable',
+    projectId: 'proj-3',
+    contractorId: 'contr-2',
+    field: 'Entrega monto fase',
+    previousValue: '3500',
+    nextValue: '4000',
+    changedAt: new Date('2026-06-10'),
+  },
+];
+
+export const DEFAULT_CONTRACTOR_PHASES = [
+  { id: 'phase-cutting', name: 'Cortado' },
+  { id: 'phase-edging', name: 'Canteado' },
+  { id: 'phase-assembly', name: 'Ensamblado' },
+  { id: 'phase-installation', name: 'Instalación' },
+  { id: 'phase-delivery', name: 'Entrega' },
+];
+
+function getDateBoundsByPreset(preset: DateRangePreset, now: Date) {
+  const end = new Date(now);
+  const start = new Date(now);
+
+  if (preset === 'day') {
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  }
+
+  if (preset === 'week') {
+    const day = now.getDay();
+    const diff = day === 0 ? 6 : day - 1;
+    start.setDate(now.getDate() - diff);
+    start.setHours(0, 0, 0, 0);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  }
+
+  if (preset === 'month') {
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+    end.setMonth(now.getMonth() + 1, 0);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  }
+
+  start.setMonth(0, 1);
+  start.setHours(0, 0, 0, 0);
+  end.setMonth(11, 31);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+export function getProjectsByClientId(clientId: string) {
+  return PROJECTS.filter((project) => project.clientId === clientId);
+}
+
+export function getProjectsByContractorId(contractorId: string) {
+  const projectIds = new Set(
+    PRODUCTION_ORDERS.filter((order) => order.assignedContractorId === contractorId).map(
+      (order) => order.projectId,
+    ),
+  );
+  return PROJECTS.filter((project) => projectIds.has(project.id));
+}
+
+export function getClientPlanByProjectId(projectId: string) {
+  return CLIENT_PROJECT_PAYMENT_PLANS.find((plan) => plan.projectId === projectId);
+}
+
+export function getContractorPlanByProjectId(projectId: string, contractorId: string) {
+  return CONTRACTOR_PROJECT_PAYMENT_PLANS.find(
+    (plan) => plan.projectId === projectId && plan.contractorId === contractorId,
+  );
+}
+
+export function getFinancialBalanceSummary(
+  totalAgreedAmount: number,
+  paymentRecords: FinancePaymentRecord[],
+): FinanceBalanceSummary {
+  const totalPaid = paymentRecords.reduce((sum, payment) => sum + payment.amount, 0);
+  return {
+    totalAgreedAmount,
+    totalPaid,
+    remainingBalance: Math.max(totalAgreedAmount - totalPaid, 0),
+  };
+}
+
+export function getHistoryByType(type: 'receivable' | 'payable') {
+  return FINANCE_PAYMENT_HISTORY.filter((record) => record.type === type);
+}
+
+export function filterFinanceHistory(
+  records: FinancePaymentRecord[],
+  filter: FinanceHistoryFilter,
+  now: Date = new Date(),
+) {
+  return records.filter((record) => {
+    if (filter.entityId) {
+      const isEntityMatch =
+        record.clientId === filter.entityId || record.contractorId === filter.entityId;
+      if (!isEntityMatch) {
+        return false;
+      }
+    }
+
+    if (typeof filter.minAmount === 'number' && record.amount < filter.minAmount) {
+      return false;
+    }
+
+    if (typeof filter.maxAmount === 'number' && record.amount > filter.maxAmount) {
+      return false;
+    }
+
+    const preset = filter.datePreset;
+    if (preset && preset !== 'custom') {
+      const { start, end } = getDateBoundsByPreset(preset, now);
+      if (record.date < start || record.date > end) {
+        return false;
+      }
+      return true;
+    }
+
+    if (filter.startDate && record.date < filter.startDate) {
+      return false;
+    }
+
+    if (filter.endDate && record.date > filter.endDate) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+export function getInstallmentAlerts(referenceDate: Date = new Date()) {
+  const dueSoonThreshold = 5;
+  const startOfReferenceDay = new Date(referenceDate);
+  startOfReferenceDay.setHours(0, 0, 0, 0);
+
+  return CLIENT_PROJECT_PAYMENT_PLANS.flatMap((plan) => {
+    const project = PROJECTS.find((item) => item.id === plan.projectId);
+    const client = CLIENTS.find((item) => item.id === plan.clientId);
+
+    return plan.installments
+      .filter((installment) => installment.status === 'pending')
+      .map((installment) => {
+        const dueDate = new Date(installment.estimatedPaymentDate);
+        dueDate.setHours(0, 0, 0, 0);
+        const diffMs = dueDate.getTime() - startOfReferenceDay.getTime();
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+        return {
+          projectId: plan.projectId,
+          projectName: project?.name ?? 'Proyecto',
+          clientId: plan.clientId,
+          clientName: client?.name ?? 'Cliente',
+          installmentId: installment.id,
+          installmentName: installment.name,
+          dueDate: installment.estimatedPaymentDate,
+          type: diffDays < 0 ? 'overdue' : diffDays <= dueSoonThreshold ? 'due-soon' : 'ok',
+          diffDays,
+        };
+      })
+      .filter((entry) => entry.type !== 'ok');
+  });
+}
