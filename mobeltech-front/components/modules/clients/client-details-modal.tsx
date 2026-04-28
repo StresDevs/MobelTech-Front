@@ -37,7 +37,7 @@ export function ClientDetailsModal({ clientId }: ClientDetailsModalProps) {
             <Phone className="w-5 h-5 text-muted-foreground mt-1" />
             <div>
               <p className="text-sm font-medium">Teléfono</p>
-              <p className="text-sm text-muted-foreground">{client.contactPhone}</p>
+              <p className="text-sm text-muted-foreground">{client.phone}</p>
             </div>
           </div>
 
@@ -57,12 +57,7 @@ export function ClientDetailsModal({ clientId }: ClientDetailsModalProps) {
             </div>
           </div>
 
-          {client.notes && (
-            <div>
-              <p className="text-sm font-medium">Notas</p>
-              <p className="text-sm text-muted-foreground">{client.notes}</p>
-            </div>
-          )}
+
         </div>
       </DialogContent>
     </Dialog>

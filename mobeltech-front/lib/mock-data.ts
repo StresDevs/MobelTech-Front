@@ -21,6 +21,7 @@ import {
   FinanceBalanceSummary,
   FinanceHistoryFilter,
   DateRangePreset,
+  Prequotation,
 } from './types';
 
 // Demo user
@@ -363,6 +364,86 @@ export const PRODUCTION_ORDERS: ProductionOrder[] = [
       },
     ],
   },
+  {
+    id: 'po-3',
+    projectId: 'proj-2',
+    quotationId: 'quote-2',
+    startDate: new Date('2026-05-15'),
+    estimatedDeliveryDate: new Date('2026-07-10'),
+    status: 'pending',
+    items: [
+      {
+        id: 'pitem-4',
+        description: 'Mostrador Recepción',
+        quantity: 1,
+        progress: 0,
+        phases: [
+          { name: 'cortado', completed: false },
+          { name: 'canteado', completed: false },
+          { name: 'ensamblado', completed: false },
+          { name: 'instalacion', completed: false },
+          { name: 'entregado', completed: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'po-4',
+    projectId: 'proj-4',
+    startDate: new Date('2026-05-20'),
+    estimatedDeliveryDate: new Date('2026-08-01'),
+    status: 'pending',
+    items: [
+      {
+        id: 'pitem-5',
+        description: 'Camas Matrimoniales',
+        quantity: 12,
+        progress: 0,
+        phases: [
+          { name: 'cortado', completed: false },
+          { name: 'canteado', completed: false },
+          { name: 'ensamblado', completed: false },
+          { name: 'instalacion', completed: false },
+          { name: 'entregado', completed: false },
+        ],
+      },
+      {
+        id: 'pitem-6',
+        description: 'Armarios Empotrados',
+        quantity: 12,
+        progress: 0,
+        phases: [
+          { name: 'cortado', completed: false },
+          { name: 'canteado', completed: false },
+          { name: 'ensamblado', completed: false },
+          { name: 'instalacion', completed: false },
+          { name: 'entregado', completed: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'po-5',
+    projectId: 'proj-2',
+    startDate: new Date('2026-05-25'),
+    estimatedDeliveryDate: new Date('2026-06-25'),
+    status: 'pending',
+    items: [
+      {
+        id: 'pitem-7',
+        description: 'Estanterías de Oficina',
+        quantity: 6,
+        progress: 0,
+        phases: [
+          { name: 'cortado', completed: false },
+          { name: 'canteado', completed: false },
+          { name: 'ensamblado', completed: false },
+          { name: 'instalacion', completed: false },
+          { name: 'entregado', completed: false },
+        ],
+      },
+    ],
+  },
 ];
 
 // Suppliers
@@ -688,6 +769,7 @@ export const PROJECT_SCHEDULES: ProjectSchedule[] = [
     phases: [
       {
         phase: 'corte',
+        machine: 'maquina-1',
         plannedStart: new Date('2026-03-10'),
         plannedEnd: new Date('2026-03-13'),
         actualStart: new Date('2026-03-10'),
@@ -712,14 +794,14 @@ export const PROJECT_SCHEDULES: ProjectSchedule[] = [
       },
       {
         phase: 'instalacion',
-        plannedStart: new Date('2026-03-25'),
-        plannedEnd: new Date('2026-03-27'),
+        plannedStart: new Date('2026-03-23'),
+        plannedEnd: new Date('2026-03-25'),
         status: 'pending',
       },
       {
         phase: 'entrega',
-        plannedStart: new Date('2026-03-28'),
-        plannedEnd: new Date('2026-03-28'),
+        plannedStart: new Date('2026-03-26'),
+        plannedEnd: new Date('2026-03-26'),
         status: 'pending',
       },
     ],
@@ -735,6 +817,7 @@ export const PROJECT_SCHEDULES: ProjectSchedule[] = [
     phases: [
       {
         phase: 'corte',
+        machine: 'maquina-2',
         plannedStart: new Date('2026-03-08'),
         plannedEnd: new Date('2026-03-10'),
         actualStart: new Date('2026-03-08'),
@@ -786,6 +869,7 @@ export const PROJECT_SCHEDULES: ProjectSchedule[] = [
     phases: [
       {
         phase: 'corte',
+        machine: 'maquina-1',
         plannedStart: new Date('2026-03-15'),
         plannedEnd: new Date('2026-03-18'),
         actualStart: new Date('2026-03-16'),
@@ -1201,3 +1285,92 @@ export function getInstallmentAlerts(referenceDate: Date = new Date()) {
       .filter((entry) => entry.type !== 'ok');
   });
 }
+
+// ─── Prequotations mock data ─────────────────────────────────────────────────
+
+export const PREQUOTATIONS: Prequotation[] = [
+  {
+    id: 'preq-1',
+    clientId: 'client-1',
+    measurementId: 'meas-1',
+    title: 'Muebles oficina – Empresa García S.A.',
+    status: 'adjustment',
+    currentVersion: 2,
+    createdBy: 'Juan Pérez',
+    createdAt: new Date('2026-04-10T09:00:00'),
+    updatedAt: new Date('2026-04-18T14:30:00'),
+    notes: 'Cliente solicitó ajuste en dimensiones de escritorios.',
+    versions: [
+      {
+        id: 'ver-1-1',
+        version: 1,
+        fileName: 'precotizacion-garcia-v1.xlsx',
+        fileType: 'excel',
+        fileSize: '245 KB',
+        uploadedBy: 'Juan Pérez',
+        uploadedAt: new Date('2026-04-10T09:15:00'),
+        notes: 'Versión inicial enviada al cliente.',
+      },
+      {
+        id: 'ver-1-2',
+        version: 2,
+        fileName: 'precotizacion-garcia-v2.xlsx',
+        fileType: 'excel',
+        fileSize: '267 KB',
+        uploadedBy: 'María López',
+        uploadedAt: new Date('2026-04-18T14:30:00'),
+        notes: 'Ajuste en dimensiones de escritorios ejecutivos.',
+      },
+    ],
+    logs: [
+      { id: 'log-1-1', action: 'created', performedBy: 'Juan Pérez', performedAt: new Date('2026-04-10T09:00:00'), description: 'Precotización creada.' },
+      { id: 'log-1-2', action: 'file_uploaded', performedBy: 'Juan Pérez', performedAt: new Date('2026-04-10T09:15:00'), description: 'Archivo subido: precotizacion-garcia-v1.xlsx (v1)' },
+      { id: 'log-1-3', action: 'status_changed', performedBy: 'Juan Pérez', performedAt: new Date('2026-04-11T10:00:00'), description: 'Estado cambiado de Borrador → En revisión.' },
+      { id: 'log-1-4', action: 'file_downloaded', performedBy: 'María López', performedAt: new Date('2026-04-12T11:45:00'), description: 'Archivo descargado: precotizacion-garcia-v1.xlsx' },
+      { id: 'log-1-5', action: 'status_changed', performedBy: 'María López', performedAt: new Date('2026-04-15T09:30:00'), description: 'Estado cambiado de En revisión → En ajuste.' },
+      { id: 'log-1-6', action: 'file_uploaded', performedBy: 'María López', performedAt: new Date('2026-04-18T14:30:00'), description: 'Archivo subido: precotizacion-garcia-v2.xlsx (v2)' },
+      { id: 'log-1-7', action: 'comment_added', performedBy: 'María López', performedAt: new Date('2026-04-18T14:35:00'), description: 'Comentario: "Ajuste en dimensiones de escritorios ejecutivos realizado."' },
+    ],
+  },
+  {
+    id: 'preq-2',
+    clientId: 'client-2',
+    title: 'Recepción y sala de espera – Oficinas López',
+    status: 'confirmed',
+    currentVersion: 3,
+    createdBy: 'María López',
+    createdAt: new Date('2026-03-20T10:00:00'),
+    updatedAt: new Date('2026-04-05T16:00:00'),
+    convertedToQuotationId: 'quot-2',
+    versions: [
+      { id: 'ver-2-1', version: 1, fileName: 'precotizacion-lopez-v1.pdf', fileType: 'pdf', fileSize: '512 KB', uploadedBy: 'María López', uploadedAt: new Date('2026-03-20T10:10:00') },
+      { id: 'ver-2-2', version: 2, fileName: 'precotizacion-lopez-v2.pdf', fileType: 'pdf', fileSize: '498 KB', uploadedBy: 'María López', uploadedAt: new Date('2026-03-28T09:00:00'), notes: 'Ajuste de precios por material importado.' },
+      { id: 'ver-2-3', version: 3, fileName: 'precotizacion-lopez-v3.pdf', fileType: 'pdf', fileSize: '501 KB', uploadedBy: 'Juan Pérez', uploadedAt: new Date('2026-04-03T11:00:00'), notes: 'Versión final aprobada por cliente.' },
+    ],
+    logs: [
+      { id: 'log-2-1', action: 'created', performedBy: 'María López', performedAt: new Date('2026-03-20T10:00:00'), description: 'Precotización creada.' },
+      { id: 'log-2-2', action: 'file_uploaded', performedBy: 'María López', performedAt: new Date('2026-03-20T10:10:00'), description: 'Archivo subido: precotizacion-lopez-v1.pdf (v1)' },
+      { id: 'log-2-3', action: 'file_uploaded', performedBy: 'María López', performedAt: new Date('2026-03-28T09:00:00'), description: 'Archivo subido: precotizacion-lopez-v2.pdf (v2)' },
+      { id: 'log-2-4', action: 'file_uploaded', performedBy: 'Juan Pérez', performedAt: new Date('2026-04-03T11:00:00'), description: 'Archivo subido: precotizacion-lopez-v3.pdf (v3)' },
+      { id: 'log-2-5', action: 'status_changed', performedBy: 'Juan Pérez', performedAt: new Date('2026-04-05T16:00:00'), description: 'Estado cambiado a Confirmado.' },
+      { id: 'log-2-6', action: 'converted_to_quotation', performedBy: 'Juan Pérez', performedAt: new Date('2026-04-05T16:05:00'), description: 'Precotización convertida a Cotización #quot-2.' },
+    ],
+  },
+  {
+    id: 'preq-3',
+    clientId: 'client-3',
+    title: 'Mobiliario bar y cocina – Restaurante El Parador',
+    status: 'draft',
+    currentVersion: 1,
+    createdBy: 'Pedro Rojas',
+    createdAt: new Date('2026-04-20T08:00:00'),
+    updatedAt: new Date('2026-04-20T08:20:00'),
+    versions: [
+      { id: 'ver-3-1', version: 1, fileName: 'precotizacion-parador-v1.xlsx', fileType: 'excel', fileSize: '189 KB', uploadedBy: 'Pedro Rojas', uploadedAt: new Date('2026-04-20T08:20:00'), notes: 'Primer borrador pendiente de revisión.' },
+    ],
+    logs: [
+      { id: 'log-3-1', action: 'created', performedBy: 'Pedro Rojas', performedAt: new Date('2026-04-20T08:00:00'), description: 'Precotización creada.' },
+      { id: 'log-3-2', action: 'file_uploaded', performedBy: 'Pedro Rojas', performedAt: new Date('2026-04-20T08:20:00'), description: 'Archivo subido: precotizacion-parador-v1.xlsx (v1)' },
+    ],
+  },
+];

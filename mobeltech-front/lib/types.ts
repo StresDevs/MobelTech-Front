@@ -215,6 +215,8 @@ export interface MaterialRequest {
 
 export type ProductionPhaseType = 'corte' | 'canteado' | 'ensamblado' | 'instalacion' | 'entrega';
 
+export type CuttingMachine = 'maquina-1' | 'maquina-2';
+
 export interface SchedulePhase {
   phase: ProductionPhaseType;
   plannedStart: Date;
@@ -222,6 +224,8 @@ export interface SchedulePhase {
   actualStart?: Date;
   actualEnd?: Date;
   status: 'pending' | 'in-progress' | 'completed';
+  /** Only meaningful when `phase === 'corte'` — identifies which cutting machine handles this stage. */
+  machine?: CuttingMachine;
 }
 
 export interface ProjectSchedule {
@@ -349,4 +353,57 @@ export interface ContractorInternalPaymentRecord {
   voidedAt?: Date;
   voidedBy?: string;
   pdfSnapshot: ContractorPaymentPdfSnapshot;
+}
+
+// ─── Prequotation ────────────────────────────────────────────────────────────
+
+export type PrequotationStatus =
+  | 'draft'       // Created, file uploaded, not yet reviewed
+  | 'in-review'   // Under review / waiting feedback
+  | 'adjustment'  // Sent back for adjustments
+  | 'confirmed'   // Approved and confirmed → becomes quotation
+  | 'rejected';   // Rejected / cancelled
+
+export type PrequotationLogAction =
+  | 'created'
+  | 'file_uploaded'
+  | 'file_downloaded'
+  | 'status_changed'
+  | 'comment_added'
+  | 'converted_to_quotation';
+
+export interface PrequotationVersion {
+  id: string;
+  version: number;
+  fileName: string;
+  fileType: 'pdf' | 'excel';
+  fileSize: string;
+  uploadedBy: string;
+  uploadedAt: Date;
+  notes?: string;
+}
+
+export interface PrequotationLog {
+  id: string;
+  action: PrequotationLogAction;
+  performedBy: string;
+  performedAt: Date;
+  description: string;
+  metadata?: Record<string, string>;
+}
+
+export interface Prequotation {
+  id: string;
+  clientId: string;
+  measurementId?: string;
+  title: string;
+  status: PrequotationStatus;
+  currentVersion: number;
+  versions: PrequotationVersion[];
+  logs: PrequotationLog[];
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+  notes?: string;
+  convertedToQuotationId?: string;
 }

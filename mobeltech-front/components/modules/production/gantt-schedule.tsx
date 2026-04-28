@@ -29,6 +29,19 @@ const PHASE_LABELS = {
   entrega: 'Entrega',
 };
 
+const MACHINE_SHORT: Record<'maquina-1' | 'maquina-2', string> = {
+  'maquina-1': 'M1',
+  'maquina-2': 'M2',
+};
+
+function getPhaseLabel(phase: { phase: keyof typeof PHASE_LABELS; machine?: 'maquina-1' | 'maquina-2' }) {
+  const base = PHASE_LABELS[phase.phase];
+  if (phase.phase === 'corte' && phase.machine) {
+    return `${base} · ${MACHINE_SHORT[phase.machine]}`;
+  }
+  return base;
+}
+
 interface DayInfo {
   date: Date;
   week: number;
@@ -39,8 +52,28 @@ interface DayInfo {
 type ScheduleItem = (typeof PROJECT_SCHEDULES)[number];
 
 const WEEKDAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-const LEFT_COL_WIDTH = 170;
-const DAY_COL_WIDTH = 28;
+// Compact left columns: furniture (small), client (initials), contractor (first name)
+const FURNITURE_COL_WIDTH = 130;
+const CLIENT_COL_WIDTH = 60;
+const CONTRACTOR_COL_WIDTH = 90;
+const LEFT_COLS_TOTAL = FURNITURE_COL_WIDTH + CLIENT_COL_WIDTH + CONTRACTOR_COL_WIDTH;
+const DAY_COL_WIDTH = 34;
+const ROW_HEIGHT = 80;
+const BAR_HEIGHT = 26;
+
+function getInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 3);
+}
+
+function getFirstName(name: string) {
+  return name.split(/\s+/)[0] ?? name;
+}
 
 export function GanttSchedule() {
   const [selectedMonth, setSelectedMonth] = useState<Date | null>(null);
@@ -82,7 +115,15 @@ export function GanttSchedule() {
       const clientMatch = !filterClient || schedule.clientName === filterClient;
       const contractorMatch = !filterContractor || schedule.contractorName === filterContractor;
 
-      const phaseMatch = !filterPhase || schedule.phases.some((p) => p.phase === filterPhase);
+      let phaseMatch = true;
+      if (filterPhase) {
+        if (filterPhase.startsWith('corte:')) {
+          const machine = filterPhase.split(':')[1] as 'maquina-1' | 'maquina-2';
+          phaseMatch = schedule.phases.some((p) => p.phase === 'corte' && p.machine === machine);
+        } else {
+          phaseMatch = schedule.phases.some((p) => p.phase === filterPhase);
+        }
+      }
 
       return clientMatch && contractorMatch && phaseMatch;
     });
@@ -177,23 +218,26 @@ export function GanttSchedule() {
     return days;
   }, [monthStart, monthEnd]);
 
-  const weekSegments = useMemo(() => {
+  const monthSegments = useMemo(() => {
     if (timelineDays.length === 0) return [];
 
     const segments: { startIdx: number; length: number; label: string }[] = [];
     let i = 0;
 
     while (i < timelineDays.length) {
-      const day = timelineDays[i];
-      const dayOfWeek = (day.getDay() + 6) % 7; // Monday = 0
-      const remainingToWeekEnd = 7 - dayOfWeek;
-      const length = Math.min(remainingToWeekEnd, timelineDays.length - i);
       const start = timelineDays[i];
-      const end = timelineDays[i + length - 1];
-      const label = `${start.getDate()}/${start.getMonth() + 1}-${end.getDate()}/${end.getMonth() + 1}`;
-
+      let j = i;
+      while (
+        j < timelineDays.length &&
+        timelineDays[j].getMonth() === start.getMonth() &&
+        timelineDays[j].getFullYear() === start.getFullYear()
+      ) {
+        j++;
+      }
+      const length = j - i;
+      const label = start.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
       segments.push({ startIdx: i, length, label });
-      i += length;
+      i = j;
     }
 
     return segments;
@@ -541,7 +585,9 @@ export function GanttSchedule() {
           className="w-full px-3 py-2 text-sm border rounded bg-background focus:outline-none focus:ring-2 focus:ring-primary"
         >
           <option value="">Todos los procesos</option>
-          <option value="corte">Corte</option>
+          <option value="corte">Corte (todas las máquinas)</option>
+          <option value="corte:maquina-1">Corte — Máquina 1</option>
+          <option value="corte:maquina-2">Corte — Máquina 2</option>
           <option value="canteado">Canteado</option>
           <option value="ensamblado">Ensamblado</option>
           <option value="instalacion">Instalación</option>
@@ -561,9 +607,25 @@ export function GanttSchedule() {
       {/* Header with month selector */}
       <div className="space-y-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
+          <div className="space-y-2">
             <h2 className="text-xl md:text-2xl font-bold">Cronograma de Producción</h2>
             <p className="text-sm text-muted-foreground">Vista Gantt con cronograma tentativo vs real</p>
+            {/* Inline phase legend */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1">
+              {Object.entries(PHASE_LABELS).map(([key, label]) => (
+                <div key={key} className="flex items-center gap-1.5">
+                  <span
+                    className="inline-block w-3 h-3 rounded-sm"
+                    style={{ backgroundColor: PHASE_COLORS[key as keyof typeof PHASE_COLORS] }}
+                  />
+                  <span className="text-[11px] text-muted-foreground">{label}</span>
+                </div>
+              ))}
+              <div className="flex items-center gap-1.5 ml-1">
+                <span className="inline-block w-3 h-3 rounded-sm bg-gray-200 dark:bg-gray-700 border border-gray-400 dark:border-gray-500" />
+                <span className="text-[11px] text-muted-foreground">Planeado</span>
+              </div>
+            </div>
           </div>
           <div className="flex flex-col gap-3 w-full lg:w-auto print:hidden">
             <div className="rounded-lg border border-border bg-muted/10 px-3 py-2 text-center text-sm font-semibold">
@@ -685,31 +747,31 @@ export function GanttSchedule() {
 
       {/* Desktop Gantt Container */}
       <div className="hidden lg:block print:block overflow-x-auto border border-border rounded-lg bg-background gantt-print-wrapper">
-        <div style={{ minWidth: `${LEFT_COL_WIDTH * 3 + timelineDays.length * DAY_COL_WIDTH}px` }}>
+        <div style={{ minWidth: `${LEFT_COLS_TOTAL + timelineDays.length * DAY_COL_WIDTH}px` }}>
           {/* Header */}
           <div className="flex border-b border-border bg-muted/30">
             {/* Left columns */}
-            <div className="border-r border-border p-2 font-semibold shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}>Mueble</div>
-            <div className="border-r border-border p-2 font-semibold shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}>Cliente</div>
-            <div className="border-r border-border p-2 font-semibold shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}>Contratista</div>
+            <div className="border-r border-border p-2 text-xs font-semibold shrink-0" style={{ width: `${FURNITURE_COL_WIDTH}px` }}>Mueble</div>
+            <div className="border-r border-border p-2 text-xs font-semibold shrink-0 text-center" style={{ width: `${CLIENT_COL_WIDTH}px` }}>Cliente</div>
+            <div className="border-r border-border p-2 text-xs font-semibold shrink-0" style={{ width: `${CONTRACTOR_COL_WIDTH}px` }}>Contratista</div>
 
-            {/* Weeks header */}
-            {weekSegments.map((segment, idx) => (
+            {/* Month header */}
+            {monthSegments.map((segment, idx) => (
               <div
-                key={`week-${idx}`}
-                className="border-r border-border p-2 text-center font-semibold text-xs bg-muted/50 shrink-0"
+                key={`month-${idx}`}
+                className="border-r border-border p-2 text-center font-semibold text-xs bg-muted/50 shrink-0 capitalize"
                 style={{ width: `${segment.length * DAY_COL_WIDTH}px` }}
               >
-                S{idx + 1} ({segment.label})
+                {segment.label}
               </div>
             ))}
           </div>
 
           {/* Days header */}
           <div className="flex border-b border-border bg-muted/20 text-xs">
-            <div className="border-r border-border shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}></div>
-            <div className="border-r border-border shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}></div>
-            <div className="border-r border-border shrink-0" style={{ width: `${LEFT_COL_WIDTH}px` }}></div>
+            <div className="border-r border-border shrink-0" style={{ width: `${FURNITURE_COL_WIDTH}px` }}></div>
+            <div className="border-r border-border shrink-0" style={{ width: `${CLIENT_COL_WIDTH}px` }}></div>
+            <div className="border-r border-border shrink-0" style={{ width: `${CONTRACTOR_COL_WIDTH}px` }}></div>
 
             {timelineDays.map((day, dayIdx) => (
                 <div
@@ -729,23 +791,33 @@ export function GanttSchedule() {
             </div>
           ) : (
             filteredSchedules.map((schedule) => (
-              <div key={schedule.projectId} className="flex border-b border-border hover:bg-muted/20 h-16">
-                <div className="border-r border-border px-2 py-1 shrink-0 flex flex-col justify-center" style={{ width: `${LEFT_COL_WIDTH}px` }}>
-                  <p className="font-semibold text-xs truncate" title={schedule.furnitureName}>{schedule.furnitureName}</p>
+              <div
+                key={schedule.projectId}
+                className="flex border-b border-border hover:bg-muted/20"
+                style={{ height: `${ROW_HEIGHT}px` }}
+              >
+                <div className="border-r border-border px-2 py-1 shrink-0 flex flex-col justify-center" style={{ width: `${FURNITURE_COL_WIDTH}px` }}>
+                  <p className="font-medium text-[11px] leading-tight truncate" title={schedule.furnitureName}>{schedule.furnitureName}</p>
                   {isAdmin && (
                     <button
                       onClick={() => handleProjectPdfDownload(schedule)}
-                      className="mt-1 px-2 py-0.5 text-[10px] border rounded hover:bg-muted w-fit print:hidden"
+                      className="mt-1 px-1.5 py-0.5 text-[9px] border rounded hover:bg-muted w-fit print:hidden"
                     >
                       PDF
                     </button>
                   )}
                 </div>
-                <div className="border-r border-border px-2 py-1 text-xs shrink-0 flex items-center" style={{ width: `${LEFT_COL_WIDTH}px` }}>
-                  <span className="truncate" title={schedule.clientName}>{schedule.clientName}</span>
+                <div className="border-r border-border px-1 py-1 text-xs shrink-0 flex items-center justify-center" style={{ width: `${CLIENT_COL_WIDTH}px` }}>
+                  <span
+                    className="inline-flex items-center justify-center w-7 h-7 rounded-full text-[10px] font-bold"
+                    style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
+                    title={schedule.clientName}
+                  >
+                    {getInitials(schedule.clientName)}
+                  </span>
                 </div>
-                <div className="border-r border-border px-2 py-1 text-xs shrink-0 flex items-center" style={{ width: `${LEFT_COL_WIDTH}px` }}>
-                  <span className="truncate" title={schedule.contractorName}>{schedule.contractorName}</span>
+                <div className="border-r border-border px-2 py-1 text-[11px] shrink-0 flex items-center" style={{ width: `${CONTRACTOR_COL_WIDTH}px` }}>
+                  <span className="truncate" title={schedule.contractorName}>{getFirstName(schedule.contractorName)}</span>
                 </div>
 
                 <div className="relative shrink-0" style={{ width: `${timelineDays.length * DAY_COL_WIDTH}px` }}>
@@ -764,14 +836,17 @@ export function GanttSchedule() {
                     return (
                       <div
                         key={`planned-${schedule.projectId}-${phase.phase}`}
-                        className="absolute top-3 h-2 bg-gray-300 border border-gray-400 opacity-70 rounded-sm"
+                        className="absolute top-2 flex items-center px-1.5 bg-gray-200 dark:bg-gray-700 border border-gray-400 dark:border-gray-500 rounded-md overflow-hidden text-[10px] font-medium text-gray-700 dark:text-gray-200"
                         suppressHydrationWarning
                         style={{
+                          height: `${BAR_HEIGHT}px`,
                           width: `${width}%`,
                           left: `${offset}%`,
                         }}
-                        title={`${PHASE_LABELS[phase.phase]} (Planeado)`}
-                      />
+                        title={`${getPhaseLabel(phase)} (Planeado)`}
+                      >
+                        <span className="truncate">{getPhaseLabel(phase)}</span>
+                      </div>
                     );
                   })}
 
@@ -786,15 +861,18 @@ export function GanttSchedule() {
                       return (
                         <div
                           key={`actual-${schedule.projectId}-${phase.phase}`}
-                          className="absolute bottom-3 h-2 rounded-sm"
+                          className="absolute bottom-2 flex items-center px-1.5 rounded-md overflow-hidden text-[10px] font-semibold text-white shadow-sm"
                           suppressHydrationWarning
                           style={{
+                            height: `${BAR_HEIGHT}px`,
                             backgroundColor: PHASE_COLORS[phase.phase as keyof typeof PHASE_COLORS],
                             width: `${width}%`,
                             left: `${offset}%`,
                           }}
-                          title={`${PHASE_LABELS[phase.phase]} (Real)`}
-                        />
+                          title={`${getPhaseLabel(phase)} (Real)`}
+                        >
+                          <span className="truncate">{getPhaseLabel(phase)}</span>
+                        </div>
                       );
                     })}
                 </div>
@@ -803,23 +881,6 @@ export function GanttSchedule() {
           )}
         </div>
       </div>
-
-      {/* Legend */}
-      <Card className="p-4">
-        <h3 className="font-semibold mb-3">Leyenda de Fases</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          {Object.entries(PHASE_LABELS).map(([key, label]) => (
-            <div key={key} className="flex items-center gap-2">
-              <div
-                className="w-6 h-4 rounded"
-                style={{ backgroundColor: PHASE_COLORS[key as keyof typeof PHASE_COLORS] }}
-              />
-              <span className="text-sm">{label}</span>
-            </div>
-          ))}
-        </div>
-
-      </Card>
 
       <Dialog open={Boolean(calendarModalProjectId)} onOpenChange={(open) => !open && closeCalendarModal()}>
         <DialogContent className="max-w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto">

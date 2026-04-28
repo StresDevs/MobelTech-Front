@@ -50,13 +50,6 @@ export const MODULES = [
     roles: ['admin', 'manager', 'operator'],
   },
   {
-    id: 'schedule',
-    label: 'Cronograma',
-    path: '/schedule',
-    icon: 'Calendar',
-    roles: ['admin', 'manager', 'operator'],
-  },
-  {
     id: 'inventory',
     label: 'Inventario y Compras',
     path: '/inventory',
@@ -78,11 +71,11 @@ export const MODULES = [
     roles: ['admin', 'manager'],
   },
   {
-    id: 'contractor-requests',
-    label: 'Solicitud Contratistas',
-    path: '/contractor-requests',
-    icon: 'FileText',
-    roles: ['admin', 'manager'],
+    id: 'users',
+    label: 'Gestión de Usuarios',
+    path: '/users',
+    icon: 'UserCog',
+    roles: ['admin'],
   },
   {
     id: 'my-materials',

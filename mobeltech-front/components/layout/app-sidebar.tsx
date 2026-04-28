@@ -15,6 +15,7 @@ import {
   Factory,
   Package,
   Warehouse,
+  Truck,
   DollarSign,
   ChevronRight,
   ChevronLeft,
@@ -26,6 +27,7 @@ import {
   ClipboardList,
   LogOut,
   X,
+  UserCog,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -40,6 +42,7 @@ const ICON_MAP = {
   ShoppingCart,
   Calendar,
   ClipboardList,
+  UserCog,
 };
 
 /* ─── Shared sidebar inner content (reused for desktop + mobile) ─── */
@@ -51,8 +54,27 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [openFinance, setOpenFinance] = useState(false);
+  const [openProduction, setOpenProduction] = useState(false);
+  const [openLogistics, setOpenLogistics] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
+
+  // Auto-open Producción group when a child route is active
+  useEffect(() => {
+    if (
+      pathname?.startsWith('/production') ||
+      pathname?.startsWith('/schedule') ||
+      pathname?.startsWith('/contractor-requests')
+    ) {
+      setOpenProduction(true);
+    }
+    if (pathname?.startsWith('/finance')) {
+      setOpenFinance(true);
+    }
+    if (pathname?.startsWith('/inventory') || pathname?.startsWith('/warehouse')) {
+      setOpenLogistics(true);
+    }
+  }, [pathname]);
 
   const isDark = mounted && resolvedTheme === 'dark';
   const availableModules = MODULES.filter((m) => m.roles.includes(currentRole));
@@ -64,10 +86,41 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     { label: 'Estado Proyectos', href: '/finance/project-status' },
   ];
 
+  const productionSubItems = [
+    { label: 'Asignación de Contratistas', href: '/production' },
+    { label: 'Cronograma', href: '/schedule' },
+    { label: 'Solicitud de Contratistas', href: '/contractor-requests' },
+  ];
+
+  const logisticsSubItems = [
+    { label: 'Inventario y Compras', href: '/inventory' },
+    { label: 'Almacén', href: '/warehouse' },
+  ];
+
   return (
     <aside className={`border-r border-border bg-background h-full flex flex-col gap-6 overflow-y-auto transition-all duration-300 ${
       isCollapsed ? 'w-20' : 'w-64'
     } p-4`}>
+      {/* Brand header */}
+      <div className={`flex items-center gap-3 ${isCollapsed ? 'justify-center' : ''}`}>
+        {mounted && (
+          <Image
+            src={isDark ? '/mobeltech-dark.png' : '/mobeltech-light.png'}
+            alt="MobelTech"
+            width={36}
+            height={36}
+            style={{ height: 'auto' }}
+            className="shrink-0 rounded"
+          />
+        )}
+        {!isCollapsed && (
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-foreground tracking-wide truncate">MöbelTech</p>
+            <p className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Muebles a medida</p>
+          </div>
+        )}
+      </div>
+
       {/* Toggle Button */}
       <div className="flex justify-end">
         <Button
@@ -145,6 +198,125 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             );
           }
 
+          /* Producción collapsible */
+          if (module.id === 'production') {
+            const productionActive =
+              pathname?.startsWith('/production') ||
+              pathname?.startsWith('/schedule') ||
+              pathname?.startsWith('/contractor-requests');
+
+            return (
+              <div key={module.id} className="space-y-0.5">
+                <button
+                  onClick={() => setOpenProduction((v) => !v)}
+                  title={isCollapsed ? module.label : undefined}
+                  className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                    isCollapsed ? 'justify-center' : ''
+                  } ${
+                    productionActive
+                      ? 'text-[#1f1f1f]'
+                      : 'text-foreground hover:bg-muted'
+                  }`}
+                  style={productionActive ? { backgroundColor: '#eab676' } : undefined}
+                >
+                  {IconComponent && (
+                    <IconComponent
+                      className={`w-[18px] h-[18px] shrink-0 ${productionActive ? 'text-[#1f1f1f]' : 'text-muted-foreground group-hover:text-foreground'}`}
+                    />
+                  )}
+                  {!isCollapsed && <span className="flex-1 text-left truncate">{module.label}</span>}
+                  {!isCollapsed && (
+                    openProduction
+                      ? <ChevronUp className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                      : <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                  )}
+                </button>
+
+                {openProduction && !isCollapsed && (
+                  <div className="ml-4 pl-3 border-l-2 space-y-0.5" style={{ borderColor: '#eab676' }}>
+                    {productionSubItems.map((sub) => {
+                      const subActive = pathname === sub.href;
+                      return (
+                        <Link
+                          key={sub.href}
+                          href={sub.href}
+                          onClick={onNavigate}
+                          className={`block text-sm px-3 py-2 rounded-md transition-colors ${
+                            subActive
+                              ? 'font-medium text-[#1f1f1f]'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                          }`}
+                          style={subActive ? { backgroundColor: '#eab676' } : undefined}
+                        >
+                          {sub.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          /* Logística (group: Inventario y Compras + Almacén) — render at 'inventory' slot, skip 'warehouse' */
+          if (module.id === 'warehouse') {
+            return null;
+          }
+          if (module.id === 'inventory') {
+            const logisticsActive =
+              pathname?.startsWith('/inventory') || pathname?.startsWith('/warehouse');
+
+            return (
+              <div key="logistics" className="space-y-0.5">
+                <button
+                  onClick={() => setOpenLogistics((v) => !v)}
+                  title={isCollapsed ? 'Logística' : undefined}
+                  className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                    isCollapsed ? 'justify-center' : ''
+                  } ${
+                    logisticsActive
+                      ? 'text-[#1f1f1f]'
+                      : 'text-foreground hover:bg-muted'
+                  }`}
+                  style={logisticsActive ? { backgroundColor: '#eab676' } : undefined}
+                >
+                  <Truck
+                    className={`w-[18px] h-[18px] shrink-0 ${logisticsActive ? 'text-[#1f1f1f]' : 'text-muted-foreground group-hover:text-foreground'}`}
+                  />
+                  {!isCollapsed && <span className="flex-1 text-left truncate">Logística</span>}
+                  {!isCollapsed && (
+                    openLogistics
+                      ? <ChevronUp className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                      : <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                  )}
+                </button>
+
+                {openLogistics && !isCollapsed && (
+                  <div className="ml-4 pl-3 border-l-2 space-y-0.5" style={{ borderColor: '#eab676' }}>
+                    {logisticsSubItems.map((sub) => {
+                      const subActive = pathname === sub.href || pathname?.startsWith(sub.href + '/');
+                      return (
+                        <Link
+                          key={sub.href}
+                          href={sub.href}
+                          onClick={onNavigate}
+                          className={`block text-sm px-3 py-2 rounded-md transition-colors ${
+                            subActive
+                              ? 'font-medium text-[#1f1f1f]'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                          }`}
+                          style={subActive ? { backgroundColor: '#eab676' } : undefined}
+                        >
+                          {sub.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
           /* Regular module link */
           return (
             <Link
@@ -166,23 +338,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </nav>
-
-      {/* Info Section */}
-      {!isCollapsed && (
-        <div className="border-t border-border pt-4">
-          <p className="text-xs text-muted-foreground px-4 mb-3">INFORMACIÓN</p>
-          <div className="space-y-2 text-xs">
-            <div className="px-4 py-2 bg-muted rounded-lg">
-              <p className="font-medium text-foreground">Versión</p>
-              <p className="text-muted-foreground">1.0.0</p>
-            </div>
-            <div className="px-4 py-2 bg-muted rounded-lg">
-              <p className="font-medium text-foreground">Estado</p>
-              <p className="text-green-600">Conectado</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* User card + logout */}
         <div

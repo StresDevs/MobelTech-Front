@@ -75,7 +75,7 @@ export function NewMeasurementModal({ onMeasurementAdded }: { onMeasurementAdded
                   onClick={() => handleSelectClient(client.id)}
                 >
                   <h3 className="font-semibold text-foreground">{client.name}</h3>
-                  <p className="text-sm text-muted-foreground">{client.contactPhone}</p>
+                  <p className="text-sm text-muted-foreground">{client.phone}</p>
                   <p className="text-sm text-muted-foreground">{client.address}</p>
                   <div className="mt-3">
                     <Button

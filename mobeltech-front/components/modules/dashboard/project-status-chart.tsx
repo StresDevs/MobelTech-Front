@@ -44,7 +44,7 @@ export function ProjectStatusChart() {
               ))}
             </Pie>
             <Tooltip
-              formatter={(value) => `${value} proyecto${value > 1 ? 's' : ''}`}
+              formatter={(value) => `${value} proyecto${(value as number) > 1 ? 's' : ''}`}
             />
             <Legend />
           </PieChart>
