@@ -77,7 +77,16 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   }, [pathname]);
 
   const isDark = mounted && resolvedTheme === 'dark';
-  const availableModules = MODULES.filter((m) => m.roles.includes(currentRole));
+  let availableModules = MODULES.filter((m) => m.roles.includes(currentRole));
+
+  // Contractor (contratista) role: show only assigned jobs, cronograma and solicitud de material
+  if (currentRole === 'operator') {
+    availableModules = [
+      { id: 'assigned-jobs', label: 'Trabajos Asignados', path: '/assigned-jobs', icon: 'Factory', roles: ['operator'] },
+      { id: 'schedule', label: 'Cronograma', path: '/schedule', icon: 'Calendar', roles: ['operator'] },
+      { id: 'contractor-requests', label: 'Solicitud de Material', path: '/contractor-requests', icon: 'ShoppingCart', roles: ['operator'] },
+    ];
+  }
 
   const financeSubItems = [
     { label: 'Clientes', href: '/finance/clients' },
@@ -89,7 +98,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const productionSubItems = [
     { label: 'Asignación de Contratistas', href: '/production' },
     { label: 'Cronograma', href: '/schedule' },
-    { label: 'Solicitud de Contratistas', href: '/contractor-requests' },
+    { label: 'Solicitud de Material', href: '/contractor-requests' },
   ];
 
   const logisticsSubItems = [
@@ -402,8 +411,10 @@ function MobileSidebar() {
 /* ─── Desktop sidebar ─── */
 function DesktopSidebar() {
   return (
-    <div className="hidden md:flex">
-      <SidebarContent />
+    <div className="hidden md:block">
+      <div className="fixed inset-y-0 left-0 z-40">
+        <SidebarContent />
+      </div>
     </div>
   );
 }

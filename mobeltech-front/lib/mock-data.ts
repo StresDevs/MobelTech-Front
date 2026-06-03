@@ -33,6 +33,21 @@ export const DEMO_USER: User = {
   avatar: '👤',
 };
 
+// Demo contractor (contratista) - mock credentials for local testing
+export const DEMO_CONTRACTOR_USER: User = {
+  id: 'user-2',
+  name: 'Carlos Mamani',
+  email: 'contratista@mobeltech.com',
+  role: 'operator',
+  avatar: '🛠️',
+};
+
+// Local mock credentials (email + password) used by the simple AuthGate
+export const MOCK_CREDENTIALS = [
+  { email: DEMO_USER.email, password: 'demo', user: DEMO_USER },
+  { email: DEMO_CONTRACTOR_USER.email, password: 'contratista123', user: DEMO_CONTRACTOR_USER },
+];
+
 // Clients
 export const CLIENTS: Client[] = [
   {
@@ -263,6 +278,7 @@ export const CONTRACTORS: Contractor[] = [
   {
     id: 'contr-1',
     name: 'Carlos Mamani',
+    userId: 'user-2',
     phone: '+591-2-1111111',
     email: 'carlos@carpinteria.com',
     status: 'active',
@@ -308,7 +324,7 @@ export const PRODUCTION_ORDERS: ProductionOrder[] = [
     quotationId: 'quote-1',
     startDate: new Date('2026-05-01'),
     estimatedDeliveryDate: new Date('2026-06-15'),
-    assignedContractorId: 'contr-1',
+    assignedContractorId: 'user-2',
     status: 'in-progress',
     items: [
       {
@@ -1183,6 +1199,76 @@ export function getProjectsByContractorId(contractorId: string) {
   );
   return PROJECTS.filter((project) => projectIds.has(project.id));
 }
+
+// -----------------------------
+// Contractor-assigned jobs (mock)
+// -----------------------------
+export const CONTRACTOR_JOBS: ProductionOrder[] = [
+  {
+    id: 'cj-1',
+    projectId: 'proj-1',
+    quotationId: 'quote-1',
+    startDate: new Date('2026-05-20'),
+    estimatedDeliveryDate: new Date('2026-06-10'),
+    assignedContractorId: 'user-2',
+    status: 'in-progress',
+    items: [
+      {
+        id: 'cj-1-item-1',
+        description: 'Escritorio Ejecutivo - Modelo A',
+        quantity: 2,
+        progress: 60,
+        phases: [
+          { name: 'cortado', completed: true, completedDate: new Date('2026-05-22') },
+          { name: 'canteado', completed: true, completedDate: new Date('2026-05-24') },
+          { name: 'ensamblado', completed: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'cj-2',
+    projectId: 'proj-2',
+    quotationId: 'quote-2',
+    startDate: new Date('2026-05-28'),
+    estimatedDeliveryDate: new Date('2026-06-20'),
+    assignedContractorId: 'user-2',
+    status: 'pending',
+    items: [
+      {
+        id: 'cj-2-item-1',
+        description: 'Mostrador Recepción - MDF Premium',
+        quantity: 1,
+        progress: 0,
+        phases: [
+          { name: 'cortado', completed: false },
+          { name: 'canteado', completed: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'cj-3',
+    projectId: 'proj-3',
+    quotationId: 'quote-3',
+    startDate: new Date('2026-06-01'),
+    estimatedDeliveryDate: new Date('2026-06-30'),
+    assignedContractorId: 'user-2',
+    status: 'in-progress',
+    items: [
+      {
+        id: 'cj-3-item-1',
+        description: 'Mesas de Comedor - Juego x4',
+        quantity: 4,
+        progress: 45,
+        phases: [
+          { name: 'cortado', completed: true, completedDate: new Date('2026-06-02') },
+          { name: 'canteado', completed: false },
+        ],
+      },
+    ],
+  },
+];
 
 export function getClientPlanByProjectId(projectId: string) {
   return CLIENT_PROJECT_PAYMENT_PLANS.find((plan) => plan.projectId === projectId);

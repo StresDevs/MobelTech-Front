@@ -1,4 +1,4 @@
-'use client';
+ 'use client';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -12,20 +12,15 @@ import {
   DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { CLIENTS } from '@/lib/mock-data';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
-
+import { useLocalData } from '@/lib/contexts/LocalDataContext';
 export function NewMeasurementModal({ onMeasurementAdded }: { onMeasurementAdded?: () => void }) {
   const [open, setOpen] = useState(false);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
-  const [newClientData, setNewClientData] = useState({
-    name: '',
-    phone: '',
-    address: '',
-    email: '',
-  });
+  const [newClientData, setNewClientData] = useState({ name: '', phone: '', address: '', email: '' });
+  const { clients, addClient } = useLocalData();
 
   const handleSelectClient = (clientId: string) => {
     setSelectedClient(clientId);
@@ -38,10 +33,11 @@ export function NewMeasurementModal({ onMeasurementAdded }: { onMeasurementAdded
       alert('Por favor completa todos los campos requeridos');
       return;
     }
-    // Here you would typically save the new client and create the measurement
-    console.log('Nuevo cliente agregado:', newClientData);
+    const created = addClient({ name: newClientData.name.trim(), phone: newClientData.phone.trim(), address: newClientData.address.trim(), email: newClientData.email.trim() });
     setNewClientData({ name: '', phone: '', address: '', email: '' });
     setOpen(false);
+    // select the new client and notify
+    setSelectedClient(created.id);
     onMeasurementAdded?.();
   };
 
@@ -68,7 +64,7 @@ export function NewMeasurementModal({ onMeasurementAdded }: { onMeasurementAdded
           <TabsContent value="existing" className="mt-6 space-y-4">
             <p className="text-sm text-muted-foreground">Selecciona un cliente de la lista para agendar una medición</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {CLIENTS.map((client) => (
+              {clients.map((client) => (
                 <Card
                   key={client.id}
                   className="p-4 cursor-pointer hover:bg-accent/10 transition-colors border-2 hover:border-amber-300"
@@ -141,15 +137,8 @@ export function NewMeasurementModal({ onMeasurementAdded }: { onMeasurementAdded
             </div>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setOpen(false)}>
-                Cancelar
-              </Button>
-              <Button
-                style={{ backgroundColor: '#d6a85a', color: '#ffffff' }}
-                onClick={handleAddNewClient}
-              >
-                Agregar Cliente y Agendar
-              </Button>
+              <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+              <Button style={{ backgroundColor: '#d6a85a', color: '#ffffff' }} onClick={handleAddNewClient}>Agregar Cliente y Agendar</Button>
             </DialogFooter>
           </TabsContent>
         </Tabs>

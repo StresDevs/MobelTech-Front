@@ -91,6 +91,13 @@ export const MODULES = [
     icon: 'DollarSign',
     roles: ['operator'],
   },
+  {
+    id: 'assigned-jobs',
+    label: 'Trabajos Asignados',
+    path: '/assigned-jobs',
+    icon: 'Factory',
+    roles: ['operator'],
+  },
 ];
 
 // Role definitions and permissions
@@ -108,7 +115,7 @@ export const ROLE_PERMISSIONS = {
   operator: {
     label: 'Contratista',
     description: 'Acceso para solicitar materiales',
-    modules: ['my-materials', 'my-finance'],
+    modules: ['my-materials', 'my-finance', 'assigned-jobs'],
   },
   viewer: {
     label: 'Visualizador',

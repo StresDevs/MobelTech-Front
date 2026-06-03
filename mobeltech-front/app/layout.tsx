@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { RoleProvider } from '@/lib/contexts/RoleContext'
 import { SidebarProvider } from '@/lib/contexts/SidebarContext'
+import { LocalDataProvider } from '@/lib/contexts/LocalDataContext'
 import { ThemeProvider } from '@/components/theme-provider'
 import AuthGate from '@/components/auth/AuthGate'
 import { Toaster } from '@/components/ui/toaster'
@@ -40,9 +41,11 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           <RoleProvider>
             <SidebarProvider>
-              <AuthGate>
-                {children}
-              </AuthGate>
+              <LocalDataProvider>
+                <AuthGate>
+                  {children}
+                </AuthGate>
+              </LocalDataProvider>
             </SidebarProvider>
           </RoleProvider>
         </ThemeProvider>

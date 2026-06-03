@@ -1,22 +1,20 @@
-'use client';
+ 'use client';
 
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { QUOTATIONS, CLIENTS } from '@/lib/mock-data';
-import { Plus, Edit, Check, X } from 'lucide-react';
 import { useState } from 'react';
+import { useLocalData } from '@/lib/contexts/LocalDataContext';
+import { Plus, Edit, Check, X } from 'lucide-react';
 import { QUOTATION_STATUS_FLOW } from '@/lib/constants';
 
 export function QuotationList() {
-  const [quotations, setQuotations] = useState(QUOTATIONS);
+  const { quotations, clients, updateQuotation } = useLocalData();
+  const [localQuotations, setLocalQuotations] = useState(quotations);
 
   const updateQuotationStatus = (quotationId: string, newStatus: string) => {
-    setQuotations(
-      quotations.map((q) =>
-        q.id === quotationId ? { ...q, status: newStatus as any } : q
-      )
-    );
+    updateQuotation(quotationId, { status: newStatus as any });
+    setLocalQuotations((prev) => prev.map((q) => (q.id === quotationId ? { ...q, status: newStatus as any } : q)));
   };
 
   const getStatusColor = (status: string) => {
@@ -67,9 +65,9 @@ export function QuotationList() {
             </tr>
           </thead>
           <tbody>
-            {quotations.map((quote) => {
-              const client = CLIENTS.find(c => c.id === quote.clientId);
-              const nextStatuses = QUOTATION_STATUS_FLOW[quote.status as keyof typeof QUOTATION_STATUS_FLOW] || [];
+                  {localQuotations.map((quote) => {
+                    const client = clients.find((c) => c.id === quote.clientId);
+                    const nextStatuses = QUOTATION_STATUS_FLOW[quote.status as keyof typeof QUOTATION_STATUS_FLOW] || [];
 
               return (
                 <tr key={quote.id} className="border-b border-border hover:bg-muted/50">

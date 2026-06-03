@@ -8,30 +8,29 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { CLIENTS } from '@/lib/mock-data';
 import { Phone, MapPin, Mail } from 'lucide-react';
+import { useLocalData } from '@/lib/contexts/LocalDataContext';
 
 interface ClientDetailsModalProps {
   clientId: string;
 }
 
 export function ClientDetailsModal({ clientId }: ClientDetailsModalProps) {
-  const client = CLIENTS.find(c => c.id === clientId);
+  const { clients } = useLocalData();
+  const client = clients.find((c) => c.id === clientId);
 
   if (!client) return null;
 
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="w-full">
-          Cliente
-        </Button>
+        <Button variant="outline" size="sm" className="w-full">Cliente</Button>
       </DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{client.name}</DialogTitle>
         </DialogHeader>
-        
+
         <div className="space-y-4">
           <div className="flex items-start gap-3">
             <Phone className="w-5 h-5 text-muted-foreground mt-1" />
@@ -56,7 +55,6 @@ export function ClientDetailsModal({ clientId }: ClientDetailsModalProps) {
               <p className="text-sm text-muted-foreground">{client.email}</p>
             </div>
           </div>
-
 
         </div>
       </DialogContent>

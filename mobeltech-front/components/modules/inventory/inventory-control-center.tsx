@@ -353,6 +353,11 @@ const normalizeText = (value: string) =>
     .replace(/[\u0300-\u036f]/g, '');
 
 export function InventoryControlCenter() {
+  // Estados para los buscadores de órdenes de compra
+  const [globalOrderSearch, setGlobalOrderSearch] = useState('');
+  const [stockOrderSearch, setStockOrderSearch] = useState('');
+  // Estado para expandir fila de subítems
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
   const [exchangeRate, setExchangeRate] = useState(6.96);
 
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>(INITIAL_SUPPLIERS);
@@ -1011,26 +1016,33 @@ export function InventoryControlCenter() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Ranking automatico de proveedores</CardTitle>
+              <CardTitle>Lista de proveedores</CardTitle>
               <CardDescription>
-                Score en base a retrasos, defectos y competitividad de precios. Mejores opciones sugeridas para compra global.
+                Listado de proveedores registrados con historial de compras.
               </CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 max-w-xs">
+                <Input
+                  placeholder="Buscar proveedor por nombre..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+              </div>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Proveedor</TableHead>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Historial compras</TableHead>
-                    <TableHead>Calidad</TableHead>
-                    <TableHead>Score</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {supplierRanking.map((supplier) => {
-                    const score = getSupplierScore(supplier);
-                    return (
+                  {supplierRanking
+                    .filter(supplier =>
+                      supplier.name.toLowerCase().includes(searchQuery.toLowerCase())
+                    )
+                    .map((supplier) => (
                       <TableRow key={supplier.id}>
                         <TableCell>
                           <p className="font-medium">{supplier.name}</p>
@@ -1038,21 +1050,8 @@ export function InventoryControlCenter() {
                         </TableCell>
                         <TableCell>{supplier.supplierType}</TableCell>
                         <TableCell>{supplier.purchaseHistoryCount} ordenes</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Star className="h-4 w-4 text-amber-500" />
-                            <span>{Math.max(1, Math.round((100 - supplier.defectsRate * 10) / 20))}/5</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium">{score}/100</p>
-                            <Progress value={score} />
-                          </div>
-                        </TableCell>
                       </TableRow>
-                    );
-                  })}
+                    ))}
                 </TableBody>
               </Table>
             </CardContent>
@@ -1302,100 +1301,149 @@ export function InventoryControlCenter() {
                       100,
                       Math.round((available / Math.max(material.minStock * 2, 1)) * 100),
                     );
+                    // Solo para el primer ítem, ejemplo de variantes
+                    const isFirst = idx === 0;
+                    const isExpanded = expandedItemId === material.id;
                     return (
-                      <TableRow key={material.id} className="group">
-                        <TableCell className="text-muted-foreground font-medium">{idx + 1}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-lg border bg-muted">
-                              <Image
-                                src={material.imageUrl}
-                                alt={material.name}
-                                fill
-                                className="object-cover"
-                                unoptimized
-                              />
+                      <>
+                        <TableRow
+                          key={material.id}
+                          className={"group cursor-pointer"}
+                          onClick={() => isFirst ? setExpandedItemId(isExpanded ? null : material.id) : undefined}
+                          style={isFirst ? { background: isExpanded ? '#f3f4f6' : undefined } : {}}
+                        >
+                          <TableCell className="text-muted-foreground font-medium">{idx + 1}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <div className="relative h-9 w-9 shrink-0 overflow-visible rounded-lg border bg-muted group/image-preview">
+                                <Image
+                                  src={material.imageUrl}
+                                  alt={material.name}
+                                  fill
+                                  className="object-cover cursor-pointer"
+                                  unoptimized
+                                />
+                                <div className="absolute left-1/2 top-1/2 z-50 hidden group-hover/image-preview:flex items-center justify-center" style={{transform: 'translate(-50%, -50%)'}}>
+                                  <div className="rounded-lg shadow-2xl border border-border bg-background p-1" style={{width: '180px', height: '120px'}}>
+                                    <Image
+                                      src={material.imageUrl}
+                                      alt={material.name}
+                                      width={180}
+                                      height={120}
+                                      className="object-contain rounded"
+                                      unoptimized
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                              <span className="font-mono text-sm font-semibold">{material.sku}</span>
                             </div>
-                            <span className="font-mono text-sm font-semibold">{material.sku}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <span className="font-medium uppercase tracking-wide">{material.name}</span>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="whitespace-nowrap">
-                            {material.category}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{material.unit}</TableCell>
-                        <TableCell>
-                          <span
-                            className={
-                              lowStock
-                                ? 'font-semibold text-red-500'
-                                : 'font-semibold text-emerald-600'
-                            }
-                          >
-                            {available}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Progress
-                              value={rendimiento}
-                              className={`h-2 w-20 ${lowStock ? '[&>div]:bg-red-500' : '[&>div]:bg-emerald-500'}`}
-                            />
-                            <span className="text-xs text-muted-foreground">{rendimiento}%</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center justify-end gap-0.5">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              title="Subir / tomar foto"
-                              className="text-emerald-600 hover:text-emerald-700"
-                              onClick={() => {
-                                setSelectedMaterialId(material.id);
-                                materialImageInputRef.current?.click();
-                              }}
-                            >
-                              <Camera className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              title="Editar"
-                              className="text-blue-500 hover:text-blue-600"
-                              onClick={() => handleEditOpen(material)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              title="Ver detalle"
-                              onClick={() => {
-                                setSelectedMaterialId(material.id);
-                                setDetailOpen(true);
-                              }}
-                            >
-                              <ChevronDown className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              title="Eliminar"
-                              className="text-red-500 hover:text-red-600"
-                              onClick={() =>
-                                setMaterials((prev) => prev.filter((m) => m.id !== material.id))
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-medium uppercase tracking-wide">{material.name}</span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="whitespace-nowrap">
+                              {material.category}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{material.unit}</TableCell>
+                          <TableCell>
+                            <span
+                              className={
+                                lowStock
+                                  ? 'font-semibold text-red-500'
+                                  : 'font-semibold text-emerald-600'
                               }
                             >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                              {available}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Progress
+                                value={rendimiento}
+                                className={`h-2 w-20 ${lowStock ? '[&>div]:bg-red-500' : '[&>div]:bg-emerald-500'}`}
+                              />
+                              <span className="text-xs text-muted-foreground">{rendimiento}%</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-0.5">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Subir / tomar foto"
+                                className="text-emerald-600 hover:text-emerald-700"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setSelectedMaterialId(material.id);
+                                  materialImageInputRef.current?.click();
+                                }}
+                              >
+                                <Camera className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Editar"
+                                className="text-blue-500 hover:text-blue-600"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  handleEditOpen(material);
+                                }}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Ver detalle"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setSelectedMaterialId(material.id);
+                                  setDetailOpen(true);
+                                }}
+                              >
+                                <ChevronDown className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Eliminar"
+                                className="text-red-500 hover:text-red-600"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setMaterials((prev) => prev.filter((m) => m.id !== material.id));
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {/* Subítems solo para el primer ítem y si está expandido */}
+                        {isFirst && isExpanded && [1, 2].map((variant) => (
+                          <TableRow key={material.id + '-sub-' + variant} className="bg-muted/40">
+                            <TableCell></TableCell>
+                            <TableCell colSpan={7}>
+                              <div className="flex items-center gap-3 pl-8">
+                                <div className="relative h-9 w-9 shrink-0 overflow-visible rounded-lg border bg-muted">
+                                  <Image
+                                    src={material.imageUrl}
+                                    alt={material.name + '-' + variant}
+                                    fill
+                                    className="object-cover"
+                                    unoptimized
+                                  />
+                                </div>
+                                <span className="font-mono text-sm font-semibold">{material.sku + '-' + variant}</span>
+                                <span className="ml-4 text-xs text-muted-foreground">Variante del ítem principal</span>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </>
                     );
                   })
                 )}
@@ -1721,6 +1769,7 @@ export function InventoryControlCenter() {
         </TabsContent>
 
         <TabsContent value="compras" className="mt-6 space-y-4">
+          {/* Buscadores para ambas secciones */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Card>
               <CardHeader>
@@ -1730,19 +1779,33 @@ export function InventoryControlCenter() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {globalOrderSuggestions.length > 0 ? (
-                  globalOrderSuggestions.map((item) => {
-                    const material = materials.find((entry) => entry.id === item.materialId);
-                    if (!material) return null;
-                    return (
-                      <div key={`${item.supplierId}-${item.materialId}`} className="rounded-lg border p-3">
-                        <p className="font-medium">{material.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Proveedor sugerido: {getSupplierName(item.supplierId)} | Cantidad consolidada: {item.quantity}
-                        </p>
-                      </div>
-                    );
-                  })
+                <Input
+                  placeholder="Buscar ítem..."
+                  className="mb-3 max-w-xs"
+                  value={globalOrderSearch || ''}
+                  onChange={e => setGlobalOrderSearch(e.target.value)}
+                />
+                {globalOrderSuggestions.filter(item => {
+                  const material = materials.find((entry) => entry.id === item.materialId);
+                  return !globalOrderSearch || (material?.name?.toLowerCase().includes(globalOrderSearch.toLowerCase()) || material?.sku?.toLowerCase().includes(globalOrderSearch.toLowerCase()));
+                }).length > 0 ? (
+                  <ul className="space-y-2">
+                    {globalOrderSuggestions.filter(item => {
+                      const material = materials.find((entry) => entry.id === item.materialId);
+                      return !globalOrderSearch || (material?.name?.toLowerCase().includes(globalOrderSearch.toLowerCase()) || material?.sku?.toLowerCase().includes(globalOrderSearch.toLowerCase()));
+                    }).map((item) => {
+                      const material = materials.find((entry) => entry.id === item.materialId);
+                      if (!material) return null;
+                      return (
+                        <li key={`${item.supplierId}-${item.materialId}`} className="rounded-lg border p-3">
+                          <p className="font-medium">{material.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            Proveedor sugerido: {getSupplierName(item.supplierId)} | Cantidad consolidada: {item.quantity}
+                          </p>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 ) : (
                   <p className="text-sm text-muted-foreground">No hay solicitudes aprobadas para consolidar.</p>
                 )}
@@ -1761,20 +1824,34 @@ export function InventoryControlCenter() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {stockAlerts.length > 0 ? (
-                  stockAlerts.map((alert) => {
-                    const material = materials.find((entry) => entry.id === alert.materialId);
-                    if (!material) return null;
-                    return (
-                      <div key={alert.materialId} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                        <p className="font-medium">{material.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Disponible: {getAvailableStock(material)} | Minimo: {material.minStock}
-                        </p>
-                        <p className="text-sm">Sugerido comprar: {alert.suggestedQty} {material.unit}</p>
-                      </div>
-                    );
-                  })
+                <Input
+                  placeholder="Buscar ítem..."
+                  className="mb-3 max-w-xs"
+                  value={stockOrderSearch || ''}
+                  onChange={e => setStockOrderSearch(e.target.value)}
+                />
+                {stockAlerts.filter(alert => {
+                  const material = materials.find((entry) => entry.id === alert.materialId);
+                  return !stockOrderSearch || (material?.name?.toLowerCase().includes(stockOrderSearch.toLowerCase()) || material?.sku?.toLowerCase().includes(stockOrderSearch.toLowerCase()));
+                }).length > 0 ? (
+                  <ul className="space-y-2">
+                    {stockAlerts.filter(alert => {
+                      const material = materials.find((entry) => entry.id === alert.materialId);
+                      return !stockOrderSearch || (material?.name?.toLowerCase().includes(stockOrderSearch.toLowerCase()) || material?.sku?.toLowerCase().includes(stockOrderSearch.toLowerCase()));
+                    }).map((alert) => {
+                      const material = materials.find((entry) => entry.id === alert.materialId);
+                      if (!material) return null;
+                      return (
+                        <li key={alert.materialId} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                          <p className="font-medium">{material.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            Disponible: {getAvailableStock(material)} | Minimo: {material.minStock}
+                          </p>
+                          <p className="text-sm">Sugerido comprar: {alert.suggestedQty} {material.unit}</p>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 ) : (
                   <p className="text-sm text-muted-foreground">No hay materiales debajo del stock minimo.</p>
                 )}
@@ -1784,6 +1861,9 @@ export function InventoryControlCenter() {
               </CardContent>
             </Card>
           </div>
+        // Estados para los buscadores de órdenes de compra
+        const [globalOrderSearch, setGlobalOrderSearch] = useState('');
+        const [stockOrderSearch, setStockOrderSearch] = useState('');
         </TabsContent>
 
         <TabsContent value="defectos" className="mt-6 space-y-4">

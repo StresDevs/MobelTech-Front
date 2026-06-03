@@ -1,10 +1,10 @@
-'use client';
+ 'use client';
 
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { MEASUREMENTS, CLIENTS } from '@/lib/mock-data';
-import { Measurement } from '@/lib/types';
+import { useLocalData } from '@/lib/contexts/LocalDataContext';
+import { Measurement, Client } from '@/lib/types';
 import {
   ChevronLeft,
   ChevronRight,
@@ -87,10 +87,12 @@ export function MeasurementCalendar() {
     year: 'numeric',
   });
 
+  const { measurements, clients, addClient, addMeasurement } = useLocalData();
+
   /* group measurements by day number */
   const measurementsByDay = useMemo(() => {
     const map: Record<number, Measurement[]> = {};
-    MEASUREMENTS.forEach((m) => {
+    measurements.forEach((m) => {
       if (
         m.date.getFullYear() === currentDate.getFullYear() &&
         m.date.getMonth() === currentDate.getMonth()
@@ -101,7 +103,7 @@ export function MeasurementCalendar() {
       }
     });
     return map;
-  }, [currentDate]);
+  }, [currentDate, measurements]);
 
   const getSlots = (day: number) => {
     const ms = measurementsByDay[day] || [];
@@ -125,22 +127,46 @@ export function MeasurementCalendar() {
   const closeNewMeasurement = () => setNewMeasurementSlot(null);
 
   const handleSelectExistingClient = (clientId: string) => {
-    const c = CLIENTS.find((cl) => cl.id === clientId);
+    const c = clients.find((cl) => cl.id === clientId);
     if (!c) return;
     setFormData((prev) => ({ ...prev, clientId: c.id, name: c.name, phone: c.phone, address: c.address, email: c.email }));
   };
 
   const handleSubmitMeasurement = () => {
-    if (!formData.name.trim() || !formData.phone.trim() || !formData.address.trim()) return;
-    console.log('Medición agendada:', { day: newMeasurementSlot?.day, slotIndex: newMeasurementSlot?.slotIndex, ...formData });
+    if (!formData.name.trim() || !formData.phone.trim() || !formData.address.trim() || !newMeasurementSlot) return;
+    // ensure client exists (create if needed)
+    let clientId = formData.clientId;
+    if (!clientId) {
+      const created = addClient({ name: formData.name.trim(), phone: formData.phone.trim(), address: formData.address.trim(), email: formData.email.trim() });
+      clientId = created.id;
+    }
+
+    const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), newMeasurementSlot.day);
+    const [hh, mm] = formData.time.split(':').map((s) => parseInt(s, 10));
+    if (!Number.isNaN(hh)) date.setHours(hh, Number.isNaN(mm) ? 0 : mm, 0, 0);
+
+    const measurement: Omit<Measurement, 'id'> = {
+      clientId: clientId,
+      date,
+      time: formData.time,
+      address: formData.address,
+      phone: formData.phone,
+      referenceNotes: formData.notes,
+      furnitureItems: formData.furnitureItems.split(',').map((s) => s.trim()).filter(Boolean),
+      quotationDeliveryDate: undefined,
+      prequotationLink: '/prequotations',
+      status: 'scheduled',
+    } as any;
+
+    addMeasurement(measurement);
     closeNewMeasurement();
   };
 
-  const filteredClients = CLIENTS.filter(
+  const filteredClients = clients.filter(
     (c) => c.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) || c.phone.includes(clientSearchQuery),
   );
 
-  const detailClient = clientDetailId ? CLIENTS.find((c) => c.id === clientDetailId) : null;
+  const detailClient = clientDetailId ? clients.find((c) => c.id === clientDetailId) : null;
 
   /* ────────────────── RENDER ────────────────── */
   return (
@@ -212,14 +238,15 @@ export function MeasurementCalendar() {
                   </div>
 
                   {/* slots */}
-                  {slots.map((m, idx) => (
-                    <DesktopSlot
-                      key={idx}
-                      measurement={m}
-                      onClickAvailable={() => openNewMeasurement(day, idx)}
-                      onClickClient={(id) => setClientDetailId(id)}
-                    />
-                  ))}
+                          {slots.map((m, idx) => (
+                            <DesktopSlot
+                              key={idx}
+                              measurement={m}
+                              onClickAvailable={() => openNewMeasurement(day, idx)}
+                              onClickClient={(id) => setClientDetailId(id)}
+                              clients={clients}
+                            />
+                          ))}
                 </div>
               </Card>
             );
@@ -254,6 +281,7 @@ export function MeasurementCalendar() {
                     measurement={m}
                     onClickAvailable={() => openNewMeasurement(day, idx)}
                     onClickClient={(id) => setClientDetailId(id)}
+                    clients={clients}
                   />
                 ))}
               </div>
@@ -276,7 +304,7 @@ export function MeasurementCalendar() {
             </DialogTitle>
           </DialogHeader>
 
-          <Tabs defaultValue={formData.clientId ? 'details' : 'existing'} className="w-full">
+          <Tabs defaultValue={formData.clientId ? 'existing' : 'new'} className="w-full">
             <div className="px-6">
               <TabsList className="grid w-full grid-cols-2 h-9">
                 <TabsTrigger value="existing" className="text-xs">
@@ -424,10 +452,12 @@ function DesktopSlot({
   measurement,
   onClickAvailable,
   onClickClient,
+  clients,
 }: {
   measurement: Measurement | null;
   onClickAvailable: () => void;
   onClickClient: (id: string) => void;
+  clients: Client[];
 }) {
   if (!measurement) {
     return (
@@ -445,7 +475,7 @@ function DesktopSlot({
     );
   }
 
-  const client = CLIENTS.find((c) => c.id === measurement.clientId);
+  const client = clients.find((c) => c.id === measurement.clientId);
   const clientName = client?.name ?? 'Cliente';
   const shortName = clientName.length > 14 ? clientName.slice(0, 13) + '…' : clientName;
 
@@ -478,11 +508,13 @@ function MobileSlot({
   measurement,
   onClickAvailable,
   onClickClient,
+  clients,
 }: {
   slotIndex: number;
   measurement: Measurement | null;
   onClickAvailable: () => void;
   onClickClient: (id: string) => void;
+  clients: Client[];
 }) {
   if (!measurement) {
     return (
@@ -494,7 +526,7 @@ function MobileSlot({
     );
   }
 
-  const client = CLIENTS.find((c) => c.id === measurement.clientId);
+  const client = clients.find((c) => c.id === measurement.clientId);
 
   return (
     <div className="px-4 py-2.5 flex items-center gap-3" style={{ backgroundColor: 'rgba(234,182,118,0.08)' }}>

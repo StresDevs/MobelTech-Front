@@ -1,26 +1,27 @@
-'use client';
+ 'use client';
 
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { MEASUREMENTS, CLIENTS } from '@/lib/mock-data';
 import { Download, Eye, Clock, CheckCircle } from 'lucide-react';
 import { useMemo } from 'react';
+import { useLocalData } from '@/lib/contexts/LocalDataContext';
 
 export function PrequotationList() {
+  const { measurements, clients } = useLocalData();
   const prequotations = useMemo(() => {
-    return MEASUREMENTS.map((measurement) => {
-      const client = CLIENTS.find(c => c.id === measurement.clientId);
+    return measurements.map((measurement) => {
+      const client = clients.find((c) => c.id === measurement.clientId);
       return {
         ...measurement,
         clientName: client?.name || 'Desconocido',
-        status: measurement.quotationDeliveryDate && 
-                new Date(measurement.quotationDeliveryDate) > new Date()
-                ? 'pending'
-                : 'completed',
+        status:
+          measurement.quotationDeliveryDate && new Date(measurement.quotationDeliveryDate) > new Date()
+            ? 'pending'
+            : 'completed',
       };
     });
-  }, []);
+  }, [measurements, clients]);
 
   const getStatusBadge = (status: string) => {
     if (status === 'pending') {

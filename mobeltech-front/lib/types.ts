@@ -98,6 +98,7 @@ export interface Contractor {
   name: string;
   phone: string;
   email: string;
+  userId?: string;
   status: 'active' | 'inactive';
   specialization: string;
   advances: {
@@ -187,6 +188,15 @@ export interface Invoice {
   issueDate: Date;
   dueDate?: Date;
   number: string;
+}
+
+export interface Notification {
+  id: string;
+  recipientId: string; // user id (contractor)
+  message: string;
+  createdAt: Date;
+  read?: boolean;
+  relatedJobId?: string;
 }
 
 export interface DashboardKPI {
@@ -406,4 +416,6 @@ export interface Prequotation {
   updatedAt: Date;
   notes?: string;
   convertedToQuotationId?: string;
+  billingRequested?: boolean;
+  totalAmount?: number; // monto total en bolivianos
 }

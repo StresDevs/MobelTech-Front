@@ -2,8 +2,9 @@
 
 import React, { useEffect, useState } from 'react'
 import Image from 'next/image'
+import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
-import { DEMO_USER } from '@/lib/mock-data'
+import { DEMO_USER, MOCK_CREDENTIALS } from '@/lib/mock-data'
 import { AuthProvider } from '@/lib/contexts/AuthContext'
 import type { User } from '@/lib/types'
 
@@ -15,6 +16,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { resolvedTheme } = useTheme()
+  const router = useRouter()
 
   useEffect(() => {
     try {
@@ -33,13 +35,23 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
     // Simulated delay for UX
     await new Promise((r) => setTimeout(r, 600))
+    const found = MOCK_CREDENTIALS.find(
+      (c) => c.email.toLowerCase() === email.trim().toLowerCase() && c.password === password,
+    )
 
-    if (email.trim().toLowerCase() === DEMO_USER.email.toLowerCase()) {
-      const u: User = { ...DEMO_USER }
+    if (found) {
+      const u: User = { ...found.user }
       localStorage.setItem('mobeltech_user', JSON.stringify(u))
+      // Notify other contexts (RoleContext) about auth change in this window
+      try { window.dispatchEvent(new Event('mobeltech_auth_change')); } catch {}
       setUser(u)
+      // Redirect contractors to their assigned jobs; others to dashboard
+      try {
+        if (u.role === 'operator') router.replace('/assigned-jobs')
+        else router.replace('/dashboard')
+      } catch {}
     } else {
-      setError('Credenciales incorrectas. Verifica tu email.')
+      setError('Credenciales incorrectas. Verifica correo y contraseña.')
     }
     setIsSubmitting(false)
   }
@@ -53,12 +65,18 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   function handleLogout() {
     localStorage.removeItem('mobeltech_user')
+    try { window.dispatchEvent(new Event('mobeltech_auth_change')); } catch {}
     setUser(null)
   }
 
   function handleLoginDirect(u: User) {
     localStorage.setItem('mobeltech_user', JSON.stringify(u))
+    try { window.dispatchEvent(new Event('mobeltech_auth_change')); } catch {}
     setUser(u)
+    try {
+      if (u.role === 'operator') router.replace('/assigned-jobs')
+      else router.replace('/dashboard')
+    } catch {}
   }
 
   if (user) {
@@ -299,8 +317,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           {/* Hint */}
           <div className="mt-6 p-3 rounded-lg border border-border bg-muted/50">
             <p className="text-xs text-muted-foreground text-center">
-              <span className="font-medium" style={{ color: '#eab676' }}>Demo:</span>{' '}
-              usa <span className="font-mono text-foreground">{DEMO_USER.email}</span> con cualquier contraseña
+              <span className="font-medium" style={{ color: '#eab676' }}>Demo Admin:</span>{' '}
+              usa <span className="font-mono text-foreground">{DEMO_USER.email}</span> / <span className="font-mono">demo</span>
+            </p>
+            <p className="text-xs text-muted-foreground text-center mt-2">
+              <span className="font-medium" style={{ color: '#eab676' }}>Demo Contratista:</span>{' '}
+              usa <span className="font-mono text-foreground">contratista@mobeltech.com</span> / <span className="font-mono">contratista123</span>
             </p>
           </div>
 

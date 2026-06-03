@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { Prequotation, PrequotationVersion, PrequotationLog } from '@/lib/types';
-import { CLIENTS } from '@/lib/mock-data';
+import { useLocalData } from '@/lib/contexts/LocalDataContext';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,6 +26,9 @@ export function NewPrequotationDialog({ onClose, onCreate }: Props) {
   const [notes, setNotes] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { clients } = useLocalData();
+  const [billingRequested, setBillingRequested] = useState(false);
+  const [totalAmount, setTotalAmount] = useState<string>('0');
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     setFile(e.target.files?.[0] ?? null);
@@ -83,13 +86,15 @@ export function NewPrequotationDialog({ onClose, onCreate }: Props) {
       createdAt: new Date(),
       updatedAt: new Date(),
       notes: notes.trim() || undefined,
+      billingRequested: billingRequested || undefined,
+      totalAmount: Number(parseFloat(totalAmount) || 0),
     };
 
     onCreate(newPreq);
   }
 
-  const isValid = title.trim() && clientId && file;
-  const selectedClient = CLIENTS.find((c) => c.id === clientId);
+  const isValid = Boolean(title.trim() && clientId && file && !Number.isNaN(Number(parseFloat(totalAmount))));
+  const selectedClient = clients.find((c) => c.id === clientId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -128,7 +133,7 @@ export function NewPrequotationDialog({ onClose, onCreate }: Props) {
               className="w-full h-10 rounded-md border border-input bg-background px-3 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-ring appearance-none"
             >
               <option value="">Seleccionar cliente…</option>
-              {CLIENTS.map((c) => (
+              {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
@@ -196,6 +201,33 @@ export function NewPrequotationDialog({ onClose, onCreate }: Props) {
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
             className="resize-none text-sm"
+          />
+        </div>
+
+        {/* Billing request */}
+        <div className="flex items-center gap-3">
+          <input
+            id="billingRequested"
+            type="checkbox"
+            checked={billingRequested}
+            onChange={(e) => setBillingRequested(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <label htmlFor="billingRequested" className="text-sm">
+            Cliente solicita factura / facturación
+          </label>
+        </div>
+
+        {/* Total amount */}
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">Monto total (Bs) <span className="text-red-500">*</span></label>
+          <Input
+            placeholder="0.00"
+            value={totalAmount}
+            onChange={(e) => setTotalAmount(e.target.value)}
+            type="number"
+            min={0}
+            step="0.01"
           />
         </div>
 

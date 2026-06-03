@@ -1,14 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import {
-  QUOTATIONS,
-  CLIENTS,
-  CONTRACTORS,
-  PRODUCTION_ORDERS,
-  PROJECTS,
-  PREQUOTATIONS,
-} from '@/lib/mock-data';
+import { useMemo, useState, useEffect } from 'react';
+import { useLocalData } from '@/lib/contexts/LocalDataContext';
+import { PROJECTS } from '@/lib/mock-data';
 import { Quotation } from '@/lib/types';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -94,21 +88,14 @@ function getInitials(name: string) {
     .slice(0, 2);
 }
 
-function getContractorsByQuotationId(quotationId: string) {
-  const ids = new Set(
-    PRODUCTION_ORDERS.filter((po) => po.quotationId === quotationId)
-      .map((po) => po.assignedContractorId)
-      .filter(Boolean) as string[],
-  );
-  return CONTRACTORS.filter((c) => ids.has(c.id));
-}
-
-function getPrequotationByQuotationId(quotationId: string) {
-  return PREQUOTATIONS.find((p) => p.convertedToQuotationId === quotationId);
+function getPrequotationByQuotationId(quotationId: string, list: any[]) {
+  return list.find((p) => p.convertedToQuotationId === quotationId);
 }
 
 export function QuotationsModule() {
-  const [data, setData] = useState<Quotation[]>(QUOTATIONS);
+  const { quotations, clients, prequotations, updateQuotation, productionOrders, contractors } = useLocalData();
+  const [data, setData] = useState<Quotation[]>(quotations);
+  useEffect(() => setData(quotations), [quotations]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<QuotationStatus | 'all'>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
@@ -118,14 +105,18 @@ export function QuotationsModule() {
 
   const enriched = useMemo(() => {
     return data.map((q) => {
-      const client = CLIENTS.find((c) => c.id === q.clientId);
+      const client = clients.find((c) => c.id === q.clientId);
       const project = PROJECTS.find((p) => p.id === q.projectId);
-      const contractors = getContractorsByQuotationId(q.id);
-      const prequotation = getPrequotationByQuotationId(q.id);
+      // find contractors assigned to production orders for this quotation
+      const assignedIds = productionOrders.filter((po) => po.quotationId === q.id).map((po) => po.assignedContractorId).filter(Boolean) as string[];
+      const contractorsForQ = assignedIds
+        .map((id) => contractors.find((c) => c.id === id) || contractors.find((c) => c.userId === id))
+        .filter(Boolean) as typeof contractors;
+      const prequotation = getPrequotationByQuotationId(q.id, prequotations);
       const itemsText = q.items.map((i) => i.description).join(' ');
-      return { q, client, project, contractors, prequotation, itemsText };
+      return { q, client, project, contractors: contractorsForQ, prequotation, itemsText };
     });
-  }, [data]);
+  }, [data, clients, prequotations]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -189,15 +180,19 @@ export function QuotationsModule() {
   }
 
   function updateStatus(id: string, newStatus: QuotationStatus) {
+    updateQuotation(id, { status: newStatus });
     setData((prev) => prev.map((q) => (q.id === id ? { ...q, status: newStatus } : q)));
     if (selected?.id === id) setSelected({ ...selected, status: newStatus });
   }
 
   if (selected) {
-    const client = CLIENTS.find((c) => c.id === selected.clientId);
+    const client = clients.find((c) => c.id === selected.clientId);
     const project = PROJECTS.find((p) => p.id === selected.projectId);
-    const contractors = getContractorsByQuotationId(selected.id);
-    const prequotation = getPrequotationByQuotationId(selected.id);
+    const assignedIds = productionOrders.filter((po) => po.quotationId === selected.id).map((po) => po.assignedContractorId).filter(Boolean) as string[];
+    const contractors = assignedIds
+      .map((id) => contractors.find((c) => c.id === id) || contractors.find((c) => c.userId === id))
+      .filter(Boolean) as any[];
+    const prequotation = getPrequotationByQuotationId(selected.id, prequotations);
     return (
       <div className="p-6">
         <QuotationDetail

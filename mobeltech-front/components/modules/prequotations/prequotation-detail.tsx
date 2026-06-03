@@ -23,6 +23,7 @@ import {
   Eye,
   RotateCcw,
 } from 'lucide-react';
+import { useLocalData } from '@/lib/contexts/LocalDataContext';
 
 const STATUS_CONFIG: Record<
   PrequotationStatus,
@@ -117,6 +118,11 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
 
   const cfg = STATUS_CONFIG[p.status];
   const transitions = STATUS_TRANSITIONS[p.status];
+  const { addQuotation, addProductionOrder, addNotification, contractors, updatePrequotation } = useLocalData();
+
+  const [selectedContractorId, setSelectedContractorId] = useState<string | undefined>(undefined);
+  const defaultEst = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14);
+  const [estimatedDelivery, setEstimatedDelivery] = useState<string>(defaultEst.toISOString().slice(0, 10));
 
   function applyUpdate(updated: Prequotation) {
     setP(updated);
@@ -190,21 +196,91 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
   }
 
   function convertToQuotation() {
+    // noop - kept for compatibility; use handleConvertAndAssign from modal
+  }
+
+  function handleConvertAndAssign() {
+    if (!selectedContractorId) return;
     const quotationId = `quot-${Date.now()}`;
+
+    const qItem = {
+      id: `qitem-${Date.now()}`,
+      description: p.title,
+      quantity: 1,
+      unitPrice: 0,
+      dimensions: '',
+    };
+
+    const quotation = {
+      id: quotationId,
+      clientId: p.clientId,
+      items: [qItem],
+      status: 'draft',
+      createdDate: new Date(),
+      totalAmount: p.totalAmount ?? 0,
+    } as any;
+
+    addQuotation(quotation);
+
+    const poId = `po-${Date.now()}`;
+    const poItem = {
+      id: `pitem-${Date.now()}`,
+      description: qItem.description,
+      quantity: qItem.quantity,
+      phases: [
+        { name: 'cortado', completed: false },
+        { name: 'canteado', completed: false },
+        { name: 'ensamblado', completed: false },
+        { name: 'instalacion', completed: false },
+        { name: 'entregado', completed: false },
+      ],
+      progress: 0,
+    } as any;
+
+    const contractorObj = contractors.find((c) => c.id === selectedContractorId);
+    const recipientId = contractorObj?.userId ?? selectedContractorId;
+
+    const po = {
+      id: poId,
+      projectId: undefined,
+      quotationId: quotationId,
+      items: [poItem],
+      startDate: new Date(),
+      estimatedDeliveryDate: estimatedDelivery ? new Date(estimatedDelivery) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
+      status: 'pending',
+      assignedContractorId: recipientId,
+    } as any;
+
+    addProductionOrder(po);
+
+    const noti = {
+      id: `noti-${Date.now()}`,
+      recipientId: recipientId,
+      message: `Tienes una orden de trabajo asignada: ${po.id} (cotización ${quotationId})`,
+      createdAt: new Date(),
+      read: false,
+      relatedJobId: po.id,
+    };
+    addNotification(noti);
+
     const log: PrequotationLog = {
       id: `log-${Date.now()}`,
       action: 'converted_to_quotation',
       performedBy: 'Juan Pérez',
       performedAt: new Date(),
-      description: `Precotización convertida a Cotización #${quotationId}.`,
+      description: `Precotización convertida a Cotización #${quotationId} y asignada a contratista ${contractorObj?.name ?? selectedContractorId}.`,
     };
-    applyUpdate({
+
+    const updated: Prequotation = {
       ...p,
       status: 'confirmed',
       convertedToQuotationId: quotationId,
       updatedAt: new Date(),
       logs: [...p.logs, log],
-    });
+    };
+
+    updatePrequotation(p.id, updated);
+    applyUpdate(updated);
     setShowConvertConfirm(false);
   }
 
@@ -237,6 +313,9 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
           <p className="text-sm text-muted-foreground mt-0.5">
             {clientName} · Creado por {p.createdBy} el {formatDate(p.createdAt)} · v{p.currentVersion} activa
           </p>
+          {typeof p.totalAmount === 'number' && (
+            <p className="text-sm font-medium mt-1">Monto total: Bs {p.totalAmount.toLocaleString('es-BO', { minimumFractionDigits: 2 })}</p>
+          )}
         </div>
       </div>
 
@@ -520,6 +599,20 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
                   <p className="text-sm text-muted-foreground mt-0.5 italic">{p.notes}</p>
                 </div>
               )}
+              <div>
+                <p className="text-xs text-muted-foreground">Facturación</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <p className="text-sm font-medium">{p.billingRequested ? 'Solicita factura' : 'No solicita factura'}</p>
+                  <Button
+                    size="sm"
+                    variant={p.billingRequested ? 'default' : 'outline'}
+                    onClick={() => applyUpdate({ ...p, billingRequested: !p.billingRequested, updatedAt: new Date() })}
+                    className="ml-2"
+                  >
+                    {p.billingRequested ? 'Quitar' : 'Marcar'}
+                  </Button>
+                </div>
+              </div>
             </div>
           </Card>
 
@@ -553,22 +646,45 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
               </div>
               <div>
                 <p className="font-semibold">Convertir a Cotización</p>
-                <p className="text-sm text-muted-foreground">Esta acción es irreversible.</p>
+                <p className="text-sm text-muted-foreground">Al convertir, podrás asignar un contratista y generar la orden de trabajo.</p>
               </div>
             </div>
-            <p className="text-sm text-muted-foreground">
-              La precotización <strong>{p.title}</strong> se marcará como <strong>Confirmada</strong> y se generará una cotización formal. ¿Deseas continuar?
-            </p>
+
+            <p className="text-sm text-muted-foreground">La precotización <strong>{p.title}</strong> se marcará como <strong>Confirmada</strong> y se generará una cotización formal.</p>
+
+            <div className="space-y-3">
+              <label className="text-sm font-medium">Asignar contratista</label>
+              <select
+                value={selectedContractorId}
+                onChange={(e) => setSelectedContractorId(e.target.value)}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">Seleccionar contratista…</option>
+                {contractors.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name} — {c.specialization}</option>
+                ))}
+              </select>
+
+              <label className="text-sm font-medium">Fecha estimada de entrega</label>
+              <input
+                type="date"
+                value={estimatedDelivery}
+                onChange={(e) => setEstimatedDelivery(e.target.value)}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+              />
+            </div>
+
             <div className="flex gap-2 justify-end">
               <Button variant="outline" size="sm" onClick={() => setShowConvertConfirm(false)}>
                 Cancelar
               </Button>
               <Button
                 size="sm"
-                onClick={convertToQuotation}
+                onClick={handleConvertAndAssign}
+                disabled={!selectedContractorId}
                 style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
               >
-                Sí, convertir
+                Confirmar y asignar
               </Button>
             </div>
           </Card>

@@ -1,5 +1,8 @@
-'use client';
+ 'use client';
 
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useRole } from '@/hooks/use-role-context';
 import { AppLayout } from '@/components/layout/app-layout';
 import { KPICards } from '@/components/modules/dashboard/kpi-cards';
 import { RevenueChart } from '@/components/modules/dashboard/revenue-chart';
@@ -9,6 +12,14 @@ import { Button } from '@/components/ui/button';
 import { Download } from 'lucide-react';
 
 export default function DashboardPage() {
+  const { currentRole } = useRole();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (currentRole === 'operator') {
+      router.replace('/assigned-jobs');
+    }
+  }, [currentRole, router]);
   return (
     <AppLayout>
       <div className="p-6 space-y-6">

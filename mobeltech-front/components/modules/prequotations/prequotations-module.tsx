@@ -1,7 +1,7 @@
-'use client';
+ 'use client';
 
-import { useState } from 'react';
-import { PREQUOTATIONS, CLIENTS } from '@/lib/mock-data';
+import { useEffect, useState } from 'react';
+import { useLocalData } from '@/lib/contexts/LocalDataContext';
 import { Prequotation, PrequotationStatus } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -69,39 +69,45 @@ function getInitials(name: string) {
 }
 
 export function PrequotationsModule() {
-  const [data, setData] = useState<Prequotation[]>(PREQUOTATIONS);
+  const { prequotations, clients, quotations, addPrequotation, updatePrequotation } = useLocalData();
+  const [data, setData] = useState<Prequotation[]>(prequotations);
+
+  useEffect(() => setData(prequotations), [prequotations]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<PrequotationStatus | 'all'>('all');
+  const [showBillingOnly, setShowBillingOnly] = useState(false);
   const [selected, setSelected] = useState<Prequotation | null>(null);
   const [showNew, setShowNew] = useState(false);
 
   const filtered = data.filter((p) => {
-    const client = CLIENTS.find((c) => c.id === p.clientId);
+    const client = clients.find((c) => c.id === p.clientId);
     const matchSearch =
       p.title.toLowerCase().includes(search.toLowerCase()) ||
       (client?.name ?? '').toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === 'all' || p.status === statusFilter;
-    return matchSearch && matchStatus;
+    const matchBilling = !showBillingOnly || !!p.billingRequested;
+    return matchSearch && matchStatus && matchBilling;
   });
 
   const statusCounts = ALL_STATUSES.reduce<Record<string, number>>((acc, s) => {
     acc[s] = data.filter((p) => p.status === s).length;
     return acc;
   }, {});
+  const billingCount = data.filter((p) => !!p.billingRequested).length;
 
   function handleUpdate(updated: Prequotation) {
-    setData((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    updatePrequotation(updated.id, updated);
     setSelected(updated);
   }
 
   function handleCreate(p: Prequotation) {
-    setData((prev) => [p, ...prev]);
+    addPrequotation(p);
     setShowNew(false);
     setSelected(p);
   }
 
   if (selected) {
-    const client = CLIENTS.find((c) => c.id === selected.clientId);
+    const client = clients.find((c) => c.id === selected.clientId);
     return (
       <div className="p-6">
         <PrequotationDetail
@@ -124,18 +130,22 @@ export function PrequotationsModule() {
             Gestiona el ciclo de vida de cada precotización hasta convertirla en cotización.
           </p>
         </div>
-        <Button
-          onClick={() => setShowNew(true)}
-          className="gap-2 shrink-0"
-          style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
-        >
-          <Plus className="w-4 h-4" />
-          Nueva Precotización
-        </Button>
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Buscar por título o cliente…"
+            value={search}
+            onChange={(e) => setSearch((e.target as HTMLInputElement).value)}
+            className="max-w-xs"
+          />
+          <Button onClick={() => setShowNew(true)} className="flex items-center gap-2">
+            <Plus className="w-4 h-4" />
+            Nueva
+          </Button>
+        </div>
       </div>
 
-      {/* Summary pills */}
-      <div className="flex flex-wrap gap-2">
+      {/* Filters */}
+      <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={() => setStatusFilter('all')}
           className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
@@ -146,118 +156,132 @@ export function PrequotationsModule() {
         >
           Todos · {data.length}
         </button>
-        {ALL_STATUSES.map((s) => {
-          const cfg = STATUS_CONFIG[s];
+        <button
+          onClick={() => { setShowBillingOnly((s) => !s); setStatusFilter('all'); }}
+          className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+            showBillingOnly
+              ? 'border-foreground bg-foreground text-background'
+              : 'border-border text-muted-foreground hover:border-foreground/40'
+          }`}
+        >
+          Facturación · {billingCount}
+        </button>
+        {ALL_STATUSES.map((s) => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+              statusFilter === s
+                ? 'border-foreground bg-foreground text-background'
+                : 'border-border text-muted-foreground hover:border-foreground/40'
+            }`}
+          >
+            {s} · {statusCounts[s]}
+          </button>
+        ))}
+      </div>
+
+      {/* List */}
+      <div className="space-y-3">
+        {filtered.map((p) => {
+          const client = clients.find((c) => c.id === p.clientId);
+          const cfg = STATUS_CONFIG[p.status];
+          const latestVersion = p.versions[p.versions.length - 1];
           return (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                statusFilter === s
-                  ? 'border-foreground bg-foreground text-background'
-                  : 'border-border text-muted-foreground hover:border-foreground/40'
-              }`}
+            <Card
+              key={p.id}
+              onClick={() => setSelected(p)}
+              className="p-4 cursor-pointer hover:shadow-md transition-all hover:border-foreground/20 group"
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-              {cfg.label} · {statusCounts[s] ?? 0}
-            </button>
+              <div className="flex items-center gap-4">
+                {/* File icon */}
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-muted">
+                  {latestVersion?.fileType === 'excel' ? (
+                    <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                  ) : (
+                    <FileText className="w-5 h-5 text-red-500" />
+                  )}
+                </div>
+
+                {/* Main info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold truncate">{p.title}</p>
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${cfg.color}`}
+                    >
+                      {cfg.icon}
+                      {cfg.label}
+                    </span>
+                    {p.convertedToQuotationId && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Cotización generada
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 flex-wrap">
+                    <span className="text-xs text-muted-foreground">{client?.name ?? '—'}</span>
+                    <span className="text-xs text-muted-foreground/50">·</span>
+                    <span className="text-xs text-muted-foreground">v{p.currentVersion}</span>
+                    <span className="text-xs text-muted-foreground/50">·</span>
+                    <span className="text-xs text-muted-foreground">{formatDate(p.updatedAt)}</span>
+                    {latestVersion && (
+                      <>
+                        <span className="text-xs text-muted-foreground/50">·</span>
+                        <span className="text-xs text-muted-foreground truncate max-w-[180px]">
+                          {latestVersion.fileName}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Avatars (log participants) */}
+                <div className="hidden sm:flex items-center -space-x-2 shrink-0">
+                  {[...new Set(p.logs.map((l) => l.performedBy))].slice(0, 3).map((name) => (
+                    <div
+                      key={name}
+                      title={name}
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold border-2 border-background"
+                      style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
+                    >
+                      {getInitials(name)}
+                    </div>
+                  ))}
+                </div>
+
+                <ChevronRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-foreground transition-colors shrink-0" />
+              </div>
+            </Card>
           );
         })}
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          placeholder="Buscar por título o cliente…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-9"
-        />
-      </div>
-
-      {/* List */}
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-center">
-          <Filter className="w-10 h-10 text-muted-foreground/30 mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">Sin resultados</p>
-          <p className="text-xs text-muted-foreground/60 mt-1">Prueba con otro filtro o búsqueda</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filtered.map((p) => {
-            const client = CLIENTS.find((c) => c.id === p.clientId);
-            const cfg = STATUS_CONFIG[p.status];
-            const latestVersion = p.versions[p.versions.length - 1];
-            return (
-              <Card
-                key={p.id}
-                onClick={() => setSelected(p)}
-                className="p-4 cursor-pointer hover:shadow-md transition-all hover:border-foreground/20 group"
-              >
-                <div className="flex items-center gap-4">
-                  {/* File icon */}
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-muted">
-                    {latestVersion?.fileType === 'excel' ? (
-                      <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-                    ) : (
-                      <FileText className="w-5 h-5 text-red-500" />
-                    )}
+      {/* Billing-only compact list */}
+      {showBillingOnly && (
+        <div className="mt-4">
+          <h3 className="text-lg font-medium">Clientes que solicitaron factura</h3>
+          <div className="mt-2 grid grid-cols-1 gap-2">
+            {filtered.map((p) => {
+              const client = clients.find((c) => c.id === p.clientId)!;
+              const linkedQuotation = quotations.find((q) => q.id === p.convertedToQuotationId);
+              return (
+                <div key={p.id} className="p-3 border rounded-md flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-semibold">{client.name}</div>
+                    <div className="text-xs text-muted-foreground">{p.title} — {new Date(p.updatedAt).toLocaleDateString()}</div>
                   </div>
-
-                  {/* Main info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-semibold truncate">{p.title}</p>
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${cfg.color}`}
-                      >
-                        {cfg.icon}
-                        {cfg.label}
-                      </span>
-                      {p.convertedToQuotationId && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
-                          <CheckCircle2 className="w-3 h-3" />
-                          Cotización generada
-                        </span>
-                      )}
+                  <div className="text-right">
+                    <div className="text-sm font-medium">
+                      {linkedQuotation ? `$ ${linkedQuotation.totalAmount?.toFixed(2) ?? '0.00'}` : '$ —'}
                     </div>
-                    <div className="flex items-center gap-3 mt-1 flex-wrap">
-                      <span className="text-xs text-muted-foreground">{client?.name ?? '—'}</span>
-                      <span className="text-xs text-muted-foreground/50">·</span>
-                      <span className="text-xs text-muted-foreground">v{p.currentVersion}</span>
-                      <span className="text-xs text-muted-foreground/50">·</span>
-                      <span className="text-xs text-muted-foreground">{formatDate(p.updatedAt)}</span>
-                      {latestVersion && (
-                        <>
-                          <span className="text-xs text-muted-foreground/50">·</span>
-                          <span className="text-xs text-muted-foreground truncate max-w-[180px]">
-                            {latestVersion.fileName}
-                          </span>
-                        </>
-                      )}
-                    </div>
+                    <div className="text-xs text-muted-foreground">{(client as any).contact ?? ''}</div>
                   </div>
-
-                  {/* Avatars (log participants) */}
-                  <div className="hidden sm:flex items-center -space-x-2 shrink-0">
-                    {[...new Set(p.logs.map((l) => l.performedBy))].slice(0, 3).map((name) => (
-                      <div
-                        key={name}
-                        title={name}
-                        className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold border-2 border-background"
-                        style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
-                      >
-                        {getInitials(name)}
-                      </div>
-                    ))}
-                  </div>
-
-                  <ChevronRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-foreground transition-colors shrink-0" />
                 </div>
-              </Card>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
