@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,12 +11,65 @@ import { AlertCircle, Calendar, ClipboardList } from 'lucide-react';
 export default function AssignedJobs() {
   const { user } = useAuth();
   const [selected, setSelected] = useState<string | null>(null);
-  const { productionOrders, quotations, clients, notifications, updateNotification } = useLocalData();
+  const { productionOrders, quotations, clients, notifications, updateNotification, contractors } = useLocalData();
+
+  const myContractor = useMemo(() => {
+    if (!user) return null;
+    return contractors.find((c) => c.userId === user.id || c.id === user.id) ?? null;
+  }, [contractors, user]);
 
   const myJobs = useMemo(() => {
     if (!user) return [];
-    return productionOrders.filter((j) => j.assignedContractorId === user.id);
-  }, [productionOrders, user]);
+    return productionOrders.filter((j) => {
+      if (!j.assignedContractorId) return false;
+      // match by user id
+      if (j.assignedContractorId === user.id) return true;
+      // match by contractor record (either contractor.id or contractor.userId)
+      if (myContractor) {
+        if (j.assignedContractorId === myContractor.id) return true;
+        if (myContractor.userId && j.assignedContractorId === myContractor.userId) return true;
+      }
+      return false;
+    });
+  }, [productionOrders, user, myContractor]);
+
+  // If no real assigned jobs exist, create a lightweight mock list derived from quotations
+  const fallbackJobs = useMemo(() => {
+    if (!user) return [];
+    if (myJobs.length > 0) return [];
+    const source = quotations.filter((q) => q.status === 'approved' || q.status === 'draft' || q.status === 'adjustment');
+    return source.map((q, idx) => {
+      const items = q.items.map((it) => ({ id: `mock-${it.id}`, description: it.description, quantity: it.quantity, progress: Math.floor(Math.random() * 80) }));
+      return {
+        id: `mock-po-${q.id}`,
+        quotationId: q.id,
+        projectId: q.projectId,
+        startDate: new Date(),
+        estimatedDeliveryDate: new Date(Date.now() + (7 + idx) * 24 * 60 * 60 * 1000),
+        status: 'in-progress',
+        items,
+        assignedContractorId: user.id,
+      } as any;
+    });
+  }, [quotations, user, myJobs.length]);
+
+  const displayedJobs = myJobs.length > 0 ? myJobs : fallbackJobs;
+
+  useEffect(() => {
+    try {
+      console.debug('AssignedJobs debug', {
+        userId: user?.id ?? null,
+        userRole: user?.role ?? null,
+        contractorsCount: contractors?.length ?? 0,
+        productionOrdersCount: productionOrders?.length ?? 0,
+        myContractor: myContractor ?? null,
+        myJobsCount: myJobs.length,
+        assignedIdsSample: productionOrders?.slice(0, 10).map((p) => p.assignedContractorId),
+      });
+    } catch (e) {
+      // ignore
+    }
+  }, [user, contractors, productionOrders, myContractor, myJobs]);
 
   const myNotifications = useMemo(() => {
     if (!user) return [];
@@ -42,7 +95,7 @@ export default function AssignedJobs() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold">Trabajos asignados</h2>
-        <div className="text-sm text-muted-foreground">Total: <span className="font-medium">{myJobs.length}</span></div>
+        <div className="text-sm text-muted-foreground">Total: <span className="font-medium">{displayedJobs.length}</span></div>
       </div>
 
       {myNotifications.length > 0 && (
@@ -67,7 +120,7 @@ export default function AssignedJobs() {
 
       {/* Mobile list */}
       <div className="space-y-3 lg:hidden">
-        {myJobs.map((job) => {
+        {displayedJobs.map((job) => {
           const quotation = quotations.find((q) => q.id === job.quotationId);
           const client = clients.find((c) => c.id === quotation?.clientId);
           const delayed = job.estimatedDeliveryDate && new Date() > job.estimatedDeliveryDate && job.status !== 'completed';
@@ -148,7 +201,7 @@ export default function AssignedJobs() {
             </tr>
           </thead>
           <tbody>
-            {myJobs.map((job) => {
+            {displayedJobs.map((job) => {
               const quotation = quotations.find((q) => q.id === job.quotationId);
               const client = clients.find((c) => c.id === quotation?.clientId);
               const delayed = job.estimatedDeliveryDate && new Date() > job.estimatedDeliveryDate && job.status !== 'completed';
@@ -186,12 +239,12 @@ export default function AssignedJobs() {
       </div>
 
       {/* Selected details (desktop) */}
-      {selected && (
+            {selected && (
         <Card className="p-4">
           <h3 className="font-semibold">Detalles - {selected}</h3>
           <div className="mt-3 text-sm">
               {(() => {
-              const job = myJobs.find((j) => j.id === selected);
+              const job = displayedJobs.find((j) => j.id === selected);
               if (!job) return <p>Trabajo no encontrado.</p>;
               const quotation = quotations.find((q) => q.id === job.quotationId);
               const client = clients.find((c) => c.id === quotation?.clientId);

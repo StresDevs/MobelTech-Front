@@ -15,10 +15,12 @@ import {
 import { ROLE_PERMISSIONS } from '@/lib/constants';
 import { useEffect, useState } from 'react';
 import { useTheme } from 'next-themes';
+import { useLocalData } from '@/lib/contexts/LocalDataContext';
 
 export function AppHeader() {
   const { currentRole, userName } = useRole();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
+  const { notifications, updateNotification } = useLocalData();
   const { toggleMobileOpen } = useSidebar();
   const [showNotifications, setShowNotifications] = useState(false);
   const { theme, setTheme } = useTheme();
@@ -83,35 +85,50 @@ export function AppHeader() {
             aria-label="Notificaciones"
           >
             <Bell className="h-[1.15rem] w-[1.15rem]" />
-            <span
-              className="absolute top-1 right-1 h-4 w-4 rounded-full text-[10px] font-bold flex items-center justify-center"
-              style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
-            >
-              3
-            </span>
+            {(() => {
+              const my = user ? notifications.filter((n) => n.recipientId === user.id) : [];
+              const unread = my.filter((n) => !n.read).length;
+              if (unread <= 0) return null;
+              return (
+                <span
+                  className="absolute top-1 right-1 h-4 min-w-[1rem] px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
+                  style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
+                >
+                  {unread}
+                </span>
+              );
+            })()}
           </Button>
-
           {showNotifications && (
             <div className="absolute right-0 mt-2 w-[min(90vw,20rem)] bg-background border border-border rounded-lg shadow-lg z-50">
               <div className="p-4 border-b border-border">
                 <h3 className="font-semibold">Notificaciones</h3>
               </div>
               <div className="max-h-80 overflow-y-auto divide-y divide-border">
-                <div className="px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors">
-                  <p className="text-sm font-medium">Nueva solicitud de material</p>
-                  <p className="text-xs text-muted-foreground">Carlos Mamani solicitó materiales</p>
-                  <p className="text-xs text-muted-foreground/60 mt-1">Hace 2 horas</p>
-                </div>
-                <div className="px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors">
-                  <p className="text-sm font-medium">Orden de producción completada</p>
-                  <p className="text-xs text-muted-foreground">Proyecto García - Mueblería</p>
-                  <p className="text-xs text-muted-foreground/60 mt-1">Hace 4 horas</p>
-                </div>
-                <div className="px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors">
-                  <p className="text-sm font-medium">Medición agendada</p>
-                  <p className="text-xs text-muted-foreground">Empresa García - Mañana 09:00</p>
-                  <p className="text-xs text-muted-foreground/60 mt-1">Hace 6 horas</p>
-                </div>
+                {(() => {
+                  const my = user ? notifications.filter((n) => n.recipientId === user.id) : [];
+                  if (!my || my.length === 0) {
+                    return (
+                      <div className="p-4 text-sm text-muted-foreground">No tienes notificaciones</div>
+                    );
+                  }
+                  return my
+                    .slice()
+                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                    .map((n) => (
+                      <div
+                        key={n.id}
+                        className={`px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors ${!n.read ? 'bg-muted/10' : ''}`}
+                        onClick={() => {
+                          try { updateNotification(n.id, { read: true }); } catch {}
+                        }}
+                      >
+                        <p className={`text-sm ${!n.read ? 'font-medium' : 'font-normal'}`}>{n.message}</p>
+                        {n.relatedJobId && <p className="text-xs text-muted-foreground">Relacionado: {n.relatedJobId}</p>}
+                        <p className="text-xs text-muted-foreground/60 mt-1">{new Date(n.createdAt).toLocaleString('es-VE')}</p>
+                      </div>
+                    ));
+                })()}
               </div>
             </div>
           )}

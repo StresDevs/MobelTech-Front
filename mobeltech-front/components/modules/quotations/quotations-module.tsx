@@ -2,8 +2,10 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import { useLocalData } from '@/lib/contexts/LocalDataContext';
+import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRole } from '@/hooks/use-role-context';
 import { PROJECTS } from '@/lib/mock-data';
-import { Quotation } from '@/lib/types';
+import { Quotation, QuotationItem, QuotationAudit } from '@/lib/types';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -72,6 +74,16 @@ function formatDate(d: Date) {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+  }).format(d);
+}
+
+function formatDateTime(d: Date) {
+  return new Intl.DateTimeFormat('es-BO', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(d);
 }
 
@@ -189,7 +201,7 @@ export function QuotationsModule() {
     const client = clients.find((c) => c.id === selected.clientId);
     const project = PROJECTS.find((p) => p.id === selected.projectId);
     const assignedIds = productionOrders.filter((po) => po.quotationId === selected.id).map((po) => po.assignedContractorId).filter(Boolean) as string[];
-    const contractors = assignedIds
+    const selectedContractors = assignedIds
       .map((id) => contractors.find((c) => c.id === id) || contractors.find((c) => c.userId === id))
       .filter(Boolean) as any[];
     const prequotation = getPrequotationByQuotationId(selected.id, prequotations);
@@ -199,7 +211,7 @@ export function QuotationsModule() {
           quotation={selected}
           clientName={client?.name}
           projectName={project?.name}
-          contractors={contractors}
+          contractors={selectedContractors}
           prequotationTitle={prequotation?.title}
           onBack={() => setSelected(null)}
           onChangeStatus={(s) => updateStatus(selected.id, s)}
@@ -493,8 +505,25 @@ function QuotationDetail({
   onBack,
   onChangeStatus,
 }: DetailProps) {
-  const cfg = STATUS_CONFIG[quotation.status];
-  const subtotal = quotation.items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+  const { quotations, updateQuotation } = useLocalData();
+  const { user } = useAuth();
+  const { currentRole } = useRole();
+
+  // Always use latest quotation from context so updates reflect immediately
+  const currentQuotation: Quotation = quotations.find((q) => q.id === quotation.id) ?? quotation;
+  const cfg = STATUS_CONFIG[currentQuotation.status];
+  const subtotal = currentQuotation.items.reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0);
+
+  const [editing, setEditing] = useState(false);
+  const [editableItems, setEditableItems] = useState<QuotationItem[]>(() =>
+    currentQuotation.items.map((it) => ({ ...it } as QuotationItem)),
+  );
+  const [editableTotal, setEditableTotal] = useState<number>(currentQuotation.totalAmount || subtotal);
+
+  useEffect(() => {
+    setEditableItems(currentQuotation.items.map((it: any) => ({ ...it })));
+    setEditableTotal(currentQuotation.totalAmount || subtotal);
+  }, [currentQuotation]);
 
   return (
     <div className="space-y-6">
@@ -534,7 +563,83 @@ function QuotationDetail({
           <Card className="overflow-hidden">
             <div className="px-5 py-4 border-b border-border flex items-center justify-between">
               <p className="text-sm font-semibold">Ítems cotizados</p>
-              <Badge variant="outline">{quotation.items.length}</Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">{currentQuotation.items.length}</Badge>
+                {currentRole === 'admin' && (
+                  <div className="inline-flex items-center gap-2">
+                    {!editing ? (
+                      <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                        Editar
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            // save
+                            const now = new Date();
+                            const actor = user?.name ?? 'Administrador';
+                            const logs: any[] = [];
+                            // compare items
+                            currentQuotation.items.forEach((prev: any) => {
+                              const next = editableItems.find((it: any) => it.id === prev.id);
+                              if (!next) return;
+                              if (prev.quantity !== next.quantity) {
+                                logs.push({
+                                  id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                                  field: `items.${prev.id}.quantity`,
+                                  previousValue: String(prev.quantity),
+                                  nextValue: String(next.quantity),
+                                  changedBy: actor,
+                                  changedAt: now,
+                                });
+                              }
+                              if (prev.unitPrice !== next.unitPrice) {
+                                logs.push({
+                                  id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                                  field: `items.${prev.id}.unitPrice`,
+                                  previousValue: String(prev.unitPrice),
+                                  nextValue: String(next.unitPrice),
+                                  changedBy: actor,
+                                  changedAt: now,
+                                });
+                              }
+                            });
+                            // total amount change
+                            if ((currentQuotation.totalAmount || 0) !== editableTotal) {
+                              logs.push({
+                                id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                                field: 'totalAmount',
+                                previousValue: String(currentQuotation.totalAmount || 0),
+                                nextValue: String(editableTotal),
+                                changedBy: actor,
+                                changedAt: now,
+                              });
+                            }
+
+                            // commit
+                            updateQuotation(currentQuotation.id, {
+                              items: editableItems,
+                              totalAmount: editableTotal,
+                              auditLogs: logs,
+                            } as any);
+                            setEditing(false);
+                          }}
+                        >
+                          Guardar cambios
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => {
+                          setEditableItems(currentQuotation.items.map((it: any) => ({ ...it })));
+                          setEditableTotal(currentQuotation.totalAmount || subtotal);
+                          setEditing(false);
+                        }}>
+                          Cancelar
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -558,15 +663,45 @@ function QuotationDetail({
                   </tr>
                 </thead>
                 <tbody>
-                  {quotation.items.map((it) => (
+                  {editableItems.map((it: QuotationItem) => (
                     <tr key={it.id} className="border-t border-border">
                       <td className="py-3 px-4 font-medium">{it.description}</td>
                       <td className="py-3 px-4 text-xs text-muted-foreground">
                         {it.dimensions ?? '—'}
                       </td>
-                      <td className="py-3 px-4 text-right font-mono">{it.quantity}</td>
                       <td className="py-3 px-4 text-right font-mono">
-                        {formatCurrency(it.unitPrice)}
+                        {editing ? (
+                          <Input
+                            type="number"
+                            min={1}
+                            value={String(it.quantity)}
+                            onChange={(e) =>
+                              setEditableItems((prev: QuotationItem[]) =>
+                                prev.map((p: QuotationItem) => (p.id === it.id ? { ...p, quantity: Number(e.target.value || 0) } : p)),
+                              )
+                            }
+                            className="w-20 text-right"
+                          />
+                        ) : (
+                          it.quantity
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono">
+                        {editing ? (
+                          <Input
+                            type="number"
+                            min={0}
+                            value={String(it.unitPrice)}
+                            onChange={(e) =>
+                              setEditableItems((prev: QuotationItem[]) =>
+                                prev.map((p: QuotationItem) => (p.id === it.id ? { ...p, unitPrice: Number(e.target.value || 0) } : p)),
+                              )
+                            }
+                            className="w-28 text-right"
+                          />
+                        ) : (
+                          formatCurrency(it.unitPrice)
+                        )}
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-semibold">
                         {formatCurrency(it.unitPrice * it.quantity)}
@@ -580,7 +715,7 @@ function QuotationDetail({
                       Total
                     </td>
                     <td className="py-3 px-4 text-right font-mono font-bold text-base">
-                      {formatCurrency(quotation.totalAmount || subtotal)}
+                      {formatCurrency(currentQuotation.totalAmount || editableTotal)}
                     </td>
                   </tr>
                 </tfoot>
@@ -639,12 +774,29 @@ function QuotationDetail({
                 label="Fecha"
                 value={formatDate(quotation.createdDate)}
               />
-              <SummaryRow
-                icon={<DollarSign className="w-3.5 h-3.5" />}
-                label="Total"
-                value={formatCurrency(quotation.totalAmount)}
-                mono
-              />
+              {currentRole === 'admin' && editing ? (
+                <div className="flex items-start gap-2.5">
+                  <span className="text-muted-foreground mt-0.5">
+                    <DollarSign className="w-3.5 h-3.5" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-muted-foreground">Total</p>
+                    <Input
+                      type="number"
+                      value={String(editableTotal)}
+                      onChange={(e) => setEditableTotal(Number(e.target.value || 0))}
+                      className="text-sm font-medium mt-0.5 w-full"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <SummaryRow
+                  icon={<DollarSign className="w-3.5 h-3.5" />}
+                  label="Total"
+                  value={formatCurrency(currentQuotation.totalAmount || editableTotal)}
+                  mono
+                />
+              )}
               {prequotationTitle && (
                 <SummaryRow
                   icon={<FileText className="w-3.5 h-3.5" />}
@@ -681,6 +833,57 @@ function QuotationDetail({
                   </div>
                 ))}
               </div>
+            </Card>
+          )}
+
+          {currentQuotation.auditLogs && currentQuotation.auditLogs.length > 0 && (
+            <Card className="p-5 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Historial de cambios
+              </p>
+                  <div className="space-y-2 text-sm">
+                    {currentQuotation.auditLogs
+                      .slice()
+                      .reverse()
+                      .map((a: QuotationAudit) => {
+                        const changedAt = new Date(a.changedAt);
+
+                        // friendly label and formatted values
+                        let detail = '';
+                        if (a.field === 'totalAmount') {
+                          const prev = Number(a.previousValue || 0);
+                          const next = Number(a.nextValue || 0);
+                          detail = `Total: ${formatCurrency(prev)} → ${formatCurrency(next)}`;
+                        } else if (a.field.startsWith('items.')) {
+                          const parts = a.field.split('.');
+                          const itemId = parts[1];
+                          const prop = parts[2];
+                          const item = currentQuotation.items.find((it) => it.id === itemId);
+                          const itemName = item ? item.description : itemId;
+                          if (prop === 'quantity') {
+                            detail = `Cantidad — ${itemName}: ${a.previousValue} → ${a.nextValue}`;
+                          } else if (prop === 'unitPrice') {
+                            const prev = Number(a.previousValue || 0);
+                            const next = Number(a.nextValue || 0);
+                            detail = `Precio unitario — ${itemName}: ${formatCurrency(prev)} → ${formatCurrency(next)}`;
+                          } else {
+                            detail = `${prop} — ${itemName}: ${a.previousValue} → ${a.nextValue}`;
+                          }
+                        } else {
+                          detail = `${a.field}: ${a.previousValue} → ${a.nextValue}`;
+                        }
+
+                        return (
+                          <div key={a.id} className="text-xs">
+                            <p className="font-medium flex items-center justify-between">
+                              <span>{a.changedBy}</span>
+                              <span className="text-muted-foreground text-[11px]">{formatDateTime(changedAt)}</span>
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
+                          </div>
+                        );
+                      })}
+                  </div>
             </Card>
           )}
         </div>

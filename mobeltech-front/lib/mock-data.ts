@@ -42,10 +42,20 @@ export const DEMO_CONTRACTOR_USER: User = {
   avatar: '🛠️',
 };
 
+// Demo architect (manager-level, can view most modules but not user management)
+export const DEMO_ARCHITECT_USER: User = {
+  id: 'user-3',
+  name: 'Arquitecta Ana Rojas',
+  email: 'arquitecta@mobeltech.com',
+  role: 'manager',
+  avatar: '🏛️',
+};
+
 // Local mock credentials (email + password) used by the simple AuthGate
 export const MOCK_CREDENTIALS = [
   { email: DEMO_USER.email, password: 'demo', user: DEMO_USER },
   { email: DEMO_CONTRACTOR_USER.email, password: 'contratista123', user: DEMO_CONTRACTOR_USER },
+  { email: DEMO_ARCHITECT_USER.email, password: 'arquitecta123', user: DEMO_ARCHITECT_USER },
 ];
 
 // Clients

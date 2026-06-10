@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
-import { DEMO_USER, MOCK_CREDENTIALS } from '@/lib/mock-data'
+import { DEMO_USER, MOCK_CREDENTIALS, DEMO_ARCHITECT_USER } from '@/lib/mock-data'
 import { AuthProvider } from '@/lib/contexts/AuthContext'
 import type { User } from '@/lib/types'
 
@@ -322,8 +322,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
             </p>
             <p className="text-xs text-muted-foreground text-center mt-2">
               <span className="font-medium" style={{ color: '#eab676' }}>Demo Contratista:</span>{' '}
-              usa <span className="font-mono text-foreground">contratista@mobeltech.com</span> / <span className="font-mono">contratista123</span>
+              usa <span className="font-mono text-foreground">{MOCK_CREDENTIALS.find(c=>c.user.role==='operator')?.email ?? 'contratista@mobeltech.com'}</span> / <span className="font-mono">contratista123</span>
             </p>
+              <p className="text-xs text-muted-foreground text-center mt-2">
+                <span className="font-medium" style={{ color: '#eab676' }}>Demo Arquitecta:</span>{' '}
+                usa <span className="font-mono text-foreground">{DEMO_ARCHITECT_USER.email}</span> / <span className="font-mono">arquitecta123</span>
+              </p>
           </div>
 
           {/* Footer */}

@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -6,8 +6,9 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { MATERIAL_REQUESTS, CONTRACTORS, MATERIALS, PROJECTS } from '@/lib/mock-data';
-import { CURRENCY_FORMAT, STATUS_LABELS } from '@/lib/constants';
+import { PROJECTS } from '@/lib/mock-data';
+import { useLocalData } from '@/lib/contexts/LocalDataContext';
+import { STATUS_LABELS } from '@/lib/constants';
 import { Check, X, AlertCircle } from 'lucide-react';
 import {
   Dialog,
@@ -26,7 +27,7 @@ interface RequestState {
 }
 
 export function MaterialRequestsReview() {
-  const [requests, setRequests] = useState(MATERIAL_REQUESTS);
+  const { materialRequests: requests, materials, contractors, updateMaterialRequest } = useLocalData();
   const [selectedRequest, setSelectedRequest] = useState<string | null>(null);
   const [rejectionComments, setRejectionComments] = useState('');
 
@@ -42,10 +43,7 @@ export function MaterialRequestsReview() {
   };
 
   const handleApprove = (requestId: string) => {
-    const updatedRequests = requests.map(req =>
-      req.id === requestId ? { ...req, status: 'approved' as const } : req
-    );
-    setRequests(updatedRequests);
+    updateMaterialRequest(requestId, { status: 'approved' });
     setSelectedRequest(null);
   };
 
@@ -55,12 +53,7 @@ export function MaterialRequestsReview() {
       return;
     }
 
-    const updatedRequests = requests.map(req =>
-      req.id === requestId
-        ? { ...req, status: 'rejected' as const, rejectionComments }
-        : req
-    );
-    setRequests(updatedRequests);
+    updateMaterialRequest(requestId, { status: 'rejected', rejectionComments });
     setRejectionComments('');
     setSelectedRequest(null);
   };
@@ -70,11 +63,11 @@ export function MaterialRequestsReview() {
   const rejectedRequests = requests.filter(r => r.status === 'rejected');
 
   const RequestCard = ({ request }: { request: typeof requests[0] }) => {
-    const contractor = CONTRACTORS.find(c => c.id === request.contractorId);
+    const contractor = contractors.find(c => c.id === request.contractorId);
     const project = request.projectId ? PROJECTS.find(p => p.id === request.projectId) : null;
 
     const total = request.items.reduce((sum, item) => {
-      const material = MATERIALS.find(m => m.id === item.materialId);
+      const material = materials.find(m => m.id === item.materialId);
       return sum + (material?.unitPrice || 0) * item.quantity;
     }, 0);
 
@@ -101,7 +94,7 @@ export function MaterialRequestsReview() {
           <p className="text-sm font-medium">Materiales ({request.items.length}):</p>
           <div className="text-xs text-muted-foreground space-y-1">
             {request.items.map(item => {
-              const material = MATERIALS.find(m => m.id === item.materialId);
+              const material = materials.find(m => m.id === item.materialId);
               return (
                 <p key={item.materialId}>
                   • {material?.name} - {item.quantity} {material?.unit}
@@ -111,21 +104,18 @@ export function MaterialRequestsReview() {
           </div>
         </div>
 
-        <div className="flex justify-between items-center pt-2 border-t border-border">
-          <span className="text-sm font-medium">Total:</span>
-          <span className="text-lg font-bold">{CURRENCY_FORMAT}{total}</span>
-        </div>
+        {/* Totals/prices are omitted in the admin review per user request */}
       </Card>
     );
   };
 
   const selectedReq = requests.find(r => r.id === selectedRequest);
-  const contractor = selectedReq ? CONTRACTORS.find(c => c.id === selectedReq.contractorId) : null;
+  const contractor = selectedReq ? contractors.find(c => c.id === selectedReq.contractorId) : null;
   const project = selectedReq?.projectId ? PROJECTS.find(p => p.id === selectedReq.projectId) : null;
 
   const total = selectedReq
     ? selectedReq.items.reduce((sum, item) => {
-        const material = MATERIALS.find(m => m.id === item.materialId);
+        const material = materials.find(m => m.id === item.materialId);
         return sum + (material?.unitPrice || 0) * item.quantity;
       }, 0)
     : 0;
@@ -235,7 +225,7 @@ export function MaterialRequestsReview() {
                 <h4 className="font-semibold mb-3">Materiales Solicitados:</h4>
                 <div className="space-y-2">
                   {selectedReq.items.map(item => {
-                    const material = MATERIALS.find(m => m.id === item.materialId);
+                    const material = materials.find(m => m.id === item.materialId);
                     const subtotal = (material?.unitPrice || 0) * item.quantity;
                     
                     return (

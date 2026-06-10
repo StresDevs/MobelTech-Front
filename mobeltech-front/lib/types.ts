@@ -41,6 +41,15 @@ export interface QuotationItem {
   notes?: string;
 }
 
+export interface QuotationAudit {
+  id: string;
+  field: string;
+  previousValue: string;
+  nextValue: string;
+  changedBy: string;
+  changedAt: Date;
+}
+
 export interface Quotation {
   id: string;
   clientId: string;
@@ -50,6 +59,7 @@ export interface Quotation {
   createdDate: Date;
   totalAmount: number;
   notes?: string;
+  auditLogs?: QuotationAudit[];
 }
 
 export interface Measurement {

@@ -1,7 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import type { Client, Measurement, Prequotation, Quotation, Contractor, ProductionOrder, Notification } from '@/lib/types';
+import type { Client, Measurement, Prequotation, Quotation, Contractor, ProductionOrder, Notification, Material, MaterialRequest } from '@/lib/types';
 import {
   CLIENTS as MOCK_CLIENTS,
   MEASUREMENTS as MOCK_MEASUREMENTS,
@@ -9,6 +9,9 @@ import {
   QUOTATIONS as MOCK_QUOTATIONS,
   CONTRACTORS as MOCK_CONTRACTORS,
   PRODUCTION_ORDERS as MOCK_PRODUCTION_ORDERS,
+  MATERIALS as MOCK_MATERIALS,
+  MATERIAL_REQUESTS as MOCK_MATERIAL_REQUESTS,
+  DEMO_USER as MOCK_DEMO_USER,
 } from '@/lib/mock-data';
 
 type LocalDataContextType = {
@@ -18,7 +21,11 @@ type LocalDataContextType = {
   quotations: Quotation[];
   contractors: Contractor[];
   productionOrders: ProductionOrder[];
+  materials: Material[];
+  materialRequests: MaterialRequest[];
   notifications: Notification[];
+  addMaterialRequest: (r: Omit<MaterialRequest, 'id' | 'requestDate' | 'status'>) => MaterialRequest;
+  updateMaterialRequest: (id: string, data: Partial<MaterialRequest>) => void;
   addClient: (c: Omit<Client, 'id' | 'registrationDate' | 'status'>) => Client;
   updateClient: (id: string, data: Partial<Client>) => void;
   addMeasurement: (m: Omit<Measurement, 'id'>) => Measurement;
@@ -42,6 +49,8 @@ const QUOTATIONS_KEY = 'mobeltech_quotations_v1';
 const CONTRACTORS_KEY = 'mobeltech_contractors_v1';
 const PRODUCTION_ORDERS_KEY = 'mobeltech_production_orders_v1';
 const NOTIFICATIONS_KEY = 'mobeltech_notifications_v1';
+const MATERIALS_KEY = 'mobeltech_materials_v1';
+const MATERIAL_REQUESTS_KEY = 'mobeltech_material_requests_v1';
 
 function parseClients(raw: any[]): Client[] {
   return raw.map((c) => ({ ...c, registrationDate: c.registrationDate ? new Date(c.registrationDate) : new Date() }));
@@ -66,7 +75,16 @@ function parsePrequotations(raw: any[]): Prequotation[] {
 }
 
 function parseQuotations(raw: any[]): Quotation[] {
-  return raw.map((q) => ({ ...q, createdDate: q.createdDate ? new Date(q.createdDate) : new Date() }));
+  return raw.map((q) => ({
+    ...q,
+    createdDate: q.createdDate ? new Date(q.createdDate) : new Date(),
+    auditLogs: q.auditLogs
+      ? (q.auditLogs as any[]).map((a: any) => ({
+          ...a,
+          changedAt: a.changedAt ? new Date(a.changedAt) : new Date(),
+        }))
+      : [],
+  }));
 }
 
 function parseContractors(raw: any[]): Contractor[] {
@@ -86,6 +104,17 @@ function parseProductionOrders(raw: any[]): ProductionOrder[] {
   }));
 }
 
+function parseMaterials(raw: any[]): Material[] {
+  return raw.map((m) => ({ ...m, lastPurchaseDate: m.lastPurchaseDate ? new Date(m.lastPurchaseDate) : new Date() }));
+}
+
+function parseMaterialRequests(raw: any[]): MaterialRequest[] {
+  return raw.map((r: any) => ({
+    ...r,
+    requestDate: r.requestDate ? new Date(r.requestDate) : new Date(),
+  }));
+}
+
 function parseNotifications(raw: any[]): Notification[] {
   return raw.map((n) => ({ ...n, createdAt: n.createdAt ? new Date(n.createdAt) : new Date() }));
 }
@@ -95,7 +124,10 @@ function loadOrSeed<T>(key: string, seed: T[], parser: (raw: any[]) => T[]) {
     const raw = localStorage.getItem(key);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return parser(parsed as any[]);
+      // If parsed is a non-empty array, use it; otherwise reseed with mock data.
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parser(parsed as any[]);
+      }
     }
   } catch (e) {
     // ignore
@@ -115,7 +147,9 @@ export function LocalDataProvider({ children }: { children: React.ReactNode }) {
   const [quotations, setQuotations] = useState<Quotation[]>(() => loadOrSeed(QUOTATIONS_KEY, MOCK_QUOTATIONS, parseQuotations));
   const [contractors, setContractors] = useState<Contractor[]>(() => loadOrSeed(CONTRACTORS_KEY, MOCK_CONTRACTORS, parseContractors));
   const [productionOrders, setProductionOrders] = useState<ProductionOrder[]>(() => loadOrSeed(PRODUCTION_ORDERS_KEY, MOCK_PRODUCTION_ORDERS, parseProductionOrders));
-  const [notifications, setNotifications] = useState<Notification[]>(() => loadOrSeed(NOTIFICATIONS_KEY, [], parseNotifications));
+  const [notifications, setNotifications] = useState<Notification[]>(() => []);
+  const [materials, setMaterials] = useState<Material[]>(() => loadOrSeed(MATERIALS_KEY, MOCK_MATERIALS, parseMaterials));
+  const [materialRequests, setMaterialRequests] = useState<MaterialRequest[]>(() => loadOrSeed(MATERIAL_REQUESTS_KEY, MOCK_MATERIAL_REQUESTS, parseMaterialRequests));
 
   useEffect(() => {
     try { localStorage.setItem(CLIENTS_KEY, JSON.stringify(clients)); } catch {}
@@ -135,7 +169,15 @@ export function LocalDataProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { try { localStorage.setItem(CONTRACTORS_KEY, JSON.stringify(contractors)); } catch {} }, [contractors]);
   useEffect(() => { try { localStorage.setItem(PRODUCTION_ORDERS_KEY, JSON.stringify(productionOrders)); } catch {} }, [productionOrders]);
+  // Ensure any previously seeded/mock notifications are removed on provider mount
+  useEffect(() => {
+    try {
+      localStorage.removeItem(NOTIFICATIONS_KEY);
+    } catch {}
+  }, []);
   useEffect(() => { try { localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(notifications)); } catch {} }, [notifications]);
+  useEffect(() => { try { localStorage.setItem(MATERIALS_KEY, JSON.stringify(materials)); } catch {} }, [materials]);
+  useEffect(() => { try { localStorage.setItem(MATERIAL_REQUESTS_KEY, JSON.stringify(materialRequests)); } catch {} }, [materialRequests]);
 
   // Normalize productionOrders assignedContractorId to user ids when possible
   useEffect(() => {
@@ -195,7 +237,14 @@ export function LocalDataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateQuotation = (id: string, data: Partial<Quotation>) => {
-    setQuotations((s) => s.map((q) => (q.id === id ? { ...q, ...data } : q)));
+    setQuotations((s) =>
+      s.map((q) => {
+        if (q.id !== id) return q;
+        const existingLogs = (q as any).auditLogs ?? [];
+        const newLogs = (data as any).auditLogs ? [...existingLogs, ...(data as any).auditLogs] : existingLogs;
+        return { ...q, ...data, auditLogs: newLogs } as Quotation;
+      }),
+    );
   };
 
   const addProductionOrder = (po: ProductionOrder) => {
@@ -218,6 +267,36 @@ export function LocalDataProvider({ children }: { children: React.ReactNode }) {
     setNotifications((s) => s.map((n) => (n.id === id ? { ...n, ...data } : n)));
   };
 
+  const addMaterialRequest = (r: Omit<MaterialRequest, 'id' | 'requestDate' | 'status'>) => {
+    const id = `mreq-${Date.now()}`;
+    const next: MaterialRequest = { id, status: 'pending', requestDate: new Date(), ...r } as MaterialRequest;
+    setMaterialRequests((s) => [next, ...s]);
+
+    // notify admin (demo user) — best-effort: notify first admin user found in contractors or fallback to DEMO_USER id 'user-1'
+    try {
+      const adminId = MOCK_DEMO_USER?.id ?? 'user-1';
+      addNotification({ recipientId: adminId, message: `Tienes una nueva solicitud de material`, createdAt: new Date(), relatedJobId: next.projectId });
+    } catch {}
+
+    return next;
+  };
+
+  const updateMaterialRequest = (id: string, data: Partial<MaterialRequest>) => {
+    setMaterialRequests((s) => s.map((mr) => (mr.id === id ? { ...mr, ...data } : mr)));
+
+    // if rejected, notify contractor user if available
+    if (data.status === 'rejected') {
+      const target = materialRequests.find((m) => m.id === id) ?? null;
+      if (target) {
+        const contractor = contractors.find((c) => c.id === target.contractorId);
+        const recipientId = contractor?.userId ?? null;
+        if (recipientId) {
+          addNotification({ recipientId, message: `Tu solicitud ${id} ha sido devuelta: ${data.rejectionComments ?? ''}`, createdAt: new Date(), relatedJobId: target.projectId });
+        }
+      }
+    }
+  };
+
   return (
     <LocalDataContext.Provider
       value={{
@@ -225,6 +304,8 @@ export function LocalDataProvider({ children }: { children: React.ReactNode }) {
         measurements,
         prequotations,
         quotations,
+        materials,
+        materialRequests,
         addClient,
         updateClient,
         addMeasurement,
@@ -235,6 +316,8 @@ export function LocalDataProvider({ children }: { children: React.ReactNode }) {
         updateQuotation,
         contractors,
         productionOrders,
+        addMaterialRequest,
+        updateMaterialRequest,
         notifications,
         addProductionOrder,
         updateProductionOrder,
