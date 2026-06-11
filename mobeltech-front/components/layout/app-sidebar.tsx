@@ -96,7 +96,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   ];
 
   const productionSubItems = [
-    { label: 'Asignación de Contratistas', href: '/production' },
     { label: 'Cronograma', href: '/schedule' },
     { label: 'Solicitud de Material', href: '/contractor-requests' },
   ];
