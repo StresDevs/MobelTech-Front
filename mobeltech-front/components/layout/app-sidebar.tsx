@@ -80,11 +80,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   let availableModules = MODULES.filter((m) => m.roles.includes(currentRole));
 
   // Contractor (contratista) role: show only assigned jobs, cronograma and solicitud de material
-  if (currentRole === 'operator') {
+  if (currentRole === 'contractor') {
     availableModules = [
-      { id: 'assigned-jobs', label: 'Trabajos Asignados', path: '/assigned-jobs', icon: 'Factory', roles: ['operator'] },
-      { id: 'schedule', label: 'Cronograma', path: '/schedule', icon: 'Calendar', roles: ['operator'] },
-      { id: 'contractor-requests', label: 'Solicitud de Material', path: '/contractor-requests', icon: 'ShoppingCart', roles: ['operator'] },
+      { id: 'assigned-jobs', label: 'Trabajos Asignados', path: '/assigned-jobs', icon: 'Factory', roles: ['contractor'] },
+      { id: 'schedule', label: 'Cronograma', path: '/schedule', icon: 'Calendar', roles: ['contractor'] },
+      { id: 'contractor-requests', label: 'Solicitud de Material', path: '/contractor-requests', icon: 'ShoppingCart', roles: ['contractor'] },
     ];
   }
 

@@ -25,6 +25,7 @@ export function AppHeader() {
   const [showNotifications, setShowNotifications] = useState(false);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const roleInfo = ROLE_PERMISSIONS[currentRole] ?? ROLE_PERMISSIONS.admin;
 
   useEffect(() => {
     setMounted(true);
@@ -149,14 +150,14 @@ export function AppHeader() {
               </div>
               <div className="text-left hidden sm:block">
                 <p className="text-sm font-medium leading-tight">{userName}</p>
-                <p className="text-[11px] text-muted-foreground leading-tight">{ROLE_PERMISSIONS[currentRole].label}</p>
+                <p className="text-[11px] text-muted-foreground leading-tight">{roleInfo.label}</p>
               </div>
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52 rounded-xl">
             <div className="px-3 py-2.5">
               <p className="text-sm font-medium">{userName}</p>
-              <p className="text-xs text-muted-foreground">{ROLE_PERMISSIONS[currentRole].label}</p>
+              <p className="text-xs text-muted-foreground">{roleInfo.label}</p>
             </div>
             <DropdownMenuSeparator />
             <DropdownMenuItem

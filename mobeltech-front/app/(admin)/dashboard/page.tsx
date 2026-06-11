@@ -16,7 +16,7 @@ export default function DashboardPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (currentRole === 'operator') {
+    if (currentRole === 'contractor') {
       router.replace('/assigned-jobs');
     }
   }, [currentRole, router]);

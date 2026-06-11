@@ -1,6 +1,6 @@
 // Business entity types for MobelTech admin system
 
-export type UserRole = 'admin' | 'manager' | 'operator' | 'viewer';
+export type UserRole = 'admin' | 'contractor' | 'architect';
 
 export interface User {
   id: string;

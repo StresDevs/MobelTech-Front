@@ -38,7 +38,7 @@ export const DEMO_CONTRACTOR_USER: User = {
   id: 'user-2',
   name: 'Carlos Mamani',
   email: 'contratista@mobeltech.com',
-  role: 'operator',
+  role: 'contractor',
   avatar: '🛠️',
 };
 
@@ -47,7 +47,7 @@ export const DEMO_ARCHITECT_USER: User = {
   id: 'user-3',
   name: 'Arquitecta Ana Rojas',
   email: 'arquitecta@mobeltech.com',
-  role: 'manager',
+  role: 'architect',
   avatar: '🏛️',
 };
 

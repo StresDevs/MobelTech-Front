@@ -25,6 +25,11 @@ import {
 } from 'lucide-react';
 import { useLocalData } from '@/lib/contexts/LocalDataContext';
 
+const SYSTEM_RECIPIENTS = {
+  admin: '11111111-1111-1111-1111-111111111111',
+  architect: '33333333-3333-3333-3333-333333333333',
+} as const;
+
 const STATUS_CONFIG: Record<
   PrequotationStatus,
   { label: string; color: string; dotColor: string; icon: React.ReactNode }
@@ -88,18 +93,27 @@ const NEXT_STATUS_LABEL: Partial<Record<PrequotationStatus, string>> = {
 };
 
 function formatDateTime(d: Date) {
+  const value = d instanceof Date ? d : new Date(d as any);
+  if (Number.isNaN(value.getTime())) return 'Fecha inválida';
   return new Intl.DateTimeFormat('es-BO', {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
-  }).format(d);
+  }).format(value);
 }
 
 function formatDate(d: Date) {
-  return new Intl.DateTimeFormat('es-BO', { day: '2-digit', month: 'short', year: 'numeric' }).format(d);
+  const value = d instanceof Date ? d : new Date(d as any);
+  if (Number.isNaN(value.getTime())) return 'Fecha inválida';
+  return new Intl.DateTimeFormat('es-BO', { day: '2-digit', month: 'short', year: 'numeric' }).format(value);
 }
 
 function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
+}
+
+function toSafeDate(value: unknown) {
+  const date = value instanceof Date ? value : new Date(value as any);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 interface Props {
@@ -123,6 +137,22 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
 
   useEffect(() => setP(prequotation), [prequotation]);
 
+  useEffect(() => {
+    setP((current) => ({
+      ...current,
+      createdAt: toSafeDate(current.createdAt) ?? new Date(),
+      updatedAt: toSafeDate(current.updatedAt) ?? new Date(),
+      versions: (current.versions ?? []).map((version) => ({
+        ...version,
+        uploadedAt: toSafeDate(version.uploadedAt) ?? new Date(),
+      })),
+      logs: (current.logs ?? []).map((log) => ({
+        ...log,
+        performedAt: toSafeDate(log.performedAt) ?? new Date(),
+      })),
+    }));
+  }, [prequotation]);
+
   async function persist(next: Prequotation) {
     if (!apiBase) return next;
     const response = await fetch(`${apiBase}/api/prequotations/${next.id}`, {
@@ -144,7 +174,27 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
     onUpdate(updated);
   }
 
+  function notifyStateChange(previousStatus: PrequotationStatus, nextStatus: PrequotationStatus) {
+    const message = `Precotización "${p.title}" cambió de ${STATUS_CONFIG[previousStatus].label} a ${STATUS_CONFIG[nextStatus].label}.`;
+    const recipients = [SYSTEM_RECIPIENTS.admin, SYSTEM_RECIPIENTS.architect];
+
+    recipients.forEach((recipientId) => {
+      addNotification({
+        id: `noti-${Date.now()}-${recipientId}`,
+        recipientId,
+        message,
+        createdAt: new Date(),
+        relatedJobId: p.id,
+      });
+    });
+
+    try {
+      window.dispatchEvent(new Event('mobeltech_notifications_change'));
+    } catch {}
+  }
+
   function changeStatus(newStatus: PrequotationStatus) {
+    const previousStatus = p.status;
     const log: PrequotationLog = {
       id: `log-${Date.now()}`,
       action: 'status_changed',
@@ -155,6 +205,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
     void (async () => {
       const next = await persist({ ...p, status: newStatus, updatedAt: new Date(), logs: [...p.logs, log] });
       applyUpdate(next);
+      notifyStateChange(previousStatus, newStatus);
     })();
   }
 
@@ -226,9 +277,19 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
       const next = await persist({ ...p, logs: [...p.logs, log] });
       applyUpdate(next);
     })();
-    if (version.fileUrl) {
-      window.open(version.fileUrl, '_blank', 'noopener,noreferrer');
-    }
+
+    if (!version.fileUrl) return;
+
+    const link = document.createElement('a');
+    link.href = version.fileUrl;
+    link.download = version.fileName || 'prequotation-file';
+    link.rel = 'noopener noreferrer';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    requestAnimationFrame(() => {
+      document.body.removeChild(link);
+    });
   }
 
   function convertToQuotation() {
@@ -319,11 +380,16 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
       const saved = await persist(updated);
       updatePrequotation(p.id, saved);
       applyUpdate(saved);
+      notifyStateChange(p.status, 'confirmed');
     })();
     setShowConvertConfirm(false);
   }
 
-  const sortedLogs = [...p.logs].sort((a, b) => b.performedAt.getTime() - a.performedAt.getTime());
+  const sortedLogs = [...p.logs].sort((a, b) => {
+    const left = a.performedAt instanceof Date ? a.performedAt : new Date(a.performedAt as any);
+    const right = b.performedAt instanceof Date ? b.performedAt : new Date(b.performedAt as any);
+    return right.getTime() - left.getTime();
+  });
 
   return (
     <div className="space-y-6">

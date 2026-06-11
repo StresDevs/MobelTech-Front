@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { RoleProvider } from '@/lib/contexts/RoleContext'
 import { SidebarProvider } from '@/lib/contexts/SidebarContext'
@@ -8,9 +7,6 @@ import { ThemeProvider } from '@/components/theme-provider'
 import AuthGate from '@/components/auth/AuthGate'
 import { Toaster } from '@/components/ui/toaster'
 import './globals.css'
-
-const _geist = Geist({ subsets: ["latin"] });
-const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: 'MobelTech - Sistema Administrativo',

@@ -251,10 +251,10 @@ export function PrequotationsModule() {
             className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
               statusFilter === s
                 ? 'border-foreground bg-foreground text-background'
-                : 'border-border text-muted-foreground hover:border-foreground/40'
+              : 'border-border text-muted-foreground hover:border-foreground/40'
             }`}
           >
-            {s} · {statusCounts[s]}
+            {STATUS_CONFIG[s].label} · {statusCounts[s]}
           </button>
         ))}
       </div>

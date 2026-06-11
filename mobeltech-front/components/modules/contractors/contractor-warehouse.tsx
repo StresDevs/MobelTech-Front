@@ -150,7 +150,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
                   )}
                 </div>
 
-                {currentRole !== 'operator' && (
+                {currentRole !== 'contractor' && (
                   <div className="flex items-baseline gap-2">
                     <span className="text-lg font-bold">{CURRENCY_FORMAT}{material.unitPrice}</span>
                     <span className="text-xs text-muted-foreground">por {material.unit}</span>
@@ -226,7 +226,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
                       <div key={item.materialId} className="flex gap-4 p-3 border border-border rounded-lg">
                         <div className="flex-1 space-y-1">
                           <h4 className="font-semibold">{material.name}</h4>
-                          {currentRole !== 'operator' ? (
+                          {currentRole !== 'contractor' ? (
                             <p className="text-sm text-muted-foreground">
                               {item.quantity} {material.unit} × {CURRENCY_FORMAT}{material.unitPrice}
                             </p>
@@ -239,7 +239,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
                         </div>
                         <div className="flex items-center gap-3">
                           <div className="text-right">
-                            {currentRole !== 'operator' ? (
+                            {currentRole !== 'contractor' ? (
                               <p className="font-semibold">{CURRENCY_FORMAT}{subtotal}</p>
                             ) : (
                               <p className="font-semibold">—</p>
@@ -264,7 +264,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
                 <div className="border-t border-border pt-4 space-y-3">
                   <div className="flex justify-between items-center text-lg font-bold">
                     <span>Total:</span>
-                    {currentRole !== 'operator' ? (
+                    {currentRole !== 'contractor' ? (
                       <span>{CURRENCY_FORMAT}{cartTotal}</span>
                     ) : (
                       <span>—</span>

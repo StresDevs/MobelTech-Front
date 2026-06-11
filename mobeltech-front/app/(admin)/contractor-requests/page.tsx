@@ -13,7 +13,7 @@ export default function ContractorRequestsPage() {
   const { user } = useAuth();
   const { contractors } = useLocalData();
 
-  if (currentRole === 'operator' && user) {
+  if (currentRole === 'contractor' && user) {
     const contractor = contractors.find((c) => c.userId === user.id || c.id === user.id) ?? contractors[0];
     return (
       <AppLayout>
