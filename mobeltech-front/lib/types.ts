@@ -424,6 +424,9 @@ export interface Prequotation {
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
+  assignedContractorId?: string;
+  startDate?: Date;
+  estimatedDeliveryDate?: Date;
   notes?: string;
   convertedToQuotationId?: string;
   billingRequested?: boolean;

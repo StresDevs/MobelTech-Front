@@ -168,6 +168,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
   const [selectedContractorId, setSelectedContractorId] = useState<string | undefined>(undefined);
   const defaultEst = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14);
   const [estimatedDelivery, setEstimatedDelivery] = useState<string>(defaultEst.toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState<string>(new Date().toISOString().slice(0, 10));
 
   function applyUpdate(updated: Prequotation) {
     setP(updated);
@@ -371,13 +372,25 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
     const updated: Prequotation = {
       ...p,
       status: 'confirmed',
+      assignedContractorId: selectedContractorId,
+      startDate: new Date(startDate),
+      estimatedDeliveryDate: new Date(estimatedDelivery),
       convertedToQuotationId: quotationId,
       updatedAt: new Date(),
       logs: [...p.logs, log],
     };
 
     void (async () => {
-      const saved = await persist(updated);
+      const apiResp = await fetch(`${apiBase}/api/prequotations/${p.id}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assignedContractorId: selectedContractorId,
+          startDate,
+          estimatedDeliveryDate: estimatedDelivery,
+        }),
+      });
+      const saved = apiResp.ok ? (await apiResp.json()) as Prequotation : await persist(updated);
       updatePrequotation(p.id, saved);
       applyUpdate(saved);
       notifyStateChange(p.status, 'confirmed');
@@ -775,6 +788,14 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
                 type="date"
                 value={estimatedDelivery}
                 onChange={(e) => setEstimatedDelivery(e.target.value)}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+              />
+
+              <label className="text-sm font-medium">Fecha estimada de inicio</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
                 className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
               />
             </div>
