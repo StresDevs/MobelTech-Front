@@ -128,14 +128,36 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
   const [comment, setComment] = useState('');
   const [activeTab, setActiveTab] = useState<'versions' | 'history'>('versions');
   const [showConvertConfirm, setShowConvertConfirm] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const cfg = STATUS_CONFIG[p.status];
   const transitions = STATUS_TRANSITIONS[p.status];
   const { addQuotation, addProductionOrder, addNotification, contractors, updatePrequotation } = useLocalData();
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
+  const [apiContractors, setApiContractors] = useState<typeof contractors>([]);
+  const [newContractor, setNewContractor] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    specialization: '',
+  });
+  const [showNewContractor, setShowNewContractor] = useState(false);
+  const availableContractors = apiContractors.length > 0 ? apiContractors : contractors;
 
   useEffect(() => setP(prequotation), [prequotation]);
+
+  useEffect(() => {
+    if (!apiBase) return;
+    void (async () => {
+      try {
+        const response = await fetch(`${apiBase}/api/contractors`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const json = await response.json();
+        setApiContractors(json);
+      } catch {}
+    })();
+  }, [apiBase]);
 
   useEffect(() => {
     setP((current) => ({
@@ -173,6 +195,27 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
   function applyUpdate(updated: Prequotation) {
     setP(updated);
     onUpdate(updated);
+  }
+
+  async function createContractorQuick() {
+    if (!apiBase || !newContractor.name.trim() || !newContractor.phone.trim()) return;
+    const response = await fetch(`${apiBase}/api/contractors`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newContractor.name.trim(),
+        phone: newContractor.phone.trim(),
+        email: newContractor.email.trim() || null,
+        specialization: newContractor.specialization.trim() || null,
+        status: 'active',
+      }),
+    });
+    if (!response.ok) return;
+    const created = await response.json();
+    setApiContractors((prev) => [created, ...prev]);
+    setSelectedContractorId(created.id);
+    setShowNewContractor(false);
+    setNewContractor({ name: '', phone: '', email: '', specialization: '' });
   }
 
   function notifyStateChange(previousStatus: PrequotationStatus, nextStatus: PrequotationStatus) {
@@ -299,6 +342,11 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
 
   function handleConvertAndAssign() {
     if (!selectedContractorId) return;
+    if (apiContractors.length > 0 && !apiContractors.some((c) => c.id === selectedContractorId)) {
+      setActionError('Selecciona un contratista creado en la base de datos antes de confirmar.');
+      return;
+    }
+    setActionError(null);
     const quotationId = `quot-${Date.now()}`;
 
     const qItem = {
@@ -335,7 +383,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
       progress: 0,
     } as any;
 
-    const contractorObj = contractors.find((c) => c.id === selectedContractorId);
+    const contractorObj = availableContractors.find((c) => c.id === selectedContractorId);
     const recipientId = contractorObj?.userId ?? selectedContractorId;
 
     const po = {
@@ -390,7 +438,11 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
           estimatedDeliveryDate: estimatedDelivery,
         }),
       });
-      const saved = apiResp.ok ? (await apiResp.json()) as Prequotation : await persist(updated);
+      if (!apiResp.ok) {
+        const body = await apiResp.json().catch(() => null);
+        throw new Error(body?.message || body?.error || 'No se pudo confirmar la precotización');
+      }
+      const saved = (await apiResp.json()) as Prequotation;
       updatePrequotation(p.id, saved);
       applyUpdate(saved);
       notifyStateChange(p.status, 'confirmed');
@@ -771,6 +823,11 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
             <p className="text-sm text-muted-foreground">La precotización <strong>{p.title}</strong> se marcará como <strong>Confirmada</strong> y se generará una cotización formal.</p>
 
             <div className="space-y-3">
+              {actionError && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {actionError}
+                </div>
+              )}
               <label className="text-sm font-medium">Asignar contratista</label>
               <select
                 value={selectedContractorId}
@@ -778,10 +835,31 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
                 className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
               >
                 <option value="">Seleccionar contratista…</option>
-                {contractors.map((c) => (
+                {availableContractors.map((c) => (
                   <option key={c.id} value={c.id}>{c.name} — {c.specialization}</option>
                 ))}
               </select>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowNewContractor((v) => !v)}
+              >
+                {showNewContractor ? 'Cancelar alta rápida' : 'Crear contratista'}
+              </Button>
+
+              {showNewContractor && (
+                <div className="grid gap-2 rounded-lg border border-border p-3">
+                  <input className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Nombre" value={newContractor.name} onChange={(e) => setNewContractor({ ...newContractor, name: e.target.value })} />
+                  <input className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Teléfono" value={newContractor.phone} onChange={(e) => setNewContractor({ ...newContractor, phone: e.target.value })} />
+                  <input className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Email (opcional)" value={newContractor.email} onChange={(e) => setNewContractor({ ...newContractor, email: e.target.value })} />
+                  <input className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Especialización" value={newContractor.specialization} onChange={(e) => setNewContractor({ ...newContractor, specialization: e.target.value })} />
+                  <Button type="button" size="sm" onClick={createContractorQuick} style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
+                    Guardar contratista
+                  </Button>
+                </div>
+              )}
 
               <label className="text-sm font-medium">Fecha estimada de entrega</label>
               <input

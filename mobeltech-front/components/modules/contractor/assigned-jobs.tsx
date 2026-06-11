@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,28 @@ function getStableProgress(id: string, index: number) {
 export default function AssignedJobs() {
   const { user } = useAuth();
   const [selected, setSelected] = useState<string | null>(null);
-  const { productionOrders, quotations, clients, notifications, updateNotification, contractors } = useLocalData();
+  const { quotations, clients, notifications, updateNotification, contractors } = useLocalData();
+  const [apiJobs, setApiJobs] = useState<ProductionOrder[]>([]);
+  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
+
+  useEffect(() => {
+    if (!apiBase || !user) return;
+    void (async () => {
+      try {
+        const contractor = contractors.find((c) => c.userId === user.id || c.id === user.id);
+        const contractorId = contractor?.id || user.id;
+        const response = await fetch(`${apiBase}/api/production-orders?contractorId=${encodeURIComponent(contractorId)}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const json = await response.json();
+        setApiJobs(json.map((job: any) => ({
+          ...job,
+          startDate: new Date(job.startDate),
+          estimatedDeliveryDate: new Date(job.estimatedDeliveryDate),
+          actualDeliveryDate: job.actualDeliveryDate ? new Date(job.actualDeliveryDate) : undefined,
+        })));
+      } catch {}
+    })();
+  }, [apiBase, user, contractors]);
 
   const myContractor = useMemo(() => {
     if (!user) return null;
@@ -34,7 +55,7 @@ export default function AssignedJobs() {
 
   const myJobs = useMemo(() => {
     if (!user) return [];
-    return productionOrders.filter((j) => {
+    return apiJobs.filter((j) => {
       if (!j.assignedContractorId) return false;
       // match by user id
       if (j.assignedContractorId === user.id) return true;
@@ -45,9 +66,8 @@ export default function AssignedJobs() {
       }
       return false;
     });
-  }, [productionOrders, user, myContractor]);
+  }, [apiJobs, user, myContractor]);
 
-  // If no real assigned jobs exist, create a lightweight mock list derived from quotations
   const fallbackJobs = useMemo(() => {
     if (!user) return [];
     if (myJobs.length > 0) return [];
