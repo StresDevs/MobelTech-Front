@@ -1,6 +1,6 @@
  'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocalData } from '@/lib/contexts/LocalDataContext';
 import { Prequotation, PrequotationStatus } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
@@ -69,15 +69,73 @@ function getInitials(name: string) {
 }
 
 export function PrequotationsModule() {
-  const { prequotations, clients, quotations, addPrequotation, updatePrequotation } = useLocalData();
-  const [data, setData] = useState<Prequotation[]>(prequotations);
-
-  useEffect(() => setData(prequotations), [prequotations]);
+  const { quotations } = useLocalData();
+  const [data, setData] = useState<Prequotation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [clients, setClients] = useState<Array<{ id: string; name: string }>>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<PrequotationStatus | 'all'>('all');
   const [showBillingOnly, setShowBillingOnly] = useState(false);
   const [selected, setSelected] = useState<Prequotation | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '', []);
+
+  function normalizePrequotation(p: any): Prequotation {
+    return {
+      ...p,
+      createdAt: new Date(p.createdAt),
+      updatedAt: new Date(p.updatedAt),
+      versions: (p.versions ?? []).map((v: any) => ({
+        ...v,
+        uploadedAt: new Date(v.uploadedAt),
+      })),
+      logs: (p.logs ?? []).map((l: any) => ({
+        ...l,
+        performedAt: new Date(l.performedAt),
+      })),
+    };
+  }
+
+  async function loadPrequotations() {
+    if (!apiBase) {
+      setError('Falta configurar NEXT_PUBLIC_API_URL en el front.');
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/prequotations`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('No se pudieron cargar las precotizaciones');
+      const json = await response.json();
+      setData(json.map(normalizePrequotation));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error cargando precotizaciones');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadPrequotations();
+  }, []);
+
+  async function loadClients() {
+    if (!apiBase) return;
+    try {
+      const response = await fetch(`${apiBase}/api/clients`, { cache: 'no-store' });
+      if (!response.ok) return;
+      const json = await response.json();
+      setClients(json);
+    } catch {
+      // ignore client label load errors; prequotations can still render
+    }
+  }
+
+  useEffect(() => {
+    void loadClients();
+  }, []);
 
   const filtered = data.filter((p) => {
     const client = clients.find((c) => c.id === p.clientId);
@@ -95,15 +153,34 @@ export function PrequotationsModule() {
   }, {});
   const billingCount = data.filter((p) => !!p.billingRequested).length;
 
-  function handleUpdate(updated: Prequotation) {
-    updatePrequotation(updated.id, updated);
-    setSelected(updated);
+  async function handleUpdate(updated: Prequotation) {
+    if (!apiBase) return;
+    const response = await fetch(`${apiBase}/api/prequotations/${updated.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated),
+    });
+    if (!response.ok) return;
+    const next = normalizePrequotation(await response.json());
+    setSelected(next);
+    await loadPrequotations();
   }
 
-  function handleCreate(p: Prequotation) {
-    addPrequotation(p);
+  async function handleCreate(p: Prequotation) {
+    if (!apiBase) return;
+    const response = await fetch(`${apiBase}/api/prequotations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(p),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.error || body?.message || 'No se pudo crear la precotización');
+    }
+    const next = normalizePrequotation(await response.json());
     setShowNew(false);
-    setSelected(p);
+    setSelected(next);
+    await loadPrequotations();
   }
 
   if (selected) {
@@ -122,6 +199,7 @@ export function PrequotationsModule() {
 
   return (
     <div className="p-6 space-y-6">
+      {error && <Card className="p-3 border-red-200 bg-red-50 text-sm text-red-700">{error}</Card>}
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -182,6 +260,7 @@ export function PrequotationsModule() {
       </div>
 
       {/* List */}
+      {loading && <Card className="p-4 text-sm text-muted-foreground">Cargando precotizaciones...</Card>}
       <div className="space-y-3">
         {filtered.map((p) => {
           const client = clients.find((c) => c.id === p.clientId);

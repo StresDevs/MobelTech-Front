@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Prequotation, PrequotationVersion, PrequotationLog } from '@/lib/types';
-import { useLocalData } from '@/lib/contexts/LocalDataContext';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,14 +20,38 @@ interface Props {
 }
 
 export function NewPrequotationDialog({ onClose, onCreate }: Props) {
+  const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '', []);
   const [title, setTitle] = useState('');
   const [clientId, setClientId] = useState('');
   const [notes, setNotes] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { clients } = useLocalData();
+  const [clients, setClients] = useState<Array<{ id: string; name: string }>>([]);
   const [billingRequested, setBillingRequested] = useState(false);
   const [totalAmount, setTotalAmount] = useState<string>('0');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!apiBase) return;
+    void (async () => {
+      try {
+        const response = await fetch(`${apiBase}/api/clients`, { cache: 'no-store' });
+        if (!response.ok) return;
+        setClients(await response.json());
+      } catch {
+        // ignore; the select will just stay empty
+      }
+    })();
+  }, [apiBase]);
+
+  async function fileToDataUrl(nextFile: File) {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ''));
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+      reader.readAsDataURL(nextFile);
+    });
+  }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     setFile(e.target.files?.[0] ?? null);
@@ -40,13 +63,20 @@ export function NewPrequotationDialog({ onClose, onCreate }: Props) {
     if (dropped) setFile(dropped);
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!title.trim() || !clientId || !file) return;
+    setError(null);
+    if (!apiBase) {
+      setError('Falta configurar NEXT_PUBLIC_API_URL en el front.');
+      return;
+    }
 
     const isExcel =
       file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv');
 
-    const version: PrequotationVersion = {
+    const fileUrl = await fileToDataUrl(file);
+
+    const version: PrequotationVersion & { fileUrl: string } = {
       id: `ver-${Date.now()}`,
       version: 1,
       fileName: file.name,
@@ -55,6 +85,7 @@ export function NewPrequotationDialog({ onClose, onCreate }: Props) {
       uploadedBy: 'Juan Pérez',
       uploadedAt: new Date(),
       notes: notes.trim() || undefined,
+      fileUrl,
     };
 
     const logs: PrequotationLog[] = [
@@ -90,7 +121,12 @@ export function NewPrequotationDialog({ onClose, onCreate }: Props) {
       totalAmount: Number(parseFloat(totalAmount) || 0),
     };
 
-    onCreate(newPreq);
+    try {
+      await onCreate(newPreq);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo crear la precotización');
+    }
   }
 
   const isValid = Boolean(title.trim() && clientId && file && !Number.isNaN(Number(parseFloat(totalAmount))));
@@ -100,6 +136,7 @@ export function NewPrequotationDialog({ onClose, onCreate }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <Card className="w-full max-w-lg p-6 space-y-5 max-h-[90vh] overflow-y-auto">
         {/* Header */}
+        {error && <Card className="p-3 border-red-200 bg-red-50 text-sm text-red-700">{error}</Card>}
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold">Nueva Precotización</h2>

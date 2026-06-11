@@ -275,7 +275,7 @@ export function LocalDataProvider({ children }: { children: React.ReactNode }) {
     // notify admin (demo user) — best-effort: notify first admin user found in contractors or fallback to DEMO_USER id 'user-1'
     try {
       const adminId = MOCK_DEMO_USER?.id ?? 'user-1';
-      addNotification({ recipientId: adminId, message: `Tienes una nueva solicitud de material`, createdAt: new Date(), relatedJobId: next.projectId });
+      addNotification({ id: `noti-${Date.now()}`, recipientId: adminId, message: `Tienes una nueva solicitud de material`, createdAt: new Date(), relatedJobId: next.projectId });
     } catch {}
 
     return next;
@@ -291,7 +291,7 @@ export function LocalDataProvider({ children }: { children: React.ReactNode }) {
         const contractor = contractors.find((c) => c.id === target.contractorId);
         const recipientId = contractor?.userId ?? null;
         if (recipientId) {
-          addNotification({ recipientId, message: `Tu solicitud ${id} ha sido devuelta: ${data.rejectionComments ?? ''}`, createdAt: new Date(), relatedJobId: target.projectId });
+          addNotification({ id: `noti-${Date.now()}`, recipientId, message: `Tu solicitud ${id} ha sido devuelta: ${data.rejectionComments ?? ''}`, createdAt: new Date(), relatedJobId: target.projectId });
         }
       }
     }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Prequotation, PrequotationStatus, PrequotationVersion, PrequotationLog } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -119,6 +119,21 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
   const cfg = STATUS_CONFIG[p.status];
   const transitions = STATUS_TRANSITIONS[p.status];
   const { addQuotation, addProductionOrder, addNotification, contractors, updatePrequotation } = useLocalData();
+  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
+
+  useEffect(() => setP(prequotation), [prequotation]);
+
+  async function persist(next: Prequotation) {
+    if (!apiBase) return next;
+    const response = await fetch(`${apiBase}/api/prequotations/${next.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next),
+    });
+    if (!response.ok) return next;
+    const saved = await response.json();
+    return saved as Prequotation;
+  }
 
   const [selectedContractorId, setSelectedContractorId] = useState<string | undefined>(undefined);
   const defaultEst = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14);
@@ -137,7 +152,10 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
       performedAt: new Date(),
       description: `Estado cambiado de ${STATUS_CONFIG[p.status].label} → ${STATUS_CONFIG[newStatus].label}.`,
     };
-    applyUpdate({ ...p, status: newStatus, updatedAt: new Date(), logs: [...p.logs, log] });
+    void (async () => {
+      const next = await persist({ ...p, status: newStatus, updatedAt: new Date(), logs: [...p.logs, log] });
+      applyUpdate(next);
+    })();
   }
 
   function addComment() {
@@ -149,7 +167,10 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
       performedAt: new Date(),
       description: `Comentario: "${comment.trim()}"`,
     };
-    applyUpdate({ ...p, updatedAt: new Date(), logs: [...p.logs, log] });
+    void (async () => {
+      const next = await persist({ ...p, updatedAt: new Date(), logs: [...p.logs, log] });
+      applyUpdate(next);
+    })();
     setComment('');
   }
 
@@ -158,33 +179,42 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
     if (!file) return;
     const isExcel =
       file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv');
-    const newVersion: PrequotationVersion = {
-      id: `ver-${Date.now()}`,
-      version: p.currentVersion + 1,
-      fileName: file.name,
-      fileType: isExcel ? 'excel' : 'pdf',
-      fileSize: `${Math.round(file.size / 1024)} KB`,
-      uploadedBy: 'Juan Pérez',
-      uploadedAt: new Date(),
+    const reader = new FileReader();
+    reader.onload = () => {
+      const fileUrl = String(reader.result ?? '');
+      const newVersion: PrequotationVersion & { fileUrl: string } = {
+        id: `ver-${Date.now()}`,
+        version: p.currentVersion + 1,
+        fileName: file.name,
+        fileType: isExcel ? 'excel' : 'pdf',
+        fileSize: `${Math.round(file.size / 1024)} KB`,
+        uploadedBy: 'Juan Pérez',
+        uploadedAt: new Date(),
+        fileUrl,
+      };
+      const log: PrequotationLog = {
+        id: `log-${Date.now()}`,
+        action: 'file_uploaded',
+        performedBy: 'Juan Pérez',
+        performedAt: new Date(),
+        description: `Archivo subido: ${file.name} (v${newVersion.version})`,
+      };
+      void (async () => {
+        const next = await persist({
+          ...p,
+          currentVersion: newVersion.version,
+          versions: [...p.versions, newVersion as PrequotationVersion],
+          logs: [...p.logs, log],
+          updatedAt: new Date(),
+        });
+        applyUpdate(next);
+      })();
     };
-    const log: PrequotationLog = {
-      id: `log-${Date.now()}`,
-      action: 'file_uploaded',
-      performedBy: 'Juan Pérez',
-      performedAt: new Date(),
-      description: `Archivo subido: ${file.name} (v${newVersion.version})`,
-    };
-    applyUpdate({
-      ...p,
-      currentVersion: newVersion.version,
-      versions: [...p.versions, newVersion],
-      logs: [...p.logs, log],
-      updatedAt: new Date(),
-    });
+    reader.readAsDataURL(file);
     e.target.value = '';
   }
 
-  function simulateDownload(version: PrequotationVersion) {
+  function simulateDownload(version: PrequotationVersion & { fileUrl?: string }) {
     const log: PrequotationLog = {
       id: `log-${Date.now()}`,
       action: 'file_downloaded',
@@ -192,7 +222,13 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
       performedAt: new Date(),
       description: `Archivo descargado: ${version.fileName}`,
     };
-    applyUpdate({ ...p, logs: [...p.logs, log] });
+    void (async () => {
+      const next = await persist({ ...p, logs: [...p.logs, log] });
+      applyUpdate(next);
+    })();
+    if (version.fileUrl) {
+      window.open(version.fileUrl, '_blank', 'noopener,noreferrer');
+    }
   }
 
   function convertToQuotation() {
@@ -279,8 +315,11 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
       logs: [...p.logs, log],
     };
 
-    updatePrequotation(p.id, updated);
-    applyUpdate(updated);
+    void (async () => {
+      const saved = await persist(updated);
+      updatePrequotation(p.id, saved);
+      applyUpdate(saved);
+    })();
     setShowConvertConfirm(false);
   }
 
@@ -481,10 +520,10 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
                         {v.notes && <p className="text-xs text-muted-foreground/70 italic mt-0.5">{v.notes}</p>}
                       </div>
                       <button
-                        onClick={() => simulateDownload(v)}
-                        className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                        title="Descargar"
-                      >
+                      onClick={() => simulateDownload(v as PrequotationVersion & { fileUrl?: string })}
+                      className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      title="Descargar"
+                    >
                         <Download className="w-4 h-4" />
                       </button>
                     </div>

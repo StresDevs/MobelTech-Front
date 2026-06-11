@@ -1,12 +1,26 @@
 'use client';
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useLocalData } from '@/lib/contexts/LocalDataContext';
-import { AlertCircle, Calendar, ClipboardList } from 'lucide-react';
+import type { ProductionOrder } from '@/lib/types';
+import { AlertCircle } from 'lucide-react';
+
+const EMPTY_PHASES: ProductionOrder['items'][number]['phases'] = [
+  { name: 'cortado', completed: false },
+  { name: 'canteado', completed: false },
+  { name: 'ensamblado', completed: false },
+  { name: 'instalacion', completed: false },
+  { name: 'entregado', completed: false },
+];
+
+function getStableProgress(id: string, index: number) {
+  const charTotal = Array.from(id).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return (charTotal + index * 17) % 80;
+}
 
 export default function AssignedJobs() {
   const { user } = useAuth();
@@ -38,45 +52,49 @@ export default function AssignedJobs() {
     if (!user) return [];
     if (myJobs.length > 0) return [];
     const source = quotations.filter((q) => q.status === 'approved' || q.status === 'draft' || q.status === 'adjustment');
-    return source.map((q, idx) => {
-      const items = q.items.map((it) => ({ id: `mock-${it.id}`, description: it.description, quantity: it.quantity, progress: Math.floor(Math.random() * 80) }));
+    return source.map<ProductionOrder>((q, idx) => {
+      const items = q.items.map((it, itemIndex) => ({
+        id: `mock-${it.id}`,
+        description: it.description,
+        quantity: it.quantity,
+        progress: getStableProgress(it.id, itemIndex),
+        phases: EMPTY_PHASES,
+      }));
       return {
         id: `mock-po-${q.id}`,
         quotationId: q.id,
-        projectId: q.projectId,
+        projectId: q.projectId ?? `mock-project-${q.id}`,
         startDate: new Date(),
         estimatedDeliveryDate: new Date(Date.now() + (7 + idx) * 24 * 60 * 60 * 1000),
         status: 'in-progress',
         items,
         assignedContractorId: user.id,
-      } as any;
+      };
     });
   }, [quotations, user, myJobs.length]);
 
   const displayedJobs = myJobs.length > 0 ? myJobs : fallbackJobs;
-
-  useEffect(() => {
-    try {
-      console.debug('AssignedJobs debug', {
-        userId: user?.id ?? null,
-        userRole: user?.role ?? null,
-        contractorsCount: contractors?.length ?? 0,
-        productionOrdersCount: productionOrders?.length ?? 0,
-        myContractor: myContractor ?? null,
-        myJobsCount: myJobs.length,
-        assignedIdsSample: productionOrders?.slice(0, 10).map((p) => p.assignedContractorId),
-      });
-    } catch (e) {
-      // ignore
-    }
-  }, [user, contractors, productionOrders, myContractor, myJobs]);
 
   const myNotifications = useMemo(() => {
     if (!user) return [];
     return notifications.filter((n) => n.recipientId === user.id && !n.read);
   }, [notifications, user]);
 
-  const formatDate = (d?: Date) => (d ? d.toLocaleDateString('es-BO') : 'N/A');
+  const formatDate = (date?: Date | string) => {
+    if (!date) return 'N/A';
+    const value = date instanceof Date ? date : new Date(date);
+    return Number.isNaN(value.getTime()) ? 'N/A' : value.toLocaleDateString('es-BO');
+  };
+
+  const getProgress = (job: ProductionOrder) => (
+    Math.round(job.items.reduce((sum, item) => sum + (item.progress || 0), 0) / (job.items.length || 1))
+  );
+
+  const isDelayed = (job: ProductionOrder) => {
+    if (job.status === 'completed') return false;
+    const deliveryDate = job.estimatedDeliveryDate ? new Date(job.estimatedDeliveryDate) : null;
+    return job.status === 'delayed' || Boolean(deliveryDate && new Date() > deliveryDate);
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -123,13 +141,13 @@ export default function AssignedJobs() {
         {displayedJobs.map((job) => {
           const quotation = quotations.find((q) => q.id === job.quotationId);
           const client = clients.find((c) => c.id === quotation?.clientId);
-          const delayed = job.estimatedDeliveryDate && new Date() > job.estimatedDeliveryDate && job.status !== 'completed';
+          const delayed = isDelayed(job);
 
           return (
             <Card key={job.id} className="p-4 border border-border">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                    <p className="font-mono text-xs font-semibold">{job.id}</p>
+                  <p className="font-mono text-xs font-semibold">{job.id}</p>
                   <p className="font-semibold text-sm truncate">{quotation?.items?.[0]?.description || 'Trabajo sin título'}</p>
                   <p className="text-xs text-muted-foreground truncate">{client?.name || 'Cliente desconocido'}</p>
                 </div>
@@ -154,11 +172,11 @@ export default function AssignedJobs() {
                 </div>
                 <div>
                   <p className="text-muted-foreground">Progreso</p>
-                  <p className="font-medium">{Math.round((job.items.reduce((s, it) => s + (it.progress || 0), 0) / (job.items.length || 1)))}%</p>
+                  <p className="font-medium">{getProgress(job)}%</p>
                 </div>
               </div>
 
-                <div className="mt-3 flex gap-2">
+              <div className="mt-3 flex gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setSelected(selected === job.id ? null : job.id)}>
                   Ver Detalles
                 </Button>
@@ -204,8 +222,8 @@ export default function AssignedJobs() {
             {displayedJobs.map((job) => {
               const quotation = quotations.find((q) => q.id === job.quotationId);
               const client = clients.find((c) => c.id === quotation?.clientId);
-              const delayed = job.estimatedDeliveryDate && new Date() > job.estimatedDeliveryDate && job.status !== 'completed';
-              const prog = Math.round((job.items.reduce((s, it) => s + (it.progress || 0), 0) / (job.items.length || 1)));
+              const delayed = isDelayed(job);
+              const prog = getProgress(job);
 
               return (
                 <tr key={job.id} className="border-b border-border hover:bg-muted/50">
@@ -238,12 +256,18 @@ export default function AssignedJobs() {
         </table>
       </div>
 
+      {displayedJobs.length === 0 && (
+        <Card className="p-6 text-center text-sm text-muted-foreground">
+          No tienes trabajos asignados por el momento.
+        </Card>
+      )}
+
       {/* Selected details (desktop) */}
-            {selected && (
+      {selected && (
         <Card className="p-4">
           <h3 className="font-semibold">Detalles - {selected}</h3>
           <div className="mt-3 text-sm">
-              {(() => {
+            {(() => {
               const job = displayedJobs.find((j) => j.id === selected);
               if (!job) return <p>Trabajo no encontrado.</p>;
               const quotation = quotations.find((q) => q.id === job.quotationId);
