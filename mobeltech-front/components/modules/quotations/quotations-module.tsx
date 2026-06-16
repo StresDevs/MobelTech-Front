@@ -731,7 +731,17 @@ function QuotationDetail({
 
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.error || 'No se pudieron crear los proyectos por ambiente.');
+        const details =
+          body?.details && typeof body.details === 'object'
+            ? Object.entries(body.details)
+                .flatMap(([field, messages]) =>
+                  Array.isArray(messages)
+                    ? messages.filter(Boolean).map((message) => `${field}: ${String(message)}`)
+                    : [],
+                )
+                .join(' | ')
+            : '';
+        throw new Error(details || body?.error || 'No se pudieron crear los proyectos por ambiente.');
       }
 
       const updatedQuotation = normalizeQuotationRecord(await response.json());
