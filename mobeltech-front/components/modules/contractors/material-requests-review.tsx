@@ -172,7 +172,7 @@ export function MaterialRequestsReview() {
     return (
       <PageLoadingState
         title="Cargando solicitudes"
-        description="Recuperando solicitudes, materiales y contratistas desde la API."
+        description="Recuperando solicitudes, materiales y contratistas..."
       />
     );
   }

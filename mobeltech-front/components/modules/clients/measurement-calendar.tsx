@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { ChevronLeft, ChevronRight, Plus, FileDown, Phone, MapPin, Mail, Clock, Search, UserPlus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, FileDown, Phone, MapPin, Mail, Clock, Search, UserPlus, BellRing, Sofa } from 'lucide-react';
 
 const SLOTS_PER_DAY = 4;
 const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -99,6 +99,49 @@ function getSlotDefaultTime(slotIndex: number) {
   return SLOT_START_TIMES[slotIndex] ?? SLOT_START_TIMES[SLOT_START_TIMES.length - 1];
 }
 
+function getFurnitureSummary(furnitureItems: string[]) {
+  return furnitureItems.filter(Boolean).join(', ');
+}
+
+function getQuotationDeliveryMeta(value?: string | null) {
+  if (!value) return null;
+
+  const deliveryDate = parseLocalDate(value);
+  if (!deliveryDate) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  deliveryDate.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.round((deliveryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0) {
+    return {
+      label: 'Entrega vencida',
+      tone: 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300',
+    };
+  }
+
+  if (diffDays === 0) {
+    return {
+      label: 'Entrega hoy',
+      tone: 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
+    };
+  }
+
+  if (diffDays <= 2) {
+    return {
+      label: `Entrega en ${diffDays} día${diffDays === 1 ? '' : 's'}`,
+      tone: 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300',
+    };
+  }
+
+  return {
+    label: `Entrega ${value}`,
+    tone: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+  };
+}
+
 function bumpTimeIfPast(date: Date, time: string) {
   const [hourRaw, minuteRaw] = time.split(':');
   const hour = Number.parseInt(hourRaw ?? '0', 10);
@@ -142,6 +185,7 @@ export function MeasurementCalendar() {
     address: '',
     email: '',
     time: '09:00',
+    quotationDeliveryDate: '',
     furnitureItems: '',
     notes: '',
   });
@@ -228,6 +272,7 @@ export function MeasurementCalendar() {
       address: '',
       email: '',
       time: suggestedTime,
+      quotationDeliveryDate: '',
       furnitureItems: '',
       notes: '',
     });
@@ -301,7 +346,7 @@ export function MeasurementCalendar() {
           .split(',')
           .map((item) => item.trim())
           .filter(Boolean),
-        quotationDeliveryDate: null,
+        quotationDeliveryDate: formData.quotationDeliveryDate || null,
         prequotationLink: null,
         notes: formData.notes.trim() || null,
         status: 'scheduled',
@@ -573,6 +618,15 @@ export function MeasurementCalendar() {
                 <Label className="text-xs">Hora de la medición *</Label>
                 <Input type="time" value={formData.time} onChange={(e) => setFormData({ ...formData, time: e.target.value })} className="h-9" />
               </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Entrega de cotización</Label>
+                <Input
+                  type="date"
+                  value={formData.quotationDeliveryDate}
+                  onChange={(e) => setFormData({ ...formData, quotationDeliveryDate: e.target.value })}
+                  className="h-9"
+                />
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Mueble(s) a realizar *</Label>
@@ -768,14 +822,30 @@ function DesktopSlot({
   const client = clients.find((item) => item.id === measurement.clientId);
   const clientName = client?.name ?? 'Cliente';
   const shortName = clientName.length > 14 ? `${clientName.slice(0, 13)}…` : clientName;
+  const furnitureSummary = getFurnitureSummary(measurement.furnitureItems);
+  const deliveryMeta = getQuotationDeliveryMeta(measurement.quotationDeliveryDate);
 
   return (
     <div
-      className="grid grid-cols-[1fr_48px_32px] items-center gap-px rounded min-h-[28px] px-1"
+      className="grid grid-cols-[1fr_48px_32px] items-center gap-px rounded min-h-[52px] px-1 py-1"
       style={{ backgroundColor: 'rgba(234,182,118,0.15)', border: '1px solid rgba(234,182,118,0.35)' }}
     >
-      <button onClick={() => onClickClient(measurement.clientId)} className="text-left text-[10px] font-medium truncate hover:underline text-foreground" title={clientName}>
-        {shortName}
+      <button onClick={() => onClickClient(measurement.clientId)} className="min-w-0 text-left hover:underline" title={clientName}>
+        <p className="truncate text-[10px] font-medium text-foreground">{shortName}</p>
+        {furnitureSummary && (
+          <div className="mt-0.5 flex items-center gap-1 text-[9px] text-muted-foreground">
+            <Sofa className="h-2.5 w-2.5 shrink-0" />
+            <span className="truncate" title={furnitureSummary}>
+              {furnitureSummary}
+            </span>
+          </div>
+        )}
+        {deliveryMeta && (
+          <span className={`mt-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[8px] font-semibold ${deliveryMeta.tone}`}>
+            <BellRing className="h-2.5 w-2.5" />
+            {deliveryMeta.label}
+          </span>
+        )}
       </button>
       <span className="text-center text-[10px] text-muted-foreground">{measurement.time}</span>
       <div className="flex justify-center">
@@ -830,15 +900,31 @@ function MobileSlot({
   }
 
   const client = clients.find((item) => item.id === measurement.clientId);
+  const furnitureSummary = getFurnitureSummary(measurement.furnitureItems);
+  const deliveryMeta = getQuotationDeliveryMeta(measurement.quotationDeliveryDate);
 
   return (
     <div className="px-4 py-2.5 flex items-center gap-3" style={{ backgroundColor: 'rgba(234,182,118,0.08)' }}>
       <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#eab676' }} />
-      <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-        <button onClick={() => onClickClient(measurement.clientId)} className="text-xs font-medium text-foreground hover:underline truncate max-w-[140px]">
-          {client?.name ?? 'Cliente'}
-        </button>
-        <span className="text-[10px] text-muted-foreground whitespace-nowrap">{measurement.time}</span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => onClickClient(measurement.clientId)} className="text-xs font-medium text-foreground hover:underline truncate max-w-[140px]">
+            {client?.name ?? 'Cliente'}
+          </button>
+          <span className="text-[10px] text-muted-foreground whitespace-nowrap">{measurement.time}</span>
+        </div>
+        {furnitureSummary && (
+          <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+            <Sofa className="h-3 w-3 shrink-0" />
+            <span className="truncate">{furnitureSummary}</span>
+          </div>
+        )}
+        {deliveryMeta && (
+          <span className={`mt-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${deliveryMeta.tone}`}>
+            <BellRing className="h-3 w-3" />
+            {deliveryMeta.label}
+          </span>
+        )}
       </div>
       <Button
         variant="outline"

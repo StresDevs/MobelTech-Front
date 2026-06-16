@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRole } from '@/hooks/use-role-context';
-import { Quotation, QuotationItem, QuotationAudit } from '@/lib/types';
+import { Quotation, QuotationItem, QuotationAudit, QuotationEnvironmentProject } from '@/lib/types';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,7 +31,8 @@ import {
   Download,
   ArrowUpDown,
   RefreshCw,
-  Loader2,
+  FolderPlus,
+  Layers3,
 } from 'lucide-react';
 
 type QuotationStatus = Quotation['status'];
@@ -66,8 +67,6 @@ const STATUS_CONFIG: Record<
   },
 };
 
-const ALL_STATUSES: QuotationStatus[] = ['draft', 'adjustment', 'approved', 'rejected'];
-
 type SortKey = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
 
 type QuotationContractor = {
@@ -82,6 +81,7 @@ type QuotationContractor = {
 type ApiQuotation = Quotation & {
   clientName?: string | null;
   assignedContractors?: QuotationContractor[];
+  environmentProjects?: QuotationEnvironmentProject[];
   prequotation?: {
     id: string;
     title: string;
@@ -120,13 +120,36 @@ function getInitials(name: string) {
     .slice(0, 2);
 }
 
+function normalizeQuotationRecord(raw: any): ApiQuotation {
+  return {
+    ...raw,
+    createdDate: new Date(raw.createdDate),
+    updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : undefined,
+    totalAmount: Number(raw.totalAmount ?? 0),
+    advanceAmount: Number(raw.advanceAmount ?? 0),
+    items: (raw.items ?? []).map((item: any) => ({
+      ...item,
+      quantity: Number(item.quantity ?? 0),
+      unitPrice: Number(item.unitPrice ?? 0),
+    })),
+    assignedContractors: raw.assignedContractors ?? [],
+    environmentProjects: (raw.environmentProjects ?? []).map((environment: any) => ({
+      ...environment,
+      price: Number(environment.price ?? 0),
+    })),
+    auditLogs: (raw.auditLogs ?? []).map((log: any) => ({
+      ...log,
+      changedAt: new Date(log.changedAt),
+    })),
+  };
+}
+
 export function QuotationsModule() {
   const router = useRouter();
   const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '', []);
   const [data, setData] = useState<ApiQuotation[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [statusSaving, setStatusSaving] = useState<QuotationStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<QuotationStatus | 'all'>('all');
@@ -134,25 +157,6 @@ export function QuotationsModule() {
   const [dateTo, setDateTo] = useState<string>('');
   const [sort, setSort] = useState<SortKey>('date-desc');
   const [selected, setSelected] = useState<ApiQuotation | null>(null);
-
-  function normalizeQuotation(raw: any): ApiQuotation {
-    return {
-      ...raw,
-      createdDate: new Date(raw.createdDate),
-      updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : undefined,
-      totalAmount: Number(raw.totalAmount ?? 0),
-      items: (raw.items ?? []).map((item: any) => ({
-        ...item,
-        quantity: Number(item.quantity ?? 0),
-        unitPrice: Number(item.unitPrice ?? 0),
-      })),
-      assignedContractors: raw.assignedContractors ?? [],
-      auditLogs: (raw.auditLogs ?? []).map((log: any) => ({
-        ...log,
-        changedAt: new Date(log.changedAt),
-      })),
-    };
-  }
 
   async function loadQuotations() {
     if (!apiBase) {
@@ -167,7 +171,7 @@ export function QuotationsModule() {
       const response = await fetch(`${apiBase}/api/quotations`, { cache: 'no-store' });
       if (!response.ok) throw new Error('No se pudieron cargar las cotizaciones');
       const json = await response.json();
-      const nextData = json.map(normalizeQuotation);
+      const nextData = json.map(normalizeQuotationRecord);
       setData(nextData);
       setSelected((current) => {
         if (!current) return null;
@@ -188,11 +192,11 @@ export function QuotationsModule() {
     status?: QuotationStatus;
     items?: QuotationItem[];
     totalAmount?: number;
+    advanceAmount?: number;
   }) {
     if (!apiBase) return;
 
     setSaving(true);
-    setStatusSaving(payload.status ?? null);
     setError(null);
     try {
       const response = await fetch(`${apiBase}/api/quotations/${id}`, {
@@ -201,7 +205,7 @@ export function QuotationsModule() {
         body: JSON.stringify(payload),
       });
       if (!response.ok) throw new Error('No se pudieron guardar los cambios de la cotización');
-      const updated = normalizeQuotation(await response.json());
+      const updated = normalizeQuotationRecord(await response.json());
       setData((prev) => prev.map((quotation) => (quotation.id === id ? updated : quotation)));
       setSelected(updated);
       await loadQuotations();
@@ -210,7 +214,6 @@ export function QuotationsModule() {
       setError(err instanceof Error ? err.message : 'Error guardando cotización');
     } finally {
       setSaving(false);
-      setStatusSaving(null);
     }
   }
 
@@ -289,24 +292,23 @@ export function QuotationsModule() {
     setDateTo('');
   }
 
-  function updateStatus(id: string, newStatus: QuotationStatus) {
-    void saveQuotationChanges(id, { status: newStatus });
-  }
-
   if (selected) {
     return (
       <div className="p-6">
         <QuotationDetail
           quotation={selected}
+          apiBase={apiBase}
           clientName={selected.clientName ?? undefined}
           projectName={undefined}
           contractors={selected.assignedContractors ?? []}
           prequotationTitle={selected.prequotation?.title}
           onBack={() => setSelected(null)}
-          onChangeStatus={(s) => updateStatus(selected.id, s)}
+          onReplaceQuotation={(updated) => {
+            setData((current) => current.map((quotation) => quotation.id === updated.id ? updated : quotation));
+            setSelected(updated);
+          }}
           onSave={(payload) => saveQuotationChanges(selected.id, payload)}
           saving={saving}
-          statusSaving={statusSaving}
         />
       </div>
     );
@@ -394,7 +396,7 @@ export function QuotationsModule() {
       <Card className="p-4 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
           {/* Search */}
-          <div className="md:col-span-5 relative">
+          <div className="md:col-span-4 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
               placeholder="Buscar por mueble, cliente, contratista o ID…"
@@ -429,11 +431,11 @@ export function QuotationsModule() {
           </div>
 
           {/* Sort */}
-          <div className="md:col-span-1 relative">
+          <div className="md:col-span-2 relative">
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as SortKey)}
-              className="w-full h-10 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring appearance-none cursor-pointer"
+              className="w-full h-10 rounded-md border border-input bg-background pl-3 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-ring appearance-none cursor-pointer"
               title="Ordenar"
             >
               <option value="date-desc">Más reciente</option>
@@ -486,6 +488,7 @@ export function QuotationsModule() {
           {filtered.map(({ q, client, project, contractors, prequotation }) => {
             const cfg = STATUS_CONFIG[q.status];
             const itemCount = q.items.reduce((s, i) => s + i.quantity, 0);
+            const quotationHeadline = prequotation?.title ?? q.items[0]?.description ?? `Cotización ${q.id}`;
             return (
               <Card
                 key={q.id}
@@ -505,7 +508,7 @@ export function QuotationsModule() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold truncate">
-                        {client?.name ?? 'Cliente'}{' '}
+                        {quotationHeadline}{' '}
                         <span className="text-muted-foreground font-normal">·</span>{' '}
                         <span className="font-mono text-xs text-muted-foreground">{q.id}</span>
                       </p>
@@ -525,7 +528,7 @@ export function QuotationsModule() {
 
                     {/* Items preview */}
                     <p className="text-xs text-muted-foreground mt-1 truncate">
-                      {q.items.map((i) => `${i.quantity}× ${i.description}`).join(' · ')}
+                      Cliente: {client?.name ?? '—'} · {q.items.map((i) => `${i.quantity}× ${i.description}`).join(' · ')}
                     </p>
 
                     {/* Meta row */}
@@ -603,45 +606,154 @@ function StatCard({
 
 interface DetailProps {
   quotation: ApiQuotation;
+  apiBase: string;
   clientName?: string;
   projectName?: string;
   contractors: { id: string; name: string; specialization: string; phone: string }[];
   prequotationTitle?: string;
   onBack: () => void;
-  onChangeStatus: (s: QuotationStatus) => void;
-  onSave: (payload: { items?: QuotationItem[]; totalAmount?: number; status?: QuotationStatus }) => void;
+  onReplaceQuotation: (quotation: ApiQuotation) => void;
+  onSave: (payload: { items?: QuotationItem[]; totalAmount?: number; advanceAmount?: number; status?: QuotationStatus }) => void;
   saving: boolean;
-  statusSaving: QuotationStatus | null;
 }
 
 function QuotationDetail({
   quotation,
+  apiBase,
   clientName,
   projectName,
   contractors,
   prequotationTitle,
   onBack,
-  onChangeStatus,
+  onReplaceQuotation,
   onSave,
   saving,
-  statusSaving,
 }: DetailProps) {
   const { currentRole } = useRole();
 
   const currentQuotation = quotation;
   const cfg = STATUS_CONFIG[currentQuotation.status];
   const subtotal = currentQuotation.items.reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0);
+  const quotationHeadline = prequotationTitle ?? currentQuotation.items[0]?.description ?? `Cotización #${quotation.id}`;
 
   const [editing, setEditing] = useState(false);
   const [editableItems, setEditableItems] = useState<QuotationItem[]>(() =>
     currentQuotation.items.map((it) => ({ ...it } as QuotationItem)),
   );
   const [editableTotal, setEditableTotal] = useState<number>(currentQuotation.totalAmount || subtotal);
+  const [editableAdvance, setEditableAdvance] = useState<number>(currentQuotation.advanceAmount || 0);
+  const [showEnvironmentBuilder, setShowEnvironmentBuilder] = useState(false);
+  const [environmentSaving, setEnvironmentSaving] = useState(false);
+  const [environmentError, setEnvironmentError] = useState<string | null>(null);
+  const [contractorOptions, setContractorOptions] = useState<QuotationContractor[]>([]);
+  const [environmentRows, setEnvironmentRows] = useState<Array<{
+    key: string;
+    ambience: string;
+    description: string;
+    price: string;
+    estimatedStartDate: string;
+    estimatedEndDate: string;
+    assignedContractorId: string;
+  }>>([
+    {
+      key: 'env-1',
+      ambience: '',
+      description: '',
+      price: '',
+      estimatedStartDate: '',
+      estimatedEndDate: '',
+      assignedContractorId: '',
+    },
+  ]);
 
   useEffect(() => {
     setEditableItems(currentQuotation.items.map((it: any) => ({ ...it })));
     setEditableTotal(currentQuotation.totalAmount || subtotal);
+    setEditableAdvance(currentQuotation.advanceAmount || 0);
   }, [currentQuotation]);
+
+  useEffect(() => {
+    if (!apiBase || currentRole !== 'admin') return;
+    void (async () => {
+      try {
+        const response = await fetch(`${apiBase}/api/contractors`, { cache: 'no-store' });
+        if (!response.ok) return;
+        setContractorOptions(await response.json());
+      } catch {}
+    })();
+  }, [apiBase, currentRole]);
+
+  function addEnvironmentRow() {
+    setEnvironmentRows((current) => [
+      ...current,
+      {
+        key: `env-${Date.now()}-${current.length}`,
+        ambience: '',
+        description: '',
+        price: '',
+        estimatedStartDate: '',
+        estimatedEndDate: '',
+        assignedContractorId: '',
+      },
+    ]);
+  }
+
+  async function saveEnvironmentProjects() {
+    const preparedRows = environmentRows.map((row) => ({
+      ambience: row.ambience.trim(),
+      description: row.description.trim() || null,
+      price: Number(row.price),
+      estimatedStartDate: row.estimatedStartDate,
+      estimatedEndDate: row.estimatedEndDate,
+      assignedContractorId: row.assignedContractorId || null,
+    }));
+
+    const hasInvalidRow = preparedRows.some((row) => {
+      if (!row.ambience || !Number.isFinite(row.price) || row.price < 0) return true;
+      if (!row.estimatedStartDate || !row.estimatedEndDate) return true;
+      return new Date(row.estimatedEndDate).getTime() < new Date(row.estimatedStartDate).getTime();
+    });
+
+    if (hasInvalidRow) {
+      setEnvironmentError('Completa ambiente, precio y rango de fechas válido en cada fila.');
+      return;
+    }
+
+    setEnvironmentSaving(true);
+    setEnvironmentError(null);
+
+    try {
+      const response = await fetch(`${apiBase}/api/quotations/${quotation.id}/environment-projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projects: preparedRows }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || 'No se pudieron crear los proyectos por ambiente.');
+      }
+
+      const updatedQuotation = normalizeQuotationRecord(await response.json());
+      setEnvironmentRows([
+        {
+          key: 'env-1',
+          ambience: '',
+          description: '',
+          price: '',
+          estimatedStartDate: '',
+          estimatedEndDate: '',
+          assignedContractorId: '',
+        },
+      ]);
+      setShowEnvironmentBuilder(false);
+      onReplaceQuotation(updatedQuotation);
+    } catch (error) {
+      setEnvironmentError(error instanceof Error ? error.message : 'No se pudieron crear los proyectos por ambiente.');
+    } finally {
+      setEnvironmentSaving(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -655,7 +767,7 @@ function QuotationDetail({
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-bold truncate">Cotización #{quotation.id}</h1>
+            <h1 className="text-xl font-bold truncate">{quotationHeadline}</h1>
             <span
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${cfg.color}`}
             >
@@ -664,7 +776,7 @@ function QuotationDetail({
             </span>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {clientName ?? 'Cliente'} · Creada el {formatDate(quotation.createdDate)}
+            Cliente: {clientName ?? 'Cliente'} · Cotización #{quotation.id} · Creada el {formatDate(quotation.createdDate)}
             {projectName ? ` · ${projectName}` : ''}
           </p>
         </div>
@@ -698,6 +810,7 @@ function QuotationDetail({
                             onSave({
                               items: editableItems,
                               totalAmount: editableTotal,
+                              advanceAmount: editableAdvance,
                             });
                             setEditing(false);
                           }}
@@ -707,6 +820,7 @@ function QuotationDetail({
                         <Button size="sm" variant="ghost" onClick={() => {
                           setEditableItems(currentQuotation.items.map((it: any) => ({ ...it })));
                           setEditableTotal(currentQuotation.totalAmount || subtotal);
+                          setEditableAdvance(currentQuotation.advanceAmount || 0);
                           setEditing(false);
                         }}>
                           Cancelar
@@ -799,33 +913,61 @@ function QuotationDetail({
             </div>
           </Card>
 
-          {/* Status actions */}
-          <Card className="p-5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              Cambiar estado
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {ALL_STATUSES.filter((s) => s !== quotation.status).map((s) => {
-                const sCfg = STATUS_CONFIG[s];
-                const isApprove = s === 'approved';
-                const isReject = s === 'rejected';
-                return (
-                  <Button
-                    key={s}
-                    size="sm"
-                    variant={isApprove ? 'default' : 'outline'}
-                    disabled={saving}
-                    onClick={() => onChangeStatus(s)}
-                    className={`gap-1.5 text-xs ${
-                      isApprove ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''
-                    } ${isReject ? 'text-red-500 border-red-200 hover:bg-red-50' : ''}`}
-                  >
-                    {statusSaving === s ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : sCfg.icon}
-                    {statusSaving === s ? 'Actualizando...' : sCfg.label}
-                  </Button>
-                );
-              })}
+          <Card className="p-5 space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Proyectos Por Ambiente
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Divide esta cotización en ambientes independientes con fechas y contratista responsable.
+                </p>
+              </div>
+              {currentRole === 'admin' && (
+                <Button
+                  size="sm"
+                  className="gap-1.5 self-start"
+                  onClick={() => setShowEnvironmentBuilder(true)}
+                  style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
+                >
+                  <FolderPlus className="w-3.5 h-3.5" />
+                  Crear proyectos por ambiente
+                </Button>
+              )}
             </div>
+
+            {currentQuotation.environmentProjects && currentQuotation.environmentProjects.length > 0 ? (
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead className="bg-muted/35">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Ambiente</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Descripción</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Precio</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Inicio</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Fin</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Contratista</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentQuotation.environmentProjects.map((environment) => (
+                      <tr key={environment.id} className="border-t border-border">
+                        <td className="px-4 py-3 font-medium">{environment.ambience}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{environment.description || '—'}</td>
+                        <td className="px-4 py-3 text-right font-mono">{formatCurrency(environment.price)}</td>
+                        <td className="px-4 py-3">{environment.estimatedStartDate}</td>
+                        <td className="px-4 py-3">{environment.estimatedEndDate}</td>
+                        <td className="px-4 py-3">{environment.contractorName || 'Sin asignar'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border bg-muted/20 p-5 text-sm text-muted-foreground">
+                Aún no hay ambientes creados para esta cotización.
+              </div>
+            )}
           </Card>
         </div>
 
@@ -843,8 +985,8 @@ function QuotationDetail({
               />
               <SummaryRow
                 icon={<Hammer className="w-3.5 h-3.5" />}
-                label="Proyecto"
-                value={projectName ?? '—'}
+                label="Referencia"
+                value={quotationHeadline}
               />
               <SummaryRow
                 icon={<Calendar className="w-3.5 h-3.5" />}
@@ -871,6 +1013,29 @@ function QuotationDetail({
                   icon={<DollarSign className="w-3.5 h-3.5" />}
                   label="Total"
                   value={formatCurrency(currentQuotation.totalAmount || editableTotal)}
+                  mono
+                />
+              )}
+              {currentRole === 'admin' && editing ? (
+                <div className="flex items-start gap-2.5">
+                  <span className="text-muted-foreground mt-0.5">
+                    <Layers3 className="w-3.5 h-3.5" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-muted-foreground">Anticipo</p>
+                    <Input
+                      type="number"
+                      value={String(editableAdvance)}
+                      onChange={(e) => setEditableAdvance(Number(e.target.value || 0))}
+                      className="text-sm font-medium mt-0.5 w-full"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <SummaryRow
+                  icon={<Layers3 className="w-3.5 h-3.5" />}
+                  label="Anticipo"
+                  value={formatCurrency(currentQuotation.advanceAmount || editableAdvance)}
                   mono
                 />
               )}
@@ -965,6 +1130,101 @@ function QuotationDetail({
           )}
         </div>
       </div>
+
+      {showEnvironmentBuilder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-6xl max-h-[88vh] overflow-y-auto p-6 space-y-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-lg font-semibold">Crear proyectos por ambiente</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Registra ambientes, precio estimado, rango de fechas y contratista para esta cotización.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setShowEnvironmentBuilder(false)} disabled={environmentSaving}>
+                Cerrar
+              </Button>
+            </div>
+
+            {environmentError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {environmentError}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {environmentRows.map((row) => (
+                <div key={row.key} className="grid gap-3 rounded-2xl border border-border bg-muted/15 p-4 lg:grid-cols-[1.1fr_1.5fr_0.8fr_0.9fr_0.9fr_1fr_auto]">
+                  <Input
+                    placeholder="Ambiente"
+                    value={row.ambience}
+                    onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, ambience: e.target.value } : item))}
+                  />
+                  <Input
+                    placeholder="Descripción"
+                    value={row.description}
+                    onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, description: e.target.value } : item))}
+                  />
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Precio"
+                    value={row.price}
+                    onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, price: e.target.value } : item))}
+                  />
+                  <Input
+                    type="date"
+                    value={row.estimatedStartDate}
+                    onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, estimatedStartDate: e.target.value } : item))}
+                  />
+                  <Input
+                    type="date"
+                    value={row.estimatedEndDate}
+                    onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, estimatedEndDate: e.target.value } : item))}
+                  />
+                  <select
+                    value={row.assignedContractorId}
+                    onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, assignedContractorId: e.target.value } : item))}
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value="">Asignar contratista</option>
+                    {contractorOptions.map((contractor) => (
+                      <option key={contractor.id} value={contractor.id}>
+                        {contractor.name}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    variant="outline"
+                    type="button"
+                    className="h-10"
+                    onClick={() => setEnvironmentRows((current) => current.filter((item) => item.key !== row.key))}
+                    disabled={environmentRows.length === 1}
+                  >
+                    Quitar
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button type="button" variant="outline" className="gap-1.5" onClick={addEnvironmentRow}>
+                <FolderPlus className="w-3.5 h-3.5" />
+                Agregar ambiente
+              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setShowEnvironmentBuilder(false)} disabled={environmentSaving}>
+                  Cancelar
+                </Button>
+                <Button onClick={saveEnvironmentProjects} disabled={environmentSaving} style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
+                  {environmentSaving ? 'Guardando...' : 'Crear proyectos'}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

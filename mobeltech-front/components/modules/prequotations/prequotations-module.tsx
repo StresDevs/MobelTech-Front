@@ -102,6 +102,8 @@ export function PrequotationsModule() {
       ...p,
       createdAt: new Date(p.createdAt),
       updatedAt: new Date(p.updatedAt),
+      totalAmount: p.totalAmount != null ? Number(p.totalAmount) : undefined,
+      advanceAmount: p.advanceAmount != null ? Number(p.advanceAmount) : undefined,
       versions: (p.versions ?? []).map((v: any) => ({
         ...v,
         uploadedAt: new Date(v.uploadedAt),

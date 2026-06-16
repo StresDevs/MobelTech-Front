@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { AppLayout } from '@/components/layout/app-layout';
 import { MaterialRequestsReview } from '@/components/modules/contractors/material-requests-review';
-import AssignedJobs from '@/components/modules/contractor/assigned-jobs';
 import { ContractorWarehouse } from '@/components/modules/contractors/contractor-warehouse';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { useRole } from '@/hooks/use-role-context';
@@ -64,17 +63,10 @@ export default function ContractorRequestsPage() {
         <div className="p-6 space-y-6">
           <div>
             <h1 className="text-3xl font-bold">Solicitud de Material</h1>
-            <p className="text-muted-foreground mt-2">Selecciona tu trabajo asignado y solicita materiales</p>
+            <p className="text-muted-foreground mt-2">Selecciona el trabajo dentro del formulario y solicita los materiales que necesites.</p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-1">
-              <AssignedJobs />
-            </div>
-            <div className="lg:col-span-2">
-              {contractorId ? <ContractorWarehouse contractorId={contractorId} /> : <p>No se encontró tu registro de contratista.</p>}
-            </div>
-          </div>
+          {contractorId ? <ContractorWarehouse contractorId={contractorId} /> : <p>No se encontró tu registro de contratista.</p>}
         </div>
       </AppLayout>
     );

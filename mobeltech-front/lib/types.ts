@@ -58,6 +58,7 @@ export interface Quotation {
   status: 'draft' | 'adjustment' | 'approved' | 'rejected';
   createdDate: Date;
   totalAmount: number;
+  advanceAmount?: number;
   notes?: string;
   auditLogs?: QuotationAudit[];
 }
@@ -431,4 +432,19 @@ export interface Prequotation {
   convertedToQuotationId?: string;
   billingRequested?: boolean;
   totalAmount?: number; // monto total en bolivianos
+  advanceAmount?: number;
+}
+
+export interface QuotationEnvironmentProject {
+  id: string;
+  projectId?: string | null;
+  assignedContractorId?: string | null;
+  ambience: string;
+  description?: string | null;
+  price: number;
+  estimatedStartDate: string;
+  estimatedEndDate: string;
+  contractorName?: string | null;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
 }
