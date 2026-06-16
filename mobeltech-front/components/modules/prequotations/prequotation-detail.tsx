@@ -22,13 +22,8 @@ import {
   Sparkles,
   Eye,
   RotateCcw,
+  Copy,
 } from 'lucide-react';
-import { useLocalData } from '@/lib/contexts/LocalDataContext';
-
-const SYSTEM_RECIPIENTS = {
-  admin: '11111111-1111-1111-1111-111111111111',
-  architect: '33333333-3333-3333-3333-333333333333',
-} as const;
 
 const STATUS_CONFIG: Record<
   PrequotationStatus,
@@ -133,17 +128,28 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
 
   const cfg = STATUS_CONFIG[p.status];
   const transitions = STATUS_TRANSITIONS[p.status];
-  const { addQuotation, addProductionOrder, addNotification, contractors, updatePrequotation } = useLocalData();
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
-  const [apiContractors, setApiContractors] = useState<typeof contractors>([]);
+  const [apiContractors, setApiContractors] = useState<Array<{
+    id: string;
+    name: string;
+    phone: string;
+    email?: string | null;
+    userId?: string | null;
+    specialization?: string | null;
+    status: string;
+    credentials?: { username: string; password: string } | null;
+  }>>([]);
   const [newContractor, setNewContractor] = useState({
     name: '',
     phone: '',
     email: '',
     specialization: '',
+    username: '',
+    password: '',
   });
   const [showNewContractor, setShowNewContractor] = useState(false);
-  const availableContractors = apiContractors.length > 0 ? apiContractors : contractors;
+  const [createdCredentials, setCreatedCredentials] = useState<{ username: string; password: string } | null>(null);
+  const availableContractors = apiContractors;
 
   useEffect(() => setP(prequotation), [prequotation]);
 
@@ -199,6 +205,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
 
   async function createContractorQuick() {
     if (!apiBase || !newContractor.name.trim() || !newContractor.phone.trim()) return;
+    setActionError(null);
     const response = await fetch(`${apiBase}/api/contractors`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -207,38 +214,33 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
         phone: newContractor.phone.trim(),
         email: newContractor.email.trim() || null,
         specialization: newContractor.specialization.trim() || null,
+        username: newContractor.username.trim() || undefined,
+        password: newContractor.password.trim() || undefined,
+        createSystemAccess: true,
         status: 'active',
       }),
     });
-    if (!response.ok) return;
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      setActionError(body?.detail || body?.error || 'No se pudo crear el contratista.');
+      return;
+    }
     const created = await response.json();
     setApiContractors((prev) => [created, ...prev]);
     setSelectedContractorId(created.id);
+    setCreatedCredentials(created.credentials ?? null);
     setShowNewContractor(false);
-    setNewContractor({ name: '', phone: '', email: '', specialization: '' });
-  }
-
-  function notifyStateChange(previousStatus: PrequotationStatus, nextStatus: PrequotationStatus) {
-    const message = `Precotización "${p.title}" cambió de ${STATUS_CONFIG[previousStatus].label} a ${STATUS_CONFIG[nextStatus].label}.`;
-    const recipients = [SYSTEM_RECIPIENTS.admin, SYSTEM_RECIPIENTS.architect];
-
-    recipients.forEach((recipientId) => {
-      addNotification({
-        id: `noti-${Date.now()}-${recipientId}`,
-        recipientId,
-        message,
-        createdAt: new Date(),
-        relatedJobId: p.id,
-      });
+    setNewContractor({
+      name: '',
+      phone: '',
+      email: '',
+      specialization: '',
+      username: '',
+      password: '',
     });
-
-    try {
-      window.dispatchEvent(new Event('mobeltech_notifications_change'));
-    } catch {}
   }
 
   function changeStatus(newStatus: PrequotationStatus) {
-    const previousStatus = p.status;
     const log: PrequotationLog = {
       id: `log-${Date.now()}`,
       action: 'status_changed',
@@ -249,7 +251,6 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
     void (async () => {
       const next = await persist({ ...p, status: newStatus, updatedAt: new Date(), logs: [...p.logs, log] });
       applyUpdate(next);
-      notifyStateChange(previousStatus, newStatus);
     })();
   }
 
@@ -347,87 +348,6 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
       return;
     }
     setActionError(null);
-    const quotationId = `quot-${Date.now()}`;
-
-    const qItem = {
-      id: `qitem-${Date.now()}`,
-      description: p.title,
-      quantity: 1,
-      unitPrice: 0,
-      dimensions: '',
-    };
-
-    const quotation = {
-      id: quotationId,
-      clientId: p.clientId,
-      items: [qItem],
-      status: 'draft',
-      createdDate: new Date(),
-      totalAmount: p.totalAmount ?? 0,
-    } as any;
-
-    addQuotation(quotation);
-
-    const poId = `po-${Date.now()}`;
-    const poItem = {
-      id: `pitem-${Date.now()}`,
-      description: qItem.description,
-      quantity: qItem.quantity,
-      phases: [
-        { name: 'cortado', completed: false },
-        { name: 'canteado', completed: false },
-        { name: 'ensamblado', completed: false },
-        { name: 'instalacion', completed: false },
-        { name: 'entregado', completed: false },
-      ],
-      progress: 0,
-    } as any;
-
-    const contractorObj = availableContractors.find((c) => c.id === selectedContractorId);
-    const recipientId = contractorObj?.userId ?? selectedContractorId;
-
-    const po = {
-      id: poId,
-      projectId: undefined,
-      quotationId: quotationId,
-      items: [poItem],
-      startDate: new Date(),
-      estimatedDeliveryDate: estimatedDelivery ? new Date(estimatedDelivery) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
-      status: 'pending',
-      assignedContractorId: recipientId,
-    } as any;
-
-    addProductionOrder(po);
-
-    const noti = {
-      id: `noti-${Date.now()}`,
-      recipientId: recipientId,
-      message: `Tienes una orden de trabajo asignada: ${po.id} (cotización ${quotationId})`,
-      createdAt: new Date(),
-      read: false,
-      relatedJobId: po.id,
-    };
-    addNotification(noti);
-
-    const log: PrequotationLog = {
-      id: `log-${Date.now()}`,
-      action: 'converted_to_quotation',
-      performedBy: 'Juan Pérez',
-      performedAt: new Date(),
-      description: `Precotización convertida a Cotización #${quotationId} y asignada a contratista ${contractorObj?.name ?? selectedContractorId}.`,
-    };
-
-    const updated: Prequotation = {
-      ...p,
-      status: 'confirmed',
-      assignedContractorId: selectedContractorId,
-      startDate: new Date(startDate),
-      estimatedDeliveryDate: new Date(estimatedDelivery),
-      convertedToQuotationId: quotationId,
-      updatedAt: new Date(),
-      logs: [...p.logs, log],
-    };
-
     void (async () => {
       const apiResp = await fetch(`${apiBase}/api/prequotations/${p.id}/confirm`, {
         method: 'POST',
@@ -442,12 +362,18 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
         const body = await apiResp.json().catch(() => null);
         throw new Error(body?.message || body?.error || 'No se pudo confirmar la precotización');
       }
-      const saved = (await apiResp.json()) as Prequotation;
-      updatePrequotation(p.id, saved);
+      const body = await apiResp.json();
+      const saved = (body.prequotation ?? body) as Prequotation;
+      setCreatedCredentials(body.contractorCredentials ?? null);
       applyUpdate(saved);
-      notifyStateChange(p.status, 'confirmed');
     })();
     setShowConvertConfirm(false);
+  }
+
+  async function copyCredentialValue(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {}
   }
 
   const sortedLogs = [...p.logs].sort((a, b) => {
@@ -809,7 +735,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
       {/* Convert to quotation confirm */}
       {showConvertConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <Card className="w-full max-w-md p-6 space-y-5">
+          <Card className="w-full max-w-3xl max-h-[88vh] overflow-y-auto p-6 space-y-5">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: '#eab676' + '33' }}>
                 <Sparkles className="w-5 h-5" style={{ color: '#eab676' }} />
@@ -822,10 +748,39 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
 
             <p className="text-sm text-muted-foreground">La precotización <strong>{p.title}</strong> se marcará como <strong>Confirmada</strong> y se generará una cotización formal.</p>
 
-            <div className="space-y-3">
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+              <div className="space-y-3">
               {actionError && (
                 <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                   {actionError}
+                </div>
+              )}
+              {createdCredentials && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/90 p-4 text-sm text-emerald-900">
+                  <p className="font-semibold">Credenciales del contratista</p>
+                  <p className="mt-1 text-xs text-emerald-800/80">Compártelas para que pueda iniciar sesión y ver sus trabajos asignados.</p>
+                  <div className="mt-3 grid gap-2">
+                    <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-emerald-700/80">Usuario</p>
+                        <p className="font-mono text-sm">{createdCredentials.username}</p>
+                      </div>
+                      <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={() => void copyCredentialValue(createdCredentials.username)}>
+                        <Copy className="w-3.5 h-3.5" />
+                        Copiar
+                      </Button>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-emerald-700/80">Contraseña</p>
+                        <p className="font-mono text-sm">{createdCredentials.password}</p>
+                      </div>
+                      <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={() => void copyCredentialValue(createdCredentials.password)}>
+                        <Copy className="w-3.5 h-3.5" />
+                        Copiar
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               )}
               <label className="text-sm font-medium">Asignar contratista</label>
@@ -850,32 +805,49 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
               </Button>
 
               {showNewContractor && (
-                <div className="grid gap-2 rounded-lg border border-border p-3">
+                <div className="grid gap-2 rounded-lg border border-border p-3 md:grid-cols-2">
                   <input className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Nombre" value={newContractor.name} onChange={(e) => setNewContractor({ ...newContractor, name: e.target.value })} />
                   <input className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Teléfono" value={newContractor.phone} onChange={(e) => setNewContractor({ ...newContractor, phone: e.target.value })} />
                   <input className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Email (opcional)" value={newContractor.email} onChange={(e) => setNewContractor({ ...newContractor, email: e.target.value })} />
                   <input className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Especialización" value={newContractor.specialization} onChange={(e) => setNewContractor({ ...newContractor, specialization: e.target.value })} />
-                  <Button type="button" size="sm" onClick={createContractorQuick} style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
+                  <input className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Usuario de acceso" value={newContractor.username} onChange={(e) => setNewContractor({ ...newContractor, username: e.target.value })} />
+                  <input className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Contraseña inicial" value={newContractor.password} onChange={(e) => setNewContractor({ ...newContractor, password: e.target.value })} />
+                  <Button type="button" size="sm" className="md:col-span-2" onClick={createContractorQuick} style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
                     Guardar contratista
                   </Button>
                 </div>
               )}
+              </div>
 
-              <label className="text-sm font-medium">Fecha estimada de entrega</label>
-              <input
-                type="date"
-                value={estimatedDelivery}
-                onChange={(e) => setEstimatedDelivery(e.target.value)}
-                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-              />
-
-              <label className="text-sm font-medium">Fecha estimada de inicio</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-              />
+              <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+                <div>
+                  <p className="text-sm font-medium">Planificacion</p>
+                  <p className="text-xs text-muted-foreground mt-1">Define fechas y revisa si ya hay credenciales listas para compartir.</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Fecha estimada de entrega</label>
+                  <input
+                    type="date"
+                    value={estimatedDelivery}
+                    onChange={(e) => setEstimatedDelivery(e.target.value)}
+                    className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Fecha estimada de inicio</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                </div>
+                {!createdCredentials ? (
+                  <div className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
+                    Si el contratista es nuevo, al guardarlo o confirmarlo aqui mismo se generaran sus credenciales de acceso.
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             <div className="flex gap-2 justify-end">

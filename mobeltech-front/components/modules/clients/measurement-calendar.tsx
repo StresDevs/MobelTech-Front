@@ -2,9 +2,11 @@
 
 import type { ElementType } from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
@@ -42,7 +44,19 @@ type ApiMeasurement = {
   status: 'scheduled' | 'completed' | 'cancelled';
   createdAt: string;
   updatedAt: string;
+  linkedPrequotation?: {
+    id: string;
+    title: string;
+    status: string;
+  } | null;
 };
+
+function getUsablePrequotationLink(link?: string | null) {
+  const trimmed = link?.trim();
+  const normalized = trimmed?.replace(/\/$/, '');
+  if (!normalized || normalized === '/prequotations') return null;
+  return trimmed;
+}
 
 function getDaysInMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
@@ -63,13 +77,6 @@ function isPastDate(date: Date) {
   const compare = new Date(date);
   compare.setHours(0, 0, 0, 0);
   return compare < today;
-}
-
-function formatDisplayDate(value?: string | null) {
-  if (!value) return '—';
-  const parsed = parseLocalDate(value);
-  if (!parsed) return '—';
-  return Number.isNaN(parsed.getTime()) ? '—' : parsed.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
 }
 
 function toLocalDateString(date: Date) {
@@ -109,6 +116,7 @@ function bumpTimeIfPast(date: Date, time: string) {
 }
 
 export function MeasurementCalendar() {
+  const router = useRouter();
   const apiBase = useMemo(() => {
     const value = process.env.NEXT_PUBLIC_API_URL?.trim();
     return value ? value.replace(/\/$/, '') : '';
@@ -125,7 +133,7 @@ export function MeasurementCalendar() {
   const [measurements, setMeasurements] = useState<ApiMeasurement[]>([]);
   const [newMeasurementSlot, setNewMeasurementSlot] = useState<{ day: number; slotIndex: number } | null>(null);
   const [clientDetailId, setClientDetailId] = useState<string | null>(null);
-  const [docPreviewMeasurement, setDocPreviewMeasurement] = useState<ApiMeasurement | null>(null);
+  const [missingPrequotationMeasurement, setMissingPrequotationMeasurement] = useState<ApiMeasurement | null>(null);
   const [clientSearchQuery, setClientSearchQuery] = useState('');
   const [formData, setFormData] = useState({
     clientId: '',
@@ -294,7 +302,7 @@ export function MeasurementCalendar() {
           .map((item) => item.trim())
           .filter(Boolean),
         quotationDeliveryDate: null,
-        prequotationLink: '/prequotations',
+        prequotationLink: null,
         notes: formData.notes.trim() || null,
         status: 'scheduled',
       };
@@ -327,6 +335,21 @@ export function MeasurementCalendar() {
 
   const detailClient = clientDetailId ? clients.find((client) => client.id === clientDetailId) ?? null : null;
 
+  const handleDocClick = (measurement: ApiMeasurement) => {
+    if (measurement.linkedPrequotation) {
+      router.push(`/prequotations?prequotationId=${measurement.linkedPrequotation.id}`);
+      return;
+    }
+
+    const prequotationLink = getUsablePrequotationLink(measurement.prequotationLink);
+    if (prequotationLink) {
+      router.push(prequotationLink);
+      return;
+    }
+
+    setMissingPrequotationMeasurement(measurement);
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
@@ -347,7 +370,7 @@ export function MeasurementCalendar() {
       </div>
 
       {error && <Card className="p-3 border-red-200 bg-red-50 text-sm text-red-700">{error}</Card>}
-      {loading && <Card className="p-4 text-sm text-muted-foreground">Cargando calendario...</Card>}
+      {loading && <CalendarLoadingState />}
 
       <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
@@ -411,7 +434,7 @@ export function MeasurementCalendar() {
                       measurement={measurement}
                       clients={clients}
                       disabled={past && !measurement}
-                      onClickDoc={(m) => setDocPreviewMeasurement(m)}
+                      onClickDoc={handleDocClick}
                       onClickAvailable={() => openNewMeasurement(day, index)}
                       onClickClient={(id) => setClientDetailId(id)}
                     />
@@ -460,7 +483,7 @@ export function MeasurementCalendar() {
                     measurement={measurement}
                     clients={clients}
                     disabled={past && !measurement}
-                    onClickDoc={(m) => setDocPreviewMeasurement(m)}
+                    onClickDoc={handleDocClick}
                     onClickAvailable={() => openNewMeasurement(day, index)}
                     onClickClient={(id) => setClientDetailId(id)}
                   />
@@ -623,102 +646,66 @@ export function MeasurementCalendar() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!docPreviewMeasurement} onOpenChange={(open) => !open && setDocPreviewMeasurement(null)}>
+      <Dialog open={!!missingPrequotationMeasurement} onOpenChange={(open) => !open && setMissingPrequotationMeasurement(null)}>
         <DialogContent className="max-w-2xl p-0 overflow-hidden">
           <DialogHeader className="px-6 pt-6 pb-2">
-            <DialogTitle className="text-lg">
-              {docPreviewMeasurement?.prequotationLink ? 'Documento de precotización' : 'Sin documento de precotización'}
-            </DialogTitle>
+            <DialogTitle className="text-lg">Sin precotización enlazada</DialogTitle>
           </DialogHeader>
 
-          {docPreviewMeasurement && (
+          {missingPrequotationMeasurement && (
             <div className="px-6 pb-6 space-y-4">
-              {docPreviewMeasurement.prequotationLink ? (
-                <>
-                  <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-semibold">Ver documento de precotización</p>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {docPreviewMeasurement.time} · {formatDisplayDate(docPreviewMeasurement.date)}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-3">
-                          Documento asociado al cliente y a la medición agendada.
-                        </p>
-                      </div>
-                      <Badge className="bg-emerald-100 text-emerald-700">Disponible</Badge>
-                    </div>
+              <div className="rounded-xl border border-border bg-muted/30 p-5 text-center space-y-3">
+                <div className="mx-auto h-14 w-14 rounded-full bg-[#eab676]/15 flex items-center justify-center">
+                  <FileDown className="h-6 w-6 text-[#d6a85a]" />
+                </div>
+                <p className="text-base font-semibold">No hay precotizaciones ancladas</p>
+                <p className="text-sm text-muted-foreground">
+                  Esta medición todavía no tiene una precotización vinculada. ¿Deseas crear una ahora?
+                </p>
+              </div>
 
-                    <div className="rounded-lg border border-dashed border-border bg-background p-4 space-y-3">
-                      <div className="flex items-center gap-3">
-                        <div className="h-12 w-12 rounded-lg bg-[#eab676]/15 flex items-center justify-center">
-                          <FileDown className="h-5 w-5 text-[#d6a85a]" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">
-                            {docPreviewMeasurement.prequotationLink.split('/').pop() || 'Precotización vinculada'}
-                          </p>
-                          <p className="text-xs text-muted-foreground">Previsualización del documento</p>
-                        </div>
-                      </div>
-                      <div className="rounded-md bg-muted/50 p-3">
-                        <p className="text-xs text-muted-foreground">Vista previa</p>
-                        <div className="mt-2 h-40 rounded-md border border-border bg-white flex items-center justify-center text-sm text-muted-foreground">
-                          Vista previa del documento vinculada a esta medición
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <DialogFooter className="gap-2">
-                    <Button variant="outline" onClick={() => setDocPreviewMeasurement(null)}>
-                      Cerrar
-                    </Button>
-                    <Button
-                      style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
-                      onClick={() => {
-                        if (docPreviewMeasurement.prequotationLink) {
-                          window.location.href = docPreviewMeasurement.prequotationLink;
-                        }
-                      }}
-                    >
-                      Ver documento de precotización
-                    </Button>
-                  </DialogFooter>
-                </>
-              ) : (
-                <>
-                  <div className="rounded-xl border border-border bg-muted/30 p-5 text-center space-y-3">
-                    <div className="mx-auto h-14 w-14 rounded-full bg-[#eab676]/15 flex items-center justify-center">
-                      <FileDown className="h-6 w-6 text-[#d6a85a]" />
-                    </div>
-                    <p className="text-base font-semibold">No hay ningún documento de precotización</p>
-                    <p className="text-sm text-muted-foreground">
-                      Esta medición todavía no tiene un documento vinculado. ¿Deseas crear uno ahora?
-                    </p>
-                  </div>
-
-                  <DialogFooter className="gap-2">
-                    <Button variant="outline" onClick={() => setDocPreviewMeasurement(null)}>
-                      Cancelar
-                    </Button>
-                    <Button
-                      style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
-                      onClick={() => {
-                        setDocPreviewMeasurement(null);
-                        window.location.href = '/prequotations';
-                      }}
-                    >
-                      Sí, crear uno
-                    </Button>
-                  </DialogFooter>
-                </>
-              )}
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setMissingPrequotationMeasurement(null)}>
+                  Cancelar
+                </Button>
+                <Button
+                  style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
+                  onClick={() => {
+                    setMissingPrequotationMeasurement(null);
+                    router.push(`/prequotations?measurementId=${missingPrequotationMeasurement.id}&clientId=${missingPrequotationMeasurement.clientId}`);
+                  }}
+                >
+                  Sí, crear una
+                </Button>
+              </DialogFooter>
             </div>
           )}
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function CalendarLoadingState() {
+  return (
+    <PageLoadingState
+      title="Cargando calendario de mediciones"
+      description="Recuperando clientes, horarios y precotizaciones ancladas..."
+      preview={
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, index) => (
+            <div key={index} className="rounded-2xl border border-border/60 bg-background/80 p-3">
+              <div className="h-4 w-10 animate-pulse rounded bg-muted" />
+              <div className="mt-3 space-y-2">
+                <div className="h-8 animate-pulse rounded-xl bg-[#eab676]/18" />
+                <div className="h-8 animate-pulse rounded-xl bg-muted/80" />
+                <div className="h-8 animate-pulse rounded-xl bg-muted/70" />
+              </div>
+            </div>
+          ))}
+        </div>
+      }
+    />
   );
 }
 

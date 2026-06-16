@@ -1,15 +1,14 @@
 'use client';
 
 import { useMemo, useState, useEffect } from 'react';
-import { useLocalData } from '@/lib/contexts/LocalDataContext';
-import { useAuth } from '@/lib/contexts/AuthContext';
+import { useRouter } from 'next/navigation';
 import { useRole } from '@/hooks/use-role-context';
-import { PROJECTS } from '@/lib/mock-data';
 import { Quotation, QuotationItem, QuotationAudit } from '@/lib/types';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { PageLoadingState } from '@/components/ui/page-loading-state';
 import {
   Search,
   Filter,
@@ -31,6 +30,8 @@ import {
   X,
   Download,
   ArrowUpDown,
+  RefreshCw,
+  Loader2,
 } from 'lucide-react';
 
 type QuotationStatus = Quotation['status'];
@@ -69,6 +70,25 @@ const ALL_STATUSES: QuotationStatus[] = ['draft', 'adjustment', 'approved', 'rej
 
 type SortKey = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
 
+type QuotationContractor = {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  specialization: string;
+  status: string;
+};
+
+type ApiQuotation = Quotation & {
+  clientName?: string | null;
+  assignedContractors?: QuotationContractor[];
+  prequotation?: {
+    id: string;
+    title: string;
+  } | null;
+  updatedAt?: Date;
+};
+
 function formatDate(d: Date) {
   return new Intl.DateTimeFormat('es-BO', {
     day: '2-digit',
@@ -100,35 +120,113 @@ function getInitials(name: string) {
     .slice(0, 2);
 }
 
-function getPrequotationByQuotationId(quotationId: string, list: any[]) {
-  return list.find((p) => p.convertedToQuotationId === quotationId);
-}
-
 export function QuotationsModule() {
-  const { quotations, clients, prequotations, updateQuotation, productionOrders, contractors } = useLocalData();
-  const [data, setData] = useState<Quotation[]>(quotations);
-  useEffect(() => setData(quotations), [quotations]);
+  const router = useRouter();
+  const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '', []);
+  const [data, setData] = useState<ApiQuotation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [statusSaving, setStatusSaving] = useState<QuotationStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<QuotationStatus | 'all'>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
   const [sort, setSort] = useState<SortKey>('date-desc');
-  const [selected, setSelected] = useState<Quotation | null>(null);
+  const [selected, setSelected] = useState<ApiQuotation | null>(null);
+
+  function normalizeQuotation(raw: any): ApiQuotation {
+    return {
+      ...raw,
+      createdDate: new Date(raw.createdDate),
+      updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : undefined,
+      totalAmount: Number(raw.totalAmount ?? 0),
+      items: (raw.items ?? []).map((item: any) => ({
+        ...item,
+        quantity: Number(item.quantity ?? 0),
+        unitPrice: Number(item.unitPrice ?? 0),
+      })),
+      assignedContractors: raw.assignedContractors ?? [],
+      auditLogs: (raw.auditLogs ?? []).map((log: any) => ({
+        ...log,
+        changedAt: new Date(log.changedAt),
+      })),
+    };
+  }
+
+  async function loadQuotations() {
+    if (!apiBase) {
+      setError('Falta configurar NEXT_PUBLIC_API_URL en el front.');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/quotations`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('No se pudieron cargar las cotizaciones');
+      const json = await response.json();
+      const nextData = json.map(normalizeQuotation);
+      setData(nextData);
+      setSelected((current) => {
+        if (!current) return null;
+        return nextData.find((quotation: ApiQuotation) => quotation.id === current.id) ?? null;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error cargando cotizaciones');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadQuotations();
+  }, []);
+
+  async function saveQuotationChanges(id: string, payload: {
+    status?: QuotationStatus;
+    items?: QuotationItem[];
+    totalAmount?: number;
+  }) {
+    if (!apiBase) return;
+
+    setSaving(true);
+    setStatusSaving(payload.status ?? null);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/quotations/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error('No se pudieron guardar los cambios de la cotización');
+      const updated = normalizeQuotation(await response.json());
+      setData((prev) => prev.map((quotation) => (quotation.id === id ? updated : quotation)));
+      setSelected(updated);
+      await loadQuotations();
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error guardando cotización');
+    } finally {
+      setSaving(false);
+      setStatusSaving(null);
+    }
+  }
 
   const enriched = useMemo(() => {
     return data.map((q) => {
-      const client = clients.find((c) => c.id === q.clientId);
-      const project = PROJECTS.find((p) => p.id === q.projectId);
-      // find contractors assigned to production orders for this quotation
-      const assignedIds = productionOrders.filter((po) => po.quotationId === q.id).map((po) => po.assignedContractorId).filter(Boolean) as string[];
-      const contractorsForQ = assignedIds
-        .map((id) => contractors.find((c) => c.id === id) || contractors.find((c) => c.userId === id))
-        .filter(Boolean) as typeof contractors;
-      const prequotation = getPrequotationByQuotationId(q.id, prequotations);
       const itemsText = q.items.map((i) => i.description).join(' ');
-      return { q, client, project, contractors: contractorsForQ, prequotation, itemsText };
+      return {
+        q,
+        client: q.clientName ? { name: q.clientName } : null,
+        project: null,
+        contractors: q.assignedContractors ?? [],
+        prequotation: q.prequotation ?? null,
+        itemsText,
+      };
     });
-  }, [data, clients, prequotations]);
+  }, [data]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -192,29 +290,50 @@ export function QuotationsModule() {
   }
 
   function updateStatus(id: string, newStatus: QuotationStatus) {
-    updateQuotation(id, { status: newStatus });
-    setData((prev) => prev.map((q) => (q.id === id ? { ...q, status: newStatus } : q)));
-    if (selected?.id === id) setSelected({ ...selected, status: newStatus });
+    void saveQuotationChanges(id, { status: newStatus });
   }
 
   if (selected) {
-    const client = clients.find((c) => c.id === selected.clientId);
-    const project = PROJECTS.find((p) => p.id === selected.projectId);
-    const assignedIds = productionOrders.filter((po) => po.quotationId === selected.id).map((po) => po.assignedContractorId).filter(Boolean) as string[];
-    const selectedContractors = assignedIds
-      .map((id) => contractors.find((c) => c.id === id) || contractors.find((c) => c.userId === id))
-      .filter(Boolean) as any[];
-    const prequotation = getPrequotationByQuotationId(selected.id, prequotations);
     return (
       <div className="p-6">
         <QuotationDetail
           quotation={selected}
-          clientName={client?.name}
-          projectName={project?.name}
-          contractors={selectedContractors}
-          prequotationTitle={prequotation?.title}
+          clientName={selected.clientName ?? undefined}
+          projectName={undefined}
+          contractors={selected.assignedContractors ?? []}
+          prequotationTitle={selected.prequotation?.title}
           onBack={() => setSelected(null)}
           onChangeStatus={(s) => updateStatus(selected.id, s)}
+          onSave={(payload) => saveQuotationChanges(selected.id, payload)}
+          saving={saving}
+          statusSaving={statusSaving}
+        />
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <PageLoadingState
+          title="Cargando cotizaciones"
+          description="Consultando datos y sincronizando montos."
+          preview={
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div key={index} className="rounded-2xl border border-border/60 bg-background/80 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-11 w-11 animate-pulse rounded-xl bg-[#eab676]/20" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
+                      <div className="h-2 w-1/2 animate-pulse rounded bg-muted" />
+                    </div>
+                    <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          }
         />
       </div>
     );
@@ -230,7 +349,17 @@ export function QuotationsModule() {
             Cotizaciones formales generadas a partir de precotizaciones aprobadas.
           </p>
         </div>
+        <Button variant="outline" size="sm" className="gap-2 self-start" onClick={() => void loadQuotations()}>
+          <RefreshCw className="w-4 h-4" />
+          Actualizar
+        </Button>
       </div>
+
+      {error && (
+        <Card className="border-red-200 bg-red-50/80 p-4 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
+          {error}
+        </Card>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -334,12 +463,7 @@ export function QuotationsModule() {
         <p>
           {filtered.length} {filtered.length === 1 ? 'resultado' : 'resultados'}
         </p>
-        <p>
-          Suma visible:{' '}
-          <span className="font-mono font-semibold text-foreground">
-            {formatCurrency(filtered.reduce((s, { q }) => s + q.totalAmount, 0))}
-          </span>
-        </p>
+        <p>Resumen sincronizado en tiempo real</p>
       </div>
 
       {/* List */}
@@ -415,15 +539,6 @@ export function QuotationsModule() {
                         <Package className="w-3 h-3" />
                         {q.items.length} ítems / {itemCount} u.
                       </span>
-                      {project && (
-                        <>
-                          <span className="text-muted-foreground/50 text-xs">·</span>
-                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground truncate max-w-[180px]">
-                            <Hammer className="w-3 h-3" />
-                            {project.name}
-                          </span>
-                        </>
-                      )}
                       {contractors.length > 0 && (
                         <>
                           <span className="text-muted-foreground/50 text-xs">·</span>
@@ -487,13 +602,16 @@ function StatCard({
 // ─── Detail view ─────────────────────────────────────────────────────────────
 
 interface DetailProps {
-  quotation: Quotation;
+  quotation: ApiQuotation;
   clientName?: string;
   projectName?: string;
   contractors: { id: string; name: string; specialization: string; phone: string }[];
   prequotationTitle?: string;
   onBack: () => void;
   onChangeStatus: (s: QuotationStatus) => void;
+  onSave: (payload: { items?: QuotationItem[]; totalAmount?: number; status?: QuotationStatus }) => void;
+  saving: boolean;
+  statusSaving: QuotationStatus | null;
 }
 
 function QuotationDetail({
@@ -504,13 +622,13 @@ function QuotationDetail({
   prequotationTitle,
   onBack,
   onChangeStatus,
+  onSave,
+  saving,
+  statusSaving,
 }: DetailProps) {
-  const { quotations, updateQuotation } = useLocalData();
-  const { user } = useAuth();
   const { currentRole } = useRole();
 
-  // Always use latest quotation from context so updates reflect immediately
-  const currentQuotation: Quotation = quotations.find((q) => q.id === quotation.id) ?? quotation;
+  const currentQuotation = quotation;
   const cfg = STATUS_CONFIG[currentQuotation.status];
   const subtotal = currentQuotation.items.reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0);
 
@@ -575,58 +693,16 @@ function QuotationDetail({
                       <>
                         <Button
                           size="sm"
+                          disabled={saving}
                           onClick={() => {
-                            // save
-                            const now = new Date();
-                            const actor = user?.name ?? 'Administrador';
-                            const logs: any[] = [];
-                            // compare items
-                            currentQuotation.items.forEach((prev: any) => {
-                              const next = editableItems.find((it: any) => it.id === prev.id);
-                              if (!next) return;
-                              if (prev.quantity !== next.quantity) {
-                                logs.push({
-                                  id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                                  field: `items.${prev.id}.quantity`,
-                                  previousValue: String(prev.quantity),
-                                  nextValue: String(next.quantity),
-                                  changedBy: actor,
-                                  changedAt: now,
-                                });
-                              }
-                              if (prev.unitPrice !== next.unitPrice) {
-                                logs.push({
-                                  id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                                  field: `items.${prev.id}.unitPrice`,
-                                  previousValue: String(prev.unitPrice),
-                                  nextValue: String(next.unitPrice),
-                                  changedBy: actor,
-                                  changedAt: now,
-                                });
-                              }
-                            });
-                            // total amount change
-                            if ((currentQuotation.totalAmount || 0) !== editableTotal) {
-                              logs.push({
-                                id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                                field: 'totalAmount',
-                                previousValue: String(currentQuotation.totalAmount || 0),
-                                nextValue: String(editableTotal),
-                                changedBy: actor,
-                                changedAt: now,
-                              });
-                            }
-
-                            // commit
-                            updateQuotation(currentQuotation.id, {
+                            onSave({
                               items: editableItems,
                               totalAmount: editableTotal,
-                              auditLogs: logs,
-                            } as any);
+                            });
                             setEditing(false);
                           }}
                         >
-                          Guardar cambios
+                          {saving ? 'Guardando...' : 'Guardar cambios'}
                         </Button>
                         <Button size="sm" variant="ghost" onClick={() => {
                           setEditableItems(currentQuotation.items.map((it: any) => ({ ...it })));
@@ -738,13 +814,14 @@ function QuotationDetail({
                     key={s}
                     size="sm"
                     variant={isApprove ? 'default' : 'outline'}
+                    disabled={saving}
                     onClick={() => onChangeStatus(s)}
                     className={`gap-1.5 text-xs ${
                       isApprove ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''
                     } ${isReject ? 'text-red-500 border-red-200 hover:bg-red-50' : ''}`}
                   >
-                    {sCfg.icon}
-                    {sCfg.label}
+                    {statusSaving === s ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : sCfg.icon}
+                    {statusSaving === s ? 'Actualizando...' : sCfg.label}
                   </Button>
                 );
               })}

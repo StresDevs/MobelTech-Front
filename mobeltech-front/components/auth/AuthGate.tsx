@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import Image from 'next/image'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { AuthProvider } from '@/lib/contexts/AuthContext'
 import type { User } from '@/lib/types'
@@ -13,12 +13,12 @@ function redirectForRole(role: User['role']) {
   return role === 'contractor' ? '/assigned-jobs' : '/dashboard'
 }
 
-async function apiLogin(email: string, password: string) {
+async function apiLogin(identifier: string, password: string) {
   const response = await fetch(`${API_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ identifier, password }),
   })
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -34,8 +34,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isRedirecting, setIsRedirecting] = useState(false)
   const { resolvedTheme } = useTheme()
   const router = useRouter()
+  const pathname = usePathname()
+  const isDark = resolvedTheme === 'dark'
 
   useEffect(() => {
     try {
@@ -45,12 +48,27 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     setMounted(true)
   }, [])
 
+  useEffect(() => {
+    if (!mounted || !user) {
+      return
+    }
+
+    const destination = redirectForRole(user.role)
+    if (pathname === '/' || pathname === '/login') {
+      setIsRedirecting(true)
+      router.replace(destination)
+      return
+    }
+
+    setIsRedirecting(false)
+  }, [mounted, pathname, router, user])
+
   function persistSession(u: User, token: string) {
     localStorage.setItem('mobeltech_user', JSON.stringify(u))
     localStorage.setItem('mobeltech_token', token)
     try { window.dispatchEvent(new Event('mobeltech_auth_change')) } catch {}
+    setIsRedirecting(true)
     setUser(u)
-    router.replace(redirectForRole(u.role))
   }
 
   async function handleLogin(e: React.FormEvent) {
@@ -62,35 +80,51 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       persistSession(authenticatedUser, token)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Credenciales incorrectas')
+      setIsRedirecting(false)
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  if (!mounted) return <div className="min-h-screen bg-background" />
-
   function handleLogout() {
     localStorage.removeItem('mobeltech_user')
     localStorage.removeItem('mobeltech_token')
     try { window.dispatchEvent(new Event('mobeltech_auth_change')) } catch {}
+    setIsRedirecting(false)
     setUser(null)
+    router.replace('/')
   }
 
   function handleLoginDirect(u: User) {
     persistSession(u, localStorage.getItem('mobeltech_token') ?? '')
   }
 
-  if (user) {
+  function renderLoadingState(message: string) {
     return (
-      <AuthProvider user={user} onLogin={handleLoginDirect} onLogout={handleLogout}>
-        {children}
-      </AuthProvider>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="relative flex flex-col items-center gap-5 rounded-3xl border border-border/70 bg-card/90 px-10 py-9 shadow-2xl shadow-black/10 overflow-hidden">
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#eab676] via-[#f4d19f] to-[#d4a263]" />
+          <div className="relative h-16 w-16">
+            <div className="absolute inset-0 rounded-full border-4 border-[#eab676]/20" />
+            <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-[#eab676] animate-spin" />
+            <div className="absolute inset-4 rounded-full bg-[#eab676]/15" />
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-semibold text-foreground">{message}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Preparando tu espacio de trabajo</p>
+          </div>
+        </div>
+      </div>
     )
   }
 
-  const isDark = resolvedTheme === 'dark'
-
-  return (
+  const authContent = !mounted
+    ? renderLoadingState('Cargando sesión...')
+    : user && isRedirecting
+      ? renderLoadingState('Entrando a MöbelTech...')
+      : user
+        ? children
+        : (
     <div className="min-h-screen flex">
       <div
         className="hidden lg:flex lg:w-[480px] xl:w-[540px] flex-col items-center justify-center relative overflow-hidden"
@@ -138,15 +172,15 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground" htmlFor="login-email">Correo electrónico</label>
+              <label className="text-sm font-medium text-foreground" htmlFor="login-email">Usuario o correo</label>
               <input
                 id="login-email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@mobeltech.com"
-                type="email"
+                placeholder="admin@mobeltech.com o contratista.demo"
+                type="text"
                 required
-                autoComplete="email"
+                autoComplete="username"
                 className="w-full px-4 py-2.5 rounded-lg border border-input bg-card text-foreground placeholder:text-muted-foreground/60 transition-colors focus:outline-none focus:ring-2 focus:ring-[#eab676]/40 focus:border-[#eab676] text-sm"
               />
             </div>
@@ -187,5 +221,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         </div>
       </div>
     </div>
+  )
+
+  return (
+    <AuthProvider user={user} onLogin={handleLoginDirect} onLogout={handleLogout}>
+      {authContent}
+    </AuthProvider>
   )
 }

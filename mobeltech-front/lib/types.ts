@@ -415,7 +415,7 @@ export interface PrequotationLog {
 export interface Prequotation {
   id: string;
   clientId: string;
-  measurementId?: string;
+  measurementId?: string | null;
   title: string;
   status: PrequotationStatus;
   currentVersion: number;

@@ -1,302 +1,394 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { Textarea } from '@/components/ui/textarea';
-import { PROJECTS } from '@/lib/mock-data';
-import { useLocalData } from '@/lib/contexts/LocalDataContext';
-import { STATUS_LABELS } from '@/lib/constants';
-import { Check, X, AlertCircle } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { CURRENCY_FORMAT } from '@/lib/constants';
+import { useAuth } from '@/lib/contexts/AuthContext';
+import { AlertCircle, Check, ClipboardList, Search, X } from 'lucide-react';
 
-interface RequestState {
-  [key: string]: {
-    status: 'pending' | 'approved' | 'rejected';
-    rejectionComments?: string;
-  };
-}
+type Material = {
+  id: string;
+  name: string;
+  unit: string;
+  unitPrice: number;
+};
+
+type Contractor = {
+  id: string;
+  name: string;
+};
+
+type ProductionOrder = {
+  id: string;
+  items?: Array<{ description: string; quantity: number }>;
+};
+
+type MaterialRequestItem = {
+  materialId: string;
+  quantity: number;
+  notes?: string | null;
+};
+
+type MaterialRequest = {
+  id: string;
+  contractorId: string;
+  productionOrderId?: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  rejectionComments?: string | null;
+  requestDate: string;
+  items: MaterialRequestItem[];
+};
+
+const STATUS_META = {
+  pending: { label: 'Pendiente', className: 'bg-amber-100 text-amber-800' },
+  approved: { label: 'Aprobada', className: 'bg-emerald-100 text-emerald-800' },
+  rejected: { label: 'Rechazada', className: 'bg-rose-100 text-rose-800' },
+} as const;
 
 export function MaterialRequestsReview() {
-  const { materialRequests: requests, materials, contractors, updateMaterialRequest } = useLocalData();
-  const [selectedRequest, setSelectedRequest] = useState<string | null>(null);
+  const { user } = useAuth();
+  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [contractors, setContractors] = useState<Contractor[]>([]);
+  const [orders, setOrders] = useState<ProductionOrder[]>([]);
+  const [requests, setRequests] = useState<MaterialRequest[]>([]);
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [rejectionComments, setRejectionComments] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'approved':
-        return '#10b981';
-      case 'rejected':
-        return '#ef4444';
-      default:
-        return '#f59e0b';
-    }
-  };
-
-  const handleApprove = (requestId: string) => {
-    updateMaterialRequest(requestId, { status: 'approved' });
-    setSelectedRequest(null);
-  };
-
-  const handleReject = (requestId: string) => {
-    if (!rejectionComments.trim()) {
-      alert('Por favor ingresa un comentario sobre el rechazo');
+  async function loadData() {
+    if (!apiBase) {
+      setError('Falta configurar NEXT_PUBLIC_API_URL.');
+      setLoading(false);
       return;
     }
 
-    updateMaterialRequest(requestId, { status: 'rejected', rejectionComments });
-    setRejectionComments('');
-    setSelectedRequest(null);
-  };
+    try {
+      const [requestsResponse, materialsResponse, contractorsResponse, ordersResponse] = await Promise.all([
+        fetch(`${apiBase}/api/material-requests`, { cache: 'no-store' }),
+        fetch(`${apiBase}/api/materials`, { cache: 'no-store' }),
+        fetch(`${apiBase}/api/contractors`, { cache: 'no-store' }),
+        fetch(`${apiBase}/api/production-orders`, { cache: 'no-store' }),
+      ]);
 
-  const pendingRequests = requests.filter(r => r.status === 'pending');
-  const approvedRequests = requests.filter(r => r.status === 'approved');
-  const rejectedRequests = requests.filter(r => r.status === 'rejected');
+      if (!requestsResponse.ok) throw new Error('No se pudieron cargar las solicitudes.');
+      if (!materialsResponse.ok) throw new Error('No se pudieron cargar los materiales.');
+      if (!contractorsResponse.ok) throw new Error('No se pudieron cargar los contratistas.');
+      if (!ordersResponse.ok) throw new Error('No se pudieron cargar los trabajos.');
 
-  const RequestCard = ({ request }: { request: typeof requests[0] }) => {
-    const contractor = contractors.find(c => c.id === request.contractorId);
-    const project = request.projectId ? PROJECTS.find(p => p.id === request.projectId) : null;
+      setRequests(await requestsResponse.json());
+      setMaterials(await materialsResponse.json());
+      setContractors(await contractorsResponse.json());
+      setOrders(await ordersResponse.json());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error cargando solicitudes.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
-    const total = request.items.reduce((sum, item) => {
-      const material = materials.find(m => m.id === item.materialId);
-      return sum + (material?.unitPrice || 0) * item.quantity;
-    }, 0);
+  useEffect(() => {
+    void loadData();
+    if (!apiBase) return;
+    const interval = window.setInterval(() => {
+      void loadData();
+    }, 12000);
+    return () => window.clearInterval(interval);
+  }, [apiBase]);
 
+  const filteredRequests = useMemo(() => {
+    const normalized = searchQuery.trim().toLowerCase();
+    if (!normalized) return requests;
+    return requests.filter((request) => {
+      const contractorName = contractors.find((entry) => entry.id === request.contractorId)?.name ?? '';
+      const orderName = orders.find((entry) => entry.id === request.productionOrderId)?.items?.[0]?.description ?? '';
+      return [contractorName, orderName, request.id].some((value) => value.toLowerCase().includes(normalized));
+    });
+  }, [contractors, orders, requests, searchQuery]);
+
+  const pendingRequests = filteredRequests.filter((request) => request.status === 'pending');
+  const approvedRequests = filteredRequests.filter((request) => request.status === 'approved');
+  const rejectedRequests = filteredRequests.filter((request) => request.status === 'rejected');
+
+  const selectedRequest = requests.find((request) => request.id === selectedRequestId) ?? null;
+
+  function getContractorName(contractorId: string) {
+    return contractors.find((entry) => entry.id === contractorId)?.name ?? 'Contratista';
+  }
+
+  function getOrderName(orderId?: string | null) {
+    return orders.find((entry) => entry.id === orderId)?.items?.[0]?.description ?? 'Trabajo sin detalle';
+  }
+
+  function getMaterial(materialId: string) {
+    return materials.find((entry) => entry.id === materialId);
+  }
+
+  async function updateRequestStatus(status: 'approved' | 'rejected') {
+    if (!selectedRequest || !apiBase) return;
+    if (status === 'rejected' && !rejectionComments.trim()) {
+      setError('Debes escribir el motivo del rechazo.');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/material-requests/${selectedRequest.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status,
+          reviewedByUserId: user?.id ?? null,
+          rejectionComments: status === 'rejected' ? rejectionComments : null,
+        }),
+      });
+
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(body?.error || 'No se pudo actualizar la solicitud.');
+      }
+
+      setSelectedRequestId(null);
+      setRejectionComments('');
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error actualizando solicitud.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
     return (
-      <Card
-        className="p-4 space-y-3 cursor-pointer hover:shadow-md transition-shadow border-l-4"
-        style={{ borderLeftColor: getStatusColor(request.status) }}
-        onClick={() => setSelectedRequest(request.id)}
-      >
-        <div className="flex items-start justify-between">
-          <div>
-            <h3 className="font-semibold">{contractor?.name}</h3>
-            {project && <p className="text-sm text-muted-foreground">{project.name}</p>}
-            <p className="text-xs text-muted-foreground mt-1">
-              Solicitado: {new Date(request.requestDate).toLocaleDateString('es-BO')}
-            </p>
-          </div>
-          <Badge style={{ backgroundColor: getStatusColor(request.status) }}>
-            {STATUS_LABELS[request.status as keyof typeof STATUS_LABELS]}
-          </Badge>
-        </div>
-
-        <div className="space-y-1">
-          <p className="text-sm font-medium">Materiales ({request.items.length}):</p>
-          <div className="text-xs text-muted-foreground space-y-1">
-            {request.items.map(item => {
-              const material = materials.find(m => m.id === item.materialId);
-              return (
-                <p key={item.materialId}>
-                  • {material?.name} - {item.quantity} {material?.unit}
-                </p>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Totals/prices are omitted in the admin review per user request */}
-      </Card>
+      <PageLoadingState
+        title="Cargando solicitudes"
+        description="Recuperando solicitudes, materiales y contratistas desde la API."
+      />
     );
-  };
-
-  const selectedReq = requests.find(r => r.id === selectedRequest);
-  const contractor = selectedReq ? contractors.find(c => c.id === selectedReq.contractorId) : null;
-  const project = selectedReq?.projectId ? PROJECTS.find(p => p.id === selectedReq.projectId) : null;
-
-  const total = selectedReq
-    ? selectedReq.items.reduce((sum, item) => {
-        const material = materials.find(m => m.id === item.materialId);
-        return sum + (material?.unitPrice || 0) * item.quantity;
-      }, 0)
-    : 0;
+  }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Solicitudes de Material - Contratistas</h1>
-        <p className="text-muted-foreground mt-2">Revisa y aprueba las solicitudes de materiales de los contratistas</p>
+      <Card className="overflow-hidden border-none bg-[linear-gradient(135deg,rgba(234,182,118,0.16),rgba(255,255,255,0.92))] p-5 shadow-sm dark:bg-[linear-gradient(135deg,rgba(234,182,118,0.16),rgba(22,22,22,0.96))]">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#9a6b2f]">Panel Administrativo</p>
+            <h2 className="mt-2 text-2xl font-bold">Solicitudes de materiales de contratistas</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Aprueba rapido, observa con comentarios y devuelve la solicitud para correccion cuando sea necesario.
+            </p>
+          </div>
+          <div className="relative w-full max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Buscar por contratista, trabajo o ID..."
+              className="pl-9"
+            />
+          </div>
+        </div>
+      </Card>
+
+      {error ? <Card className="border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</Card> : null}
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <MetricCard icon={<AlertCircle className="h-4 w-4" />} label="Pendientes" value={String(pendingRequests.length)} />
+        <MetricCard icon={<Check className="h-4 w-4" />} label="Aprobadas" value={String(approvedRequests.length)} />
+        <MetricCard icon={<X className="h-4 w-4" />} label="Rechazadas" value={String(rejectedRequests.length)} />
       </div>
 
-      <Tabs defaultValue="pending" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="pending" className="gap-2">
-            <AlertCircle className="w-4 h-4" />
-            Pendientes ({pendingRequests.length})
-          </TabsTrigger>
-          <TabsTrigger value="approved" className="gap-2">
-            <Check className="w-4 h-4" />
-            Aprobadas ({approvedRequests.length})
-          </TabsTrigger>
-          <TabsTrigger value="rejected" className="gap-2">
-            <X className="w-4 h-4" />
-            Rechazadas ({rejectedRequests.length})
-          </TabsTrigger>
-        </TabsList>
+      <div className="grid gap-6 xl:grid-cols-3">
+        <RequestsColumn
+          title="Pendientes"
+          description="Requieren aprobacion o comentarios."
+          requests={pendingRequests}
+          openRequest={setSelectedRequestId}
+          getContractorName={getContractorName}
+          getOrderName={getOrderName}
+        />
+        <RequestsColumn
+          title="Aprobadas"
+          description="Ya notificadas al contratista."
+          requests={approvedRequests}
+          openRequest={setSelectedRequestId}
+          getContractorName={getContractorName}
+          getOrderName={getOrderName}
+        />
+        <RequestsColumn
+          title="Rechazadas"
+          description="Devueltas para correccion."
+          requests={rejectedRequests}
+          openRequest={setSelectedRequestId}
+          getContractorName={getContractorName}
+          getOrderName={getOrderName}
+        />
+      </div>
 
-        <TabsContent value="pending" className="mt-6 space-y-4">
-          {pendingRequests.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Check className="w-8 h-8 mx-auto mb-3 opacity-50" />
-              <p>No hay solicitudes pendientes</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {pendingRequests.map(request => (
-                <RequestCard key={request.id} request={request} />
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="approved" className="mt-6 space-y-4">
-          {approvedRequests.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Check className="w-8 h-8 mx-auto mb-3 opacity-50" />
-              <p>No hay solicitudes aprobadas</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {approvedRequests.map(request => (
-                <RequestCard key={request.id} request={request} />
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="rejected" className="mt-6 space-y-4">
-          {rejectedRequests.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <X className="w-8 h-8 mx-auto mb-3 opacity-50" />
-              <p>No hay solicitudes rechazadas</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {rejectedRequests.map(request => (
-                <RequestCard key={request.id} request={request} />
-              ))}
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
-
-      {/* Dialog de Detalles */}
-      <Dialog open={!!selectedRequest} onOpenChange={(open) => !open && setSelectedRequest(null)}>
-        <DialogContent className="max-w-2xl">
+      <Dialog open={Boolean(selectedRequest)} onOpenChange={(open) => !open && setSelectedRequestId(null)}>
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Detalles de Solicitud de Material</DialogTitle>
+            <DialogTitle>Detalle de solicitud</DialogTitle>
           </DialogHeader>
 
-          {selectedReq && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs text-muted-foreground">Contratista</p>
-                  <p className="font-semibold">{contractor?.name}</p>
-                </div>
-                {project && (
-                  <div>
-                    <p className="text-xs text-muted-foreground">Proyecto</p>
-                    <p className="font-semibold">{project.name}</p>
-                  </div>
-                )}
-                <div>
-                  <p className="text-xs text-muted-foreground">Fecha de Solicitud</p>
-                  <p className="font-semibold">{new Date(selectedReq.requestDate).toLocaleDateString('es-BO')}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Estado</p>
-                  <Badge style={{ backgroundColor: getStatusColor(selectedReq.status) }}>
-                    {STATUS_LABELS[selectedReq.status as keyof typeof STATUS_LABELS]}
-                  </Badge>
-                </div>
+          {selectedRequest ? (
+            <div className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-4">
+                <DetailPill label="Contratista" value={getContractorName(selectedRequest.contractorId)} />
+                <DetailPill label="Trabajo" value={getOrderName(selectedRequest.productionOrderId)} />
+                <DetailPill label="Fecha" value={new Date(selectedRequest.requestDate).toLocaleString('es-BO')} />
+                <DetailPill label="Estado" value={STATUS_META[selectedRequest.status].label} />
               </div>
 
-              <div className="border-t border-border pt-4">
-                <h4 className="font-semibold mb-3">Materiales Solicitados:</h4>
-                <div className="space-y-2">
-                  {selectedReq.items.map(item => {
-                    const material = materials.find(m => m.id === item.materialId);
-                    const subtotal = (material?.unitPrice || 0) * item.quantity;
-                    
-                    return (
-                      <div key={item.materialId} className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{material?.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {item.quantity} {material?.unit} × {CURRENCY_FORMAT}{material?.unitPrice}
+              <div className="space-y-3">
+                {selectedRequest.items.map((item) => {
+                  const material = getMaterial(item.materialId);
+                  return (
+                    <Card key={`${selectedRequest.id}-${item.materialId}`} className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="font-semibold">{material?.name ?? 'Material no encontrado'}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {item.quantity} {material?.unit ?? 'u'} · {CURRENCY_FORMAT}{material?.unitPrice ?? 0}
                           </p>
-                          {item.notes && (
-                            <p className="text-xs italic text-muted-foreground mt-1">Notas: {item.notes}</p>
-                          )}
+                          {item.notes ? <p className="mt-1 text-xs italic text-muted-foreground">Notas: {item.notes}</p> : null}
                         </div>
-                        <span className="font-semibold">{CURRENCY_FORMAT}{subtotal}</span>
+                        <Badge variant="outline">Subtotal {CURRENCY_FORMAT}{(material?.unitPrice ?? 0) * item.quantity}</Badge>
                       </div>
-                    );
-                  })}
-                </div>
-
-                <div className="flex justify-end mt-3 pt-3 border-t border-border">
-                  <div className="text-right">
-                    <p className="text-xs text-muted-foreground">Total:</p>
-                    <p className="text-2xl font-bold">{CURRENCY_FORMAT}{total}</p>
-                  </div>
-                </div>
+                    </Card>
+                  );
+                })}
               </div>
 
-              {selectedReq.status === 'rejected' && selectedReq.rejectionComments && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                  <p className="text-xs font-semibold text-red-700 mb-1">Motivo del Rechazo:</p>
-                  <p className="text-sm text-red-600">{selectedReq.rejectionComments}</p>
-                </div>
-              )}
+              {selectedRequest.status === 'rejected' && selectedRequest.rejectionComments ? (
+                <Card className="border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+                  <p className="font-semibold">Motivo del rechazo</p>
+                  <p className="mt-1">{selectedRequest.rejectionComments}</p>
+                </Card>
+              ) : null}
 
-              {selectedReq.status === 'pending' && (
+              {selectedRequest.status === 'pending' ? (
                 <>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Comentarios (si rechazas):</label>
+                    <label className="text-sm font-medium">Comentario si rechazas</label>
                     <Textarea
-                      placeholder="Especifica qué necesita ser modificado en la solicitud..."
                       value={rejectionComments}
-                      onChange={(e) => setRejectionComments(e.target.value)}
-                      className="text-sm"
+                      onChange={(event) => setRejectionComments(event.target.value)}
+                      placeholder="Explica claramente que debe corregir el contratista..."
                     />
                   </div>
 
                   <DialogFooter className="gap-2">
-                    <Button variant="outline" onClick={() => setSelectedRequest(null)}>
-                      Cancelar
+                    <Button variant="outline" onClick={() => setSelectedRequestId(null)}>
+                      Cerrar
                     </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() => handleReject(selectedReq.id)}
-                    >
-                      <X className="w-4 h-4 mr-2" />
-                      Rechazar
+                    <Button variant="destructive" onClick={() => void updateRequestStatus('rejected')} disabled={saving}>
+                      {saving ? 'Procesando...' : 'Rechazar'}
                     </Button>
-                    <Button
-                      onClick={() => handleApprove(selectedReq.id)}
-                      style={{ backgroundColor: '#10b981', color: '#ffffff' }}
-                    >
-                      <Check className="w-4 h-4 mr-2" />
-                      Aprobar
+                    <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void updateRequestStatus('approved')} disabled={saving}>
+                      {saving ? 'Procesando...' : 'Aprobar'}
                     </Button>
                   </DialogFooter>
                 </>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function MetricCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#eab676]/15 text-[#9a6b2f]">
+          {icon}
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="text-2xl font-bold">{value}</p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function RequestsColumn({
+  title,
+  description,
+  requests,
+  openRequest,
+  getContractorName,
+  getOrderName,
+}: {
+  title: string;
+  description: string;
+  requests: MaterialRequest[];
+  openRequest: (requestId: string) => void;
+  getContractorName: (contractorId: string) => string;
+  getOrderName: (orderId?: string | null) => string;
+}) {
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="font-semibold">{title}</h3>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+        <Badge variant="outline">{requests.length}</Badge>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {requests.map((request) => (
+          <Card
+            key={request.id}
+            className="cursor-pointer border-border/70 p-4 transition hover:shadow-sm"
+            onClick={() => openRequest(request.id)}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold">{getContractorName(request.contractorId)}</p>
+                <p className="text-sm text-muted-foreground">{getOrderName(request.productionOrderId)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {request.items.length} materiales · {new Date(request.requestDate).toLocaleDateString('es-BO')}
+                </p>
+              </div>
+              <Badge className={STATUS_META[request.status].className}>{STATUS_META[request.status].label}</Badge>
+            </div>
+            {request.status === 'rejected' && request.rejectionComments ? (
+              <p className="mt-3 line-clamp-2 text-xs text-rose-700">{request.rejectionComments}</p>
+            ) : null}
+          </Card>
+        ))}
+
+        {requests.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+            <ClipboardList className="mx-auto mb-3 h-8 w-8 opacity-60" />
+            <p>No hay solicitudes en esta bandeja.</p>
+          </div>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+function DetailPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
+      <p className="mt-1 font-semibold">{value}</p>
     </div>
   );
 }

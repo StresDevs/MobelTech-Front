@@ -15,21 +15,57 @@ import {
 import { ROLE_PERMISSIONS } from '@/lib/constants';
 import { useEffect, useState } from 'react';
 import { useTheme } from 'next-themes';
-import { useLocalData } from '@/lib/contexts/LocalDataContext';
+
+type HeaderNotification = {
+  id: string;
+  recipientUserId: string;
+  message: string;
+  relatedJobId?: string | null;
+  read: boolean;
+  createdAt: string;
+};
 
 export function AppHeader() {
   const { currentRole, userName } = useRole();
   const { logout, user } = useAuth();
-  const { notifications, updateNotification } = useLocalData();
   const { toggleMobileOpen } = useSidebar();
   const [showNotifications, setShowNotifications] = useState(false);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [notifications, setNotifications] = useState<HeaderNotification[]>([]);
+  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
   const roleInfo = ROLE_PERMISSIONS[currentRole] ?? ROLE_PERMISSIONS.admin;
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!user || !apiBase) return;
+
+    let active = true;
+
+    async function loadNotifications() {
+      try {
+        const response = await fetch(`${apiBase}/api/notifications?recipientUserId=${user?.id}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const rows = await response.json();
+        if (active) {
+          setNotifications(rows);
+        }
+      } catch {}
+    }
+
+    void loadNotifications();
+    const interval = window.setInterval(() => {
+      void loadNotifications();
+    }, 10000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [apiBase, user]);
 
   // Close notifications when clicking outside
   useEffect(() => {
@@ -87,7 +123,7 @@ export function AppHeader() {
           >
             <Bell className="h-[1.15rem] w-[1.15rem]" />
             {(() => {
-              const my = user ? notifications.filter((n) => n.recipientId === user.id) : [];
+              const my = user ? notifications.filter((n) => n.recipientUserId === user.id) : [];
               const unread = my.filter((n) => !n.read).length;
               if (unread <= 0) return null;
               return (
@@ -107,7 +143,7 @@ export function AppHeader() {
               </div>
               <div className="max-h-80 overflow-y-auto divide-y divide-border">
                 {(() => {
-                  const my = user ? notifications.filter((n) => n.recipientId === user.id) : [];
+                  const my = user ? notifications.filter((n) => n.recipientUserId === user.id) : [];
                   if (!my || my.length === 0) {
                     return (
                       <div className="p-4 text-sm text-muted-foreground">No tienes notificaciones</div>
@@ -120,8 +156,18 @@ export function AppHeader() {
                       <div
                         key={n.id}
                         className={`px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors ${!n.read ? 'bg-muted/10' : ''}`}
-                        onClick={() => {
-                          try { updateNotification(n.id, { read: true }); } catch {}
+                        onClick={async () => {
+                          try {
+                            if (!apiBase) return;
+                            await fetch(`${apiBase}/api/notifications/${n.id}`, {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ read: true }),
+                            });
+                            setNotifications((current) => current.map((item) => (
+                              item.id === n.id ? { ...item, read: true } : item
+                            )));
+                          } catch {}
                         }}
                       >
                         <p className={`text-sm ${!n.read ? 'font-medium' : 'font-normal'}`}>{n.message}</p>

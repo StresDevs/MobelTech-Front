@@ -1,20 +1,64 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { AppLayout } from '@/components/layout/app-layout';
 import { MaterialRequestsReview } from '@/components/modules/contractors/material-requests-review';
 import AssignedJobs from '@/components/modules/contractor/assigned-jobs';
 import { ContractorWarehouse } from '@/components/modules/contractors/contractor-warehouse';
+import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { useRole } from '@/hooks/use-role-context';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { useLocalData } from '@/lib/contexts/LocalDataContext';
 
 export default function ContractorRequestsPage() {
   const { currentRole } = useRole();
   const { user } = useAuth();
-  const { contractors } = useLocalData();
+  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
+  const [contractorId, setContractorId] = useState<string | null>(null);
+  const [loadingContractor, setLoadingContractor] = useState(currentRole === 'contractor');
+
+  useEffect(() => {
+    if (currentRole !== 'contractor' || !user || !apiBase) {
+      setLoadingContractor(false);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    async function loadContractor() {
+      try {
+        const response = await fetch(`${apiBase}/api/contractors`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const body = await response.json().catch(() => []);
+        if (!response.ok) throw new Error('No se pudo cargar el contratista.');
+        const contractor = body.find((entry: { id: string; userId?: string | null }) => entry.userId === user?.id || entry.id === user?.id);
+        setContractorId(contractor?.id ?? null);
+      } catch {
+        setContractorId(null);
+      } finally {
+        setLoadingContractor(false);
+      }
+    }
+
+    void loadContractor();
+    return () => controller.abort();
+  }, [apiBase, currentRole, user]);
 
   if (currentRole === 'contractor' && user) {
-    const contractor = contractors.find((c) => c.userId === user.id || c.id === user.id) ?? contractors[0];
+    if (loadingContractor) {
+      return (
+        <AppLayout>
+          <div className="p-6">
+            <PageLoadingState
+              title="Cargando solicitudes"
+              description="Buscando tu perfil de contratista y tus materiales."
+            />
+          </div>
+        </AppLayout>
+      );
+    }
+
     return (
       <AppLayout>
         <div className="p-6 space-y-6">
@@ -28,7 +72,7 @@ export default function ContractorRequestsPage() {
               <AssignedJobs />
             </div>
             <div className="lg:col-span-2">
-              {contractor ? <ContractorWarehouse contractorId={contractor.id} /> : <p>No se encontró tu registro de contratista.</p>}
+              {contractorId ? <ContractorWarehouse contractorId={contractorId} /> : <p>No se encontró tu registro de contratista.</p>}
             </div>
           </div>
         </div>
