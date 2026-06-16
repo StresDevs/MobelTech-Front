@@ -1,49 +1,24 @@
 'use client';
 
 import Image from 'next/image';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@/lib/contexts/AuthContext';
+import { CURRENCY_FORMAT } from '@/lib/constants';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { Progress } from '@/components/ui/progress';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import {
   AlertTriangle,
   ArrowLeftRight,
   Boxes,
-  Camera,
-  ChevronDown,
   ClipboardList,
   FileText,
   Package,
@@ -51,19 +26,18 @@ import {
   Plus,
   Search,
   ShoppingCart,
-  Star,
   Store,
   Trash2,
   Warehouse,
 } from 'lucide-react';
 
 type RequestPriority = 'alta' | 'media' | 'baja';
-type RequestStatus = 'pendiente' | 'aprobado' | 'rechazado';
+type RequestStatus = 'pending' | 'approved' | 'rejected';
 type DefectStatus = 'nuevo' | 'reportado' | 'en-gestion' | 'resuelto';
 type ClaimStatus = 'abierto' | 'en-revision' | 'resuelto';
 type SurplusClass = 'reutilizable' | 'desecho';
 
-interface SupplierRecord {
+type SupplierRecord = {
   id: string;
   name: string;
   nit: string;
@@ -76,15 +50,15 @@ interface SupplierRecord {
   defectsRate: number;
   avgPriceCompetitiveness: number;
   status: 'active' | 'inactive';
-}
+};
 
-interface PriceVersion {
+type PriceVersion = {
   date: string;
   priceBs: number;
   exchangeRate: number;
-}
+};
 
-interface MaterialRecord {
+type MaterialRecord = {
   id: string;
   name: string;
   category: string;
@@ -93,26 +67,26 @@ interface MaterialRecord {
   sku: string;
   unit: string;
   warehouse: string;
-  purchaseDate: string;
+  purchaseDate: string | null;
   stockPhysical: number;
   stockReserved: number;
   blockedByDefect: number;
   minStock: number;
   priceHistory: PriceVersion[];
-  recentUsage: { project: string; date: string; quantity: number }[];
-}
+  recentUsage: Array<{ project: string; date: string; quantity: number }>;
+};
 
-interface MaterialRequestRecord {
+type MaterialRequestRecord = {
   id: string;
-  requester: string;
-  materialId: string;
-  quantity: number;
-  date: string;
-  priority: RequestPriority;
+  contractorId: string;
+  productionOrderId?: string | null;
   status: RequestStatus;
-}
+  rejectionComments?: string | null;
+  requestDate: string;
+  items: Array<{ materialId: string; quantity: number; notes?: string | null }>;
+};
 
-interface DefectAlertRecord {
+type DefectAlertRecord = {
   id: string;
   materialId: string;
   defectType: string;
@@ -121,267 +95,111 @@ interface DefectAlertRecord {
   createdAt: string;
   status: DefectStatus;
   supplierReportSent: boolean;
-}
+  notes?: string | null;
+};
 
-interface ReturnClaimRecord {
+type ReturnClaimRecord = {
   id: string;
   purchaseOrderRef: string;
   materialId: string;
   reason: string;
   status: ClaimStatus;
-}
+  createdAt?: string;
+};
 
-interface SurplusRecord {
+type SurplusRecord = {
   id: string;
   materialId: string;
   quantity: number;
   origin: string;
   classification: SurplusClass;
   reintegrated: boolean;
-}
+};
 
-const INITIAL_SUPPLIERS: SupplierRecord[] = [
-  {
-    id: 'supp-1',
-    name: 'Maderas Selectas Bolivia',
-    nit: '1029384018',
-    phone: '+591 2 4444444',
-    email: 'ventas@maderasselectas.bo',
-    address: 'Zona Industrial, La Paz',
-    supplierType: 'Madera',
-    purchaseHistoryCount: 28,
-    deliveryDelays: 2,
-    defectsRate: 1.8,
-    avgPriceCompetitiveness: 84,
-    status: 'active',
-  },
-  {
-    id: 'supp-2',
-    name: 'Herrajes Andinos SRL',
-    nit: '2398741201',
-    phone: '+591 3 6666666',
-    email: 'compras@herrajesandinos.bo',
-    address: 'Parque Industrial, Santa Cruz',
-    supplierType: 'Herrajes',
-    purchaseHistoryCount: 34,
-    deliveryDelays: 4,
-    defectsRate: 2.1,
-    avgPriceCompetitiveness: 88,
-    status: 'active',
-  },
-  {
-    id: 'supp-3',
-    name: 'Textiles Premium BO',
-    nit: '5546789921',
-    phone: '+591 2 7777777',
-    email: 'pedidos@textilespremium.bo',
-    address: 'Zona Comercial, Cochabamba',
-    supplierType: 'Telas',
-    purchaseHistoryCount: 22,
-    deliveryDelays: 1,
-    defectsRate: 1.2,
-    avgPriceCompetitiveness: 81,
-    status: 'active',
-  },
-];
+type PurchaseOrderRecord = {
+  id: string;
+  supplierId: string;
+  referenceCode: string;
+  status: string;
+  requestedBy?: string | null;
+  notes?: string | null;
+  orderedAt: string;
+  items: Array<{
+    materialId: string;
+    quantity: number;
+    unitPriceBs: number;
+    receivedQuantity: number;
+  }>;
+};
 
-const INITIAL_MATERIALS: MaterialRecord[] = [
-  {
-    id: 'mat-1',
-    name: 'Madera MDF 18mm',
-    category: 'Materia prima',
-    imageUrl: makeMockImage('Madera MDF 18mm', '#047857'),
-    supplierId: 'supp-1',
-    sku: 'MDF-18-001',
-    unit: 'pliego',
-    warehouse: 'Almacen Central - La Paz',
-    purchaseDate: '2026-03-20',
-    stockPhysical: 64,
-    stockReserved: 22,
-    blockedByDefect: 0,
-    minStock: 25,
-    priceHistory: [
-      { date: '2026-01-10', priceBs: 410, exchangeRate: 6.96 },
-      { date: '2026-02-15', priceBs: 430, exchangeRate: 6.95 },
-      { date: '2026-03-20', priceBs: 450, exchangeRate: 6.96 },
-    ],
-    recentUsage: [
-      { project: 'Proyecto Hotel Andino', date: '2026-03-25', quantity: 12 },
-      { project: 'Oficinas Garcia', date: '2026-03-22', quantity: 9 },
-      { project: 'Showroom Centro', date: '2026-03-16', quantity: 6 },
-    ],
-  },
-  {
-    id: 'mat-2',
-    name: 'Bisagra Cazoleta 35mm',
-    category: 'Herrajes',
-    imageUrl: makeMockImage('Bisagra Cazoleta', '#1d4ed8'),
-    supplierId: 'supp-2',
-    sku: 'HER-BIS-035',
-    unit: 'unidad',
-    warehouse: 'Almacen Secundario - Santa Cruz',
-    purchaseDate: '2026-03-18',
-    stockPhysical: 420,
-    stockReserved: 130,
-    blockedByDefect: 15,
-    minStock: 160,
-    priceHistory: [
-      { date: '2026-01-11', priceBs: 38, exchangeRate: 6.96 },
-      { date: '2026-02-09', priceBs: 42, exchangeRate: 6.95 },
-      { date: '2026-03-18', priceBs: 45, exchangeRate: 6.96 },
-    ],
-    recentUsage: [
-      { project: 'Torres Empresariales', date: '2026-03-24', quantity: 75 },
-      { project: 'Proyecto Hotel Andino', date: '2026-03-20', quantity: 40 },
-      { project: 'Clinica Santa Maria', date: '2026-03-14', quantity: 32 },
-    ],
-  },
-  {
-    id: 'mat-3',
-    name: 'Tela Tapiceria Premium',
-    category: 'Telas',
-    imageUrl: makeMockImage('Tela Tapiceria Premium', '#9333ea'),
-    supplierId: 'supp-3',
-    sku: 'TEL-TP-090',
-    unit: 'metro',
-    warehouse: 'Almacen Tapizados - Cochabamba',
-    purchaseDate: '2026-03-21',
-    stockPhysical: 190,
-    stockReserved: 70,
-    blockedByDefect: 0,
-    minStock: 80,
-    priceHistory: [
-      { date: '2026-01-07', priceBs: 72, exchangeRate: 6.96 },
-      { date: '2026-02-17', priceBs: 78, exchangeRate: 6.95 },
-      { date: '2026-03-21', priceBs: 85, exchangeRate: 6.96 },
-    ],
-    recentUsage: [
-      { project: 'Restaurant El Parador', date: '2026-03-26', quantity: 28 },
-      { project: 'Salon Ejecutivos', date: '2026-03-18', quantity: 20 },
-      { project: 'Proyecto Lobby Norte', date: '2026-03-11', quantity: 16 },
-    ],
-  },
-];
-
-const INITIAL_REQUESTS: MaterialRequestRecord[] = [
-  {
-    id: 'req-1',
-    requester: 'Carlos Mamani',
-    materialId: 'mat-1',
-    quantity: 8,
-    date: '2026-03-27',
-    priority: 'alta',
-    status: 'pendiente',
-  },
-  {
-    id: 'req-2',
-    requester: 'Ana Rojas',
-    materialId: 'mat-2',
-    quantity: 42,
-    date: '2026-03-26',
-    priority: 'media',
-    status: 'aprobado',
-  },
-];
-
-const INITIAL_DEFECT_ALERTS: DefectAlertRecord[] = [
-  {
-    id: 'def-1',
-    materialId: 'mat-2',
-    defectType: 'Oxidacion prematura',
-    affectedQuantity: 15,
-    supplierId: 'supp-2',
-    createdAt: '2026-03-24',
-    status: 'reportado',
-    supplierReportSent: true,
-  },
-];
-
-const INITIAL_RETURN_CLAIMS: ReturnClaimRecord[] = [
-  {
-    id: 'ret-1',
-    purchaseOrderRef: 'PO-2026-118',
-    materialId: 'mat-2',
-    reason: 'Lote defectuoso reportado en linea de ensamblado',
-    status: 'en-revision',
-  },
-];
-
-const INITIAL_SURPLUS: SurplusRecord[] = [
-  {
-    id: 'sur-1',
-    materialId: 'mat-1',
-    quantity: 7,
-    origin: 'Produccion Proyecto Hotel Andino',
-    classification: 'reutilizable',
-    reintegrated: false,
-  },
-  {
-    id: 'sur-2',
-    materialId: 'mat-3',
-    quantity: 4,
-    origin: 'Compra en exceso lote febrero',
-    classification: 'desecho',
-    reintegrated: false,
-  },
-];
+type InventoryOverview = {
+  suppliers: SupplierRecord[];
+  materials: MaterialRecord[];
+  requests: MaterialRequestRecord[];
+  defects: DefectAlertRecord[];
+  claims: ReturnClaimRecord[];
+  surplus: SurplusRecord[];
+  purchaseOrders: PurchaseOrderRecord[];
+};
 
 const requesterSuggestions = ['Carlos Mamani', 'Ana Rojas', 'Diego Flores', 'Maria Villca'];
 
-const formatBs = (amount: number) => `Bs. ${amount.toLocaleString('es-BO', { maximumFractionDigits: 2 })}`;
+const EMPTY_OVERVIEW: InventoryOverview = {
+  suppliers: [],
+  materials: [],
+  requests: [],
+  defects: [],
+  claims: [],
+  surplus: [],
+  purchaseOrders: [],
+};
+
+const formatBs = (amount: number) =>
+  `${CURRENCY_FORMAT}${amount.toLocaleString('es-BO', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
 
 const toIsoDate = () => new Date().toISOString().slice(0, 10);
 
-function makeMockImage(label: string, tone: string) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="${tone}"/><stop offset="100%" stop-color="#0f172a"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><rect x="60" y="60" width="1080" height="680" rx="36" fill="rgba(255,255,255,0.14)"/><text x="600" y="390" text-anchor="middle" fill="white" font-family="Verdana, sans-serif" font-size="52" font-weight="700">${label}</text></svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
-
-const getSupplierScore = (supplier: SupplierRecord) => {
-  const delayPenalty = Math.max(0, 100 - supplier.deliveryDelays * 12);
-  const defectPenalty = Math.max(0, 100 - supplier.defectsRate * 20);
-  const pricing = supplier.avgPriceCompetitiveness;
-  const score = delayPenalty * 0.4 + defectPenalty * 0.35 + pricing * 0.25;
-  return Math.round(score);
-};
-
-const normalizeText = (value: string) =>
-  value
+function normalizeText(value: string) {
+  return value
     .trim()
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
+}
+
+function makeMockImage(label: string, tone = '#0f766e') {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="${tone}"/><stop offset="100%" stop-color="#111827"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><rect x="60" y="60" width="1080" height="680" rx="36" fill="rgba(255,255,255,0.12)"/><text x="600" y="390" text-anchor="middle" fill="white" font-family="Verdana, sans-serif" font-size="52" font-weight="700">${label}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function getSupplierScore(supplier: SupplierRecord) {
+  const delayPenalty = Math.max(0, 100 - supplier.deliveryDelays * 12);
+  const defectPenalty = Math.max(0, 100 - supplier.defectsRate * 20);
+  const pricing = supplier.avgPriceCompetitiveness;
+  return Math.round(delayPenalty * 0.4 + defectPenalty * 0.35 + pricing * 0.25);
+}
 
 export function InventoryControlCenter() {
-  // Estados para los buscadores de órdenes de compra
+  const { user } = useAuth();
+  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [exchangeRate, setExchangeRate] = useState(6.96);
+  const [overview, setOverview] = useState<InventoryOverview>(EMPTY_OVERVIEW);
+
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [materialSearch, setMaterialSearch] = useState('');
   const [globalOrderSearch, setGlobalOrderSearch] = useState('');
   const [stockOrderSearch, setStockOrderSearch] = useState('');
-  // Estado para expandir fila de subítems
-  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
-  const [exchangeRate, setExchangeRate] = useState(6.96);
-
-  const [suppliers, setSuppliers] = useState<SupplierRecord[]>(INITIAL_SUPPLIERS);
-  const [materials, setMaterials] = useState<MaterialRecord[]>(INITIAL_MATERIALS);
-  const [requests, setRequests] = useState<MaterialRequestRecord[]>(INITIAL_REQUESTS);
-  const [defectAlerts, setDefectAlerts] = useState<DefectAlertRecord[]>(INITIAL_DEFECT_ALERTS);
-  const [returnClaims, setReturnClaims] = useState<ReturnClaimRecord[]>(INITIAL_RETURN_CLAIMS);
-  const [surplus, setSurplus] = useState<SurplusRecord[]>(INITIAL_SURPLUS);
-
-  const [supplierFormError, setSupplierFormError] = useState('');
-  const [materialFormError, setMaterialFormError] = useState('');
-  const [requestError, setRequestError] = useState('');
-
-  const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [addItemOpen, setAddItemOpen] = useState(false);
-  const [editItemOpen, setEditItemOpen] = useState(false);
-  const [editDraft, setEditDraft] = useState<MaterialRecord | null>(null);
-  const [editFormError, setEditFormError] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterWarehouse, setFilterWarehouse] = useState('all');
 
-  const materialImageInputRef = useRef<HTMLInputElement>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(null);
+  const [addItemOpen, setAddItemOpen] = useState(false);
+  const [editItemOpen, setEditItemOpen] = useState(false);
+  const [editDraft, setEditDraft] = useState<MaterialRecord | null>(null);
 
   const [supplierDraft, setSupplierDraft] = useState({
     name: '',
@@ -395,10 +213,10 @@ export function InventoryControlCenter() {
   const [materialDraft, setMaterialDraft] = useState({
     name: '',
     category: 'Materia prima',
-    supplierId: INITIAL_SUPPLIERS[0]?.id ?? '',
+    supplierId: '',
     sku: '',
     unit: 'unidad',
-    warehouse: 'Almacen Central - La Paz',
+    warehouse: 'Almacén Central - La Paz',
     purchaseDate: toIsoDate(),
     purchasePriceBs: '0',
     initialStock: '0',
@@ -406,31 +224,74 @@ export function InventoryControlCenter() {
     imageUrl: '',
   });
 
-  const [requestDraft, setRequestDraft] = useState({
-    requester: requesterSuggestions[0],
-    materialId: INITIAL_MATERIALS[0]?.id ?? '',
-    quantity: '1',
-    priority: 'media' as RequestPriority,
-  });
-
   const [defectDraft, setDefectDraft] = useState({
-    materialId: INITIAL_MATERIALS[1]?.id ?? INITIAL_MATERIALS[0]?.id ?? '',
+    materialId: '',
     defectType: '',
     affectedQuantity: '1',
   });
 
   const [claimDraft, setClaimDraft] = useState({
     purchaseOrderRef: '',
-    materialId: INITIAL_MATERIALS[0]?.id ?? '',
+    materialId: '',
     reason: '',
   });
 
   const [surplusDraft, setSurplusDraft] = useState({
-    materialId: INITIAL_MATERIALS[0]?.id ?? '',
+    materialId: '',
     quantity: '1',
     origin: '',
     classification: 'reutilizable' as SurplusClass,
   });
+
+  async function loadOverview() {
+    if (!apiBase) {
+      setError('Falta configurar NEXT_PUBLIC_API_URL.');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${apiBase}/api/inventory/overview`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('No se pudo cargar el inventario.');
+      const json = await response.json();
+      setOverview(json);
+      setMaterialDraft((current) => ({
+        ...current,
+        supplierId: current.supplierId || json.suppliers[0]?.id || '',
+      }));
+      setDefectDraft((current) => ({
+        ...current,
+        materialId: current.materialId || json.materials[0]?.id || '',
+      }));
+      setClaimDraft((current) => ({
+        ...current,
+        materialId: current.materialId || json.materials[0]?.id || '',
+      }));
+      setSurplusDraft((current) => ({
+        ...current,
+        materialId: current.materialId || json.materials[0]?.id || '',
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error cargando inventario.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadOverview();
+  }, [apiBase]);
+
+  const suppliers = overview.suppliers;
+  const materials = overview.materials;
+  const requests = overview.requests;
+  const defectAlerts = overview.defects;
+  const returnClaims = overview.claims;
+  const surplus = overview.surplus;
+  const purchaseOrders = overview.purchaseOrders;
 
   const supplierRanking = useMemo(
     () => [...suppliers].sort((a, b) => getSupplierScore(b) - getSupplierScore(a)),
@@ -441,56 +302,46 @@ export function InventoryControlCenter() {
   const allWarehouses = useMemo(() => Array.from(new Set(materials.map((m) => m.warehouse))), [materials]);
 
   const filteredMaterials = useMemo(() => {
-    return materials.filter((m) => {
-      const q = normalizeText(searchQuery);
-      const matchSearch =
-        q === '' ||
-        normalizeText(m.name).includes(q) ||
-        normalizeText(m.sku).includes(q) ||
-        normalizeText(m.category).includes(q);
-      const matchCategory = filterCategory === 'all' || m.category === filterCategory;
-      const matchWarehouse = filterWarehouse === 'all' || m.warehouse === filterWarehouse;
-      return matchSearch && matchCategory && matchWarehouse;
+    return materials.filter((material) => {
+      const query = normalizeText(materialSearch);
+      const matchesSearch =
+        query === '' ||
+        normalizeText(material.name).includes(query) ||
+        normalizeText(material.sku).includes(query) ||
+        normalizeText(material.category).includes(query);
+      const matchesCategory = filterCategory === 'all' || material.category === filterCategory;
+      const matchesWarehouse = filterWarehouse === 'all' || material.warehouse === filterWarehouse;
+      return matchesSearch && matchesCategory && matchesWarehouse;
     });
-  }, [materials, searchQuery, filterCategory, filterWarehouse]);
+  }, [filterCategory, filterWarehouse, materialSearch, materials]);
 
   const stockAlerts = useMemo(
     () =>
       materials
-        .filter((material) => material.stockPhysical - material.stockReserved - material.blockedByDefect < material.minStock)
+        .filter((material) => getAvailableStock(material) < material.minStock)
         .map((material) => ({
           materialId: material.id,
-          suggestedQty: Math.max(material.minStock * 2 - (material.stockPhysical - material.stockReserved), 1),
+          suggestedQty: Math.max(material.minStock * 2 - getAvailableStock(material), 1),
         })),
     [materials],
   );
 
   const globalOrderSuggestions = useMemo(() => {
-    const approvedRequests = requests.filter((request) => request.status === 'aprobado');
-    const grouped: Record<
-      string,
-      {
-        supplierId: string;
-        materialId: string;
-        quantity: number;
-      }
-    > = {};
+    const approvedRequests = requests.filter((request) => request.status === 'approved');
+    const grouped = new Map<string, { supplierId: string; materialId: string; quantity: number }>();
 
     for (const request of approvedRequests) {
-      const material = materials.find((entry) => entry.id === request.materialId);
-      if (!material) continue;
-      const key = `${material.supplierId}-${material.id}`;
-      if (!grouped[key]) {
-        grouped[key] = {
-          supplierId: material.supplierId,
-          materialId: material.id,
-          quantity: 0,
-        };
+      for (const item of request.items) {
+        const material = materials.find((entry) => entry.id === item.materialId);
+        if (!material) continue;
+        const key = `${material.supplierId}-${material.id}`;
+        const current = grouped.get(key);
+        if (current) current.quantity += item.quantity;
+        else grouped.set(key, { supplierId: material.supplierId, materialId: material.id, quantity: item.quantity });
       }
-      grouped[key].quantity += request.quantity;
     }
 
-    return Object.values(grouped);
+    return Array.from(grouped.values());
   }, [materials, requests]);
 
   const selectedMaterial = useMemo(
@@ -498,48 +349,55 @@ export function InventoryControlCenter() {
     [materials, selectedMaterialId],
   );
 
-  const getMaterialName = (materialId: string) =>
-    materials.find((entry) => entry.id === materialId)?.name ?? 'Material no encontrado';
+  function getMaterialName(materialId: string) {
+    return materials.find((entry) => entry.id === materialId)?.name ?? 'Material no encontrado';
+  }
 
-  const getSupplierName = (supplierId: string) =>
-    suppliers.find((entry) => entry.id === supplierId)?.name ?? 'Proveedor no encontrado';
+  function getSupplierName(supplierId: string) {
+    return suppliers.find((entry) => entry.id === supplierId)?.name ?? 'Proveedor no encontrado';
+  }
 
-  const getCurrentPriceBs = (material: MaterialRecord) =>
-    material.priceHistory[material.priceHistory.length - 1]?.priceBs ?? 0;
+  function getCurrentPriceBs(material: MaterialRecord) {
+    return material.priceHistory[material.priceHistory.length - 1]?.priceBs ?? 0;
+  }
 
-  const getCurrentPriceUsd = (material: MaterialRecord) => getCurrentPriceBs(material) / exchangeRate;
+  function getCurrentPriceUsd(material: MaterialRecord) {
+    return getCurrentPriceBs(material) / exchangeRate;
+  }
 
-  const getAvailableStock = (material: MaterialRecord) =>
-    material.stockPhysical - material.stockReserved - material.blockedByDefect;
+  function getAvailableStock(material: MaterialRecord) {
+    return material.stockPhysical - material.stockReserved - material.blockedByDefect;
+  }
 
-  const handleSupplierCreate = () => {
-    const duplicate = suppliers.some(
-      (supplier) =>
-        normalizeText(supplier.name) === normalizeText(supplierDraft.name) || supplier.nit.trim() === supplierDraft.nit.trim(),
+  async function performMutation<T>(request: Promise<Response>, fallbackMessage: string): Promise<T | null> {
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await request;
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(body?.error || fallbackMessage);
+      }
+      return body as T;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : fallbackMessage);
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSupplierCreate() {
+    const created = await performMutation(
+      fetch(`${apiBase}/api/inventory/suppliers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(supplierDraft),
+      }),
+      'No se pudo registrar el proveedor.',
     );
 
-    if (duplicate) {
-      setSupplierFormError('Ya existe un proveedor con el mismo nombre o NIT.');
-      return;
-    }
-
-    setSuppliers((current) => [
-      ...current,
-      {
-        id: `supp-${current.length + 1}`,
-        name: supplierDraft.name.trim(),
-        nit: supplierDraft.nit.trim(),
-        phone: supplierDraft.phone.trim(),
-        email: supplierDraft.email.trim(),
-        address: supplierDraft.address.trim(),
-        supplierType: supplierDraft.supplierType,
-        purchaseHistoryCount: 0,
-        deliveryDelays: 0,
-        defectsRate: 0,
-        avgPriceCompetitiveness: 75,
-        status: 'active',
-      },
-    ]);
+    if (!created) return;
 
     setSupplierDraft({
       name: '',
@@ -549,88 +407,22 @@ export function InventoryControlCenter() {
       address: '',
       supplierType: 'Madera',
     });
-    setSupplierFormError('');
-  };
+    await loadOverview();
+  }
 
-  const handleEditOpen = (material: MaterialRecord) => {
-    setEditDraft({ ...material });
-    setEditFormError('');
-    setEditItemOpen(true);
-  };
-
-  const handleMaterialUpdate = () => {
-    if (!editDraft) return;
-    const priceBs = getCurrentPriceBs(editDraft);
-    const minStock = editDraft.minStock;
-    if (!editDraft.name.trim() || !editDraft.sku.trim()) {
-      setEditFormError('Nombre y SKU son obligatorios.');
-      return;
-    }
-    const skuExists = materials.some(
-      (m) => normalizeText(m.sku) === normalizeText(editDraft.sku) && m.id !== editDraft.id,
+  async function handleMaterialCreate() {
+    const created = await performMutation(
+      fetch(`${apiBase}/api/inventory/materials`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(materialDraft),
+      }),
+      'No se pudo crear el material.',
     );
-    if (skuExists) {
-      setEditFormError('El SKU ya existe en otro ítem.');
-      return;
-    }
-    if (!Number.isFinite(minStock) || minStock <= 0) {
-      setEditFormError('El stock mínimo debe ser mayor a 0.');
-      return;
-    }
-    setMaterials((prev) =>
-      prev.map((m) => (m.id === editDraft.id ? { ...editDraft } : m)),
-    );
-    setEditItemOpen(false);
-    setEditDraft(null);
-    setEditFormError('');
-  };
 
-  const handleMaterialCreate = () => {
-    const priceBs = Number(materialDraft.purchasePriceBs);
-    const initialStock = Number(materialDraft.initialStock);
-    const minStock = Number(materialDraft.minStock);
+    if (!created) return;
 
-    const skuExists = materials.some((material) => normalizeText(material.sku) === normalizeText(materialDraft.sku));
-
-    if (skuExists) {
-      setMaterialFormError('El SKU ya existe. Debe ser unico.');
-      return;
-    }
-
-    if (!Number.isFinite(priceBs) || !Number.isFinite(initialStock) || !Number.isFinite(minStock)) {
-      setMaterialFormError('Precio, stock inicial y stock minimo deben ser valores numericos validos.');
-      return;
-    }
-
-    setMaterials((current) => [
-      ...current,
-      {
-        id: `mat-${current.length + 1}`,
-        name: materialDraft.name.trim(),
-        category: materialDraft.category,
-        imageUrl:
-          materialDraft.imageUrl.trim() ||
-          makeMockImage(materialDraft.name.trim() || 'Nuevo Material', '#0f766e'),
-        supplierId: materialDraft.supplierId,
-        sku: materialDraft.sku.trim(),
-        unit: materialDraft.unit.trim(),
-        warehouse: materialDraft.warehouse.trim(),
-        purchaseDate: materialDraft.purchaseDate,
-        stockPhysical: initialStock,
-        stockReserved: 0,
-        blockedByDefect: 0,
-        minStock,
-        priceHistory: [
-          {
-            date: materialDraft.purchaseDate,
-            priceBs,
-            exchangeRate,
-          },
-        ],
-        recentUsage: [],
-      },
-    ]);
-
+    setAddItemOpen(false);
     setMaterialDraft((current) => ({
       ...current,
       name: '',
@@ -639,367 +431,275 @@ export function InventoryControlCenter() {
       initialStock: '0',
       minStock: '0',
       imageUrl: '',
+      purchaseDate: toIsoDate(),
     }));
-    setMaterialFormError('');
-  };
+    await loadOverview();
+  }
 
-  const handleMaterialImageUpdate = (materialId: string, file: File | null) => {
-    if (!file) return;
-    const url = URL.createObjectURL(file);
-    setMaterials((current) =>
-      current.map((material) => (material.id === materialId ? { ...material, imageUrl: url } : material)),
-    );
-  };
+  function handleEditOpen(material: MaterialRecord) {
+    setEditDraft({ ...material });
+    setEditItemOpen(true);
+  }
 
-  const handleRequestCreate = () => {
-    const material = materials.find((entry) => entry.id === requestDraft.materialId);
-    if (!material) return;
+  async function handleMaterialUpdate() {
+    if (!editDraft) return;
 
-    const quantity = Number(requestDraft.quantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      setRequestError('La cantidad debe ser mayor a 0.');
-      return;
-    }
-
-    if (quantity > getAvailableStock(material)) {
-      setRequestError('No hay stock disponible suficiente para esta solicitud.');
-      return;
-    }
-
-    setRequests((current) => [
-      {
-        id: `req-${current.length + 1}`,
-        requester: requestDraft.requester,
-        materialId: requestDraft.materialId,
-        quantity,
-        date: toIsoDate(),
-        priority: requestDraft.priority,
-        status: 'pendiente',
-      },
-      ...current,
-    ]);
-
-    setRequestDraft((current) => ({ ...current, quantity: '1' }));
-    setRequestError('');
-  };
-
-  const handleRequestStatus = (requestId: string, status: RequestStatus) => {
-    const request = requests.find((entry) => entry.id === requestId);
-    if (!request) return;
-
-    if (status === 'aprobado') {
-      setMaterials((current) =>
-        current.map((material) =>
-          material.id === request.materialId
-            ? {
-                ...material,
-                stockReserved: material.stockReserved + request.quantity,
-              }
-            : material,
-        ),
-      );
-    }
-
-    setRequests((current) =>
-      current.map((entry) => (entry.id === requestId ? { ...entry, status } : entry)),
-    );
-  };
-
-  const handleAddStock = (materialId: string, quantityToAdd: number, newPriceBs?: number) => {
-    setMaterials((current) =>
-      current.map((material) => {
-        if (material.id !== materialId) return material;
-        const nextHistory = [...material.priceHistory];
-        if (newPriceBs && Number.isFinite(newPriceBs)) {
-          nextHistory.push({ date: toIsoDate(), priceBs: newPriceBs, exchangeRate });
-        }
-        return {
-          ...material,
-          stockPhysical: material.stockPhysical + quantityToAdd,
-          purchaseDate: toIsoDate(),
-          priceHistory: nextHistory,
-        };
+    const updated = await performMutation(
+      fetch(`${apiBase}/api/inventory/materials/${editDraft.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editDraft.name,
+          category: editDraft.category,
+          supplierId: editDraft.supplierId,
+          sku: editDraft.sku,
+          unit: editDraft.unit,
+          warehouse: editDraft.warehouse,
+          minStock: editDraft.minStock,
+          imageUrl: editDraft.imageUrl,
+          purchasePriceBs: getCurrentPriceBs(editDraft),
+        }),
       }),
-    );
-  };
-
-  const handleMinStockChange = (materialId: string, minStock: number) => {
-    setMaterials((current) =>
-      current.map((material) => (material.id === materialId ? { ...material, minStock } : material)),
-    );
-  };
-
-  const handleDefectCreate = () => {
-    const quantity = Number(defectDraft.affectedQuantity);
-    const material = materials.find((entry) => entry.id === defectDraft.materialId);
-    if (!material || !Number.isFinite(quantity) || quantity <= 0) return;
-
-    setDefectAlerts((current) => [
-      {
-        id: `def-${current.length + 1}`,
-        materialId: defectDraft.materialId,
-        defectType: defectDraft.defectType || 'Defecto no especificado',
-        affectedQuantity: quantity,
-        supplierId: material.supplierId,
-        createdAt: toIsoDate(),
-        status: 'nuevo',
-        supplierReportSent: true,
-      },
-      ...current,
-    ]);
-
-    setMaterials((current) =>
-      current.map((entry) =>
-        entry.id === defectDraft.materialId
-          ? {
-              ...entry,
-              blockedByDefect: entry.blockedByDefect + quantity,
-            }
-          : entry,
-      ),
+      'No se pudo actualizar el material.',
     );
 
+    if (!updated) return;
+
+    setEditItemOpen(false);
+    setEditDraft(null);
+    await loadOverview();
+  }
+
+  async function handleDeleteMaterial(materialId: string) {
+    const deleted = await performMutation(
+      fetch(`${apiBase}/api/inventory/materials/${materialId}`, {
+        method: 'DELETE',
+      }),
+      'No se pudo eliminar el material.',
+    );
+
+    if (!deleted) return;
+    await loadOverview();
+  }
+
+  async function handleMinStockChange(materialId: string, minStock: number) {
+    const updated = await performMutation(
+      fetch(`${apiBase}/api/inventory/materials/${materialId}/min-stock`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ minStock }),
+      }),
+      'No se pudo actualizar el stock mínimo.',
+    );
+
+    if (!updated) return;
+    await loadOverview();
+  }
+
+  async function handleDefectCreate() {
+    const created = await performMutation(
+      fetch(`${apiBase}/api/inventory/defects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...defectDraft,
+          createdBy: user?.name ?? 'Sistema',
+        }),
+      }),
+      'No se pudo registrar el defecto.',
+    );
+
+    if (!created) return;
     setDefectDraft((current) => ({ ...current, defectType: '', affectedQuantity: '1' }));
-  };
+    await loadOverview();
+  }
 
-  const handleDefectStatusAdvance = (defectId: string) => {
-    setDefectAlerts((current) =>
-      current.map((defect) => {
-        if (defect.id !== defectId) return defect;
-        if (defect.status === 'nuevo') return { ...defect, status: 'reportado' };
-        if (defect.status === 'reportado') return { ...defect, status: 'en-gestion' };
-        if (defect.status === 'en-gestion') return { ...defect, status: 'resuelto' };
-        return defect;
+  async function handleDefectStatusAdvance(defectId: string) {
+    const updated = await performMutation(
+      fetch(`${apiBase}/api/inventory/defects/${defectId}/advance`, {
+        method: 'PATCH',
       }),
+      'No se pudo avanzar el flujo del defecto.',
     );
-  };
 
-  const handleClaimCreate = () => {
-    if (!claimDraft.purchaseOrderRef.trim() || !claimDraft.reason.trim()) return;
+    if (!updated) return;
+    await loadOverview();
+  }
 
-    setReturnClaims((current) => [
-      {
-        id: `ret-${current.length + 1}`,
-        purchaseOrderRef: claimDraft.purchaseOrderRef.trim(),
-        materialId: claimDraft.materialId,
-        reason: claimDraft.reason.trim(),
-        status: 'abierto',
-      },
-      ...current,
-    ]);
-
-    setClaimDraft({
-      purchaseOrderRef: '',
-      materialId: claimDraft.materialId,
-      reason: '',
-    });
-  };
-
-  const handleClaimStatus = (claimId: string) => {
-    setReturnClaims((current) =>
-      current.map((claim) => {
-        if (claim.id !== claimId) return claim;
-        if (claim.status === 'abierto') return { ...claim, status: 'en-revision' };
-        if (claim.status === 'en-revision') return { ...claim, status: 'resuelto' };
-        return claim;
+  async function handleClaimCreate() {
+    const created = await performMutation(
+      fetch(`${apiBase}/api/inventory/claims`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(claimDraft),
       }),
+      'No se pudo crear el reclamo.',
     );
-  };
 
-  const handleSurplusCreate = () => {
-    const quantity = Number(surplusDraft.quantity);
-    if (!Number.isFinite(quantity) || quantity <= 0 || !surplusDraft.origin.trim()) return;
+    if (!created) return;
+    setClaimDraft((current) => ({ ...current, purchaseOrderRef: '', reason: '' }));
+    await loadOverview();
+  }
 
-    setSurplus((current) => [
-      {
-        id: `sur-${current.length + 1}`,
-        materialId: surplusDraft.materialId,
-        quantity,
-        origin: surplusDraft.origin.trim(),
-        classification: surplusDraft.classification,
-        reintegrated: false,
-      },
-      ...current,
-    ]);
+  async function handleClaimStatus(claimId: string) {
+    const updated = await performMutation(
+      fetch(`${apiBase}/api/inventory/claims/${claimId}/advance`, {
+        method: 'PATCH',
+      }),
+      'No se pudo avanzar el estado del reclamo.',
+    );
 
+    if (!updated) return;
+    await loadOverview();
+  }
+
+  async function handleSurplusCreate() {
+    const created = await performMutation(
+      fetch(`${apiBase}/api/inventory/surplus`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(surplusDraft),
+      }),
+      'No se pudo registrar el sobrante.',
+    );
+
+    if (!created) return;
     setSurplusDraft((current) => ({ ...current, quantity: '1', origin: '' }));
-  };
+    await loadOverview();
+  }
 
-  const handleSurplusReintegration = (surplusId: string) => {
-    const item = surplus.find((entry) => entry.id === surplusId);
-    if (!item || item.classification !== 'reutilizable' || item.reintegrated) return;
-
-    setMaterials((current) =>
-      current.map((material) =>
-        material.id === item.materialId
-          ? { ...material, stockPhysical: material.stockPhysical + item.quantity }
-          : material,
-      ),
+  async function handleSurplusReintegration(surplusId: string) {
+    const updated = await performMutation(
+      fetch(`${apiBase}/api/inventory/surplus/${surplusId}/reintegrate`, {
+        method: 'PATCH',
+      }),
+      'No se pudo reintegrar el sobrante.',
     );
 
-    setSurplus((current) =>
-      current.map((entry) => (entry.id === surplusId ? { ...entry, reintegrated: true } : entry)),
-    );
-  };
+    if (!updated) return;
+    await loadOverview();
+  }
 
-  const handleGenerateGlobalOrder = () => {
+  async function handleDeleteSurplus(surplusId: string) {
+    const deleted = await performMutation(
+      fetch(`${apiBase}/api/inventory/surplus/${surplusId}`, {
+        method: 'DELETE',
+      }),
+      'No se pudo eliminar el sobrante.',
+    );
+
+    if (!deleted) return;
+    await loadOverview();
+  }
+
+  function handleGenerateGlobalOrder() {
     if (globalOrderSuggestions.length === 0) return;
 
-    const groupedBySupplier: Record<string, { materialName: string; quantity: number; estimatedCost: number }[]> = {};
+    const groupedBySupplier = new Map<string, Array<{ materialName: string; quantity: number; estimatedCost: number }>>();
 
     for (const suggestion of globalOrderSuggestions) {
       const material = materials.find((entry) => entry.id === suggestion.materialId);
       if (!material) continue;
-      if (!groupedBySupplier[suggestion.supplierId]) {
-        groupedBySupplier[suggestion.supplierId] = [];
-      }
-      groupedBySupplier[suggestion.supplierId].push({
+      const current = groupedBySupplier.get(suggestion.supplierId) ?? [];
+      current.push({
         materialName: material.name,
         quantity: suggestion.quantity,
         estimatedCost: suggestion.quantity * getCurrentPriceBs(material),
       });
+      groupedBySupplier.set(suggestion.supplierId, current);
     }
 
-    const lines = Object.entries(groupedBySupplier)
-      .map(([supplierId, entries]) => {
-        const supplier = getSupplierName(supplierId);
-        const total = entries.reduce((acc, entry) => acc + entry.estimatedCost, 0);
-        return `${supplier}: ${entries.length} item(s) - ${formatBs(total)}`;
-      })
-      .join('\n');
+    const lines = Array.from(groupedBySupplier.entries()).map(([supplierId, entries]) => {
+      const total = entries.reduce((sum, entry) => sum + entry.estimatedCost, 0);
+      return `${getSupplierName(supplierId)}: ${entries.length} item(s) - ${formatBs(total)}`;
+    });
 
-    window.alert(`Orden global generada con consolidacion por proveedor:\n\n${lines}`);
-  };
+    window.alert(`Orden global sugerida:\n\n${lines.join('\n')}`);
+  }
 
-  const handleGenerateStockOrder = () => {
+  function handleGenerateStockOrder() {
     if (stockAlerts.length === 0) return;
-
     const lines = stockAlerts
       .map((alert) => {
         const material = materials.find((entry) => entry.id === alert.materialId);
         if (!material) return null;
         return `${material.name}: sugerido ${alert.suggestedQty} ${material.unit} - proveedor ${getSupplierName(material.supplierId)}`;
       })
-      .filter(Boolean)
-      .join('\n');
+      .filter(Boolean);
 
-    window.alert(`Ordenes automaticas para reabastecimiento (stock < minimo):\n\n${lines}`);
-  };
+    window.alert(`Reabastecimiento sugerido:\n\n${lines.join('\n')}`);
+  }
+
+  if (loading) {
+    return (
+      <PageLoadingState
+        title="Cargando inventario"
+        description="Sincronizando materiales, proveedores, stock y trazabilidad..."
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <Card className="border border-border bg-card shadow-lg">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-2xl text-foreground">Centro Inteligente de Inventario</CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Gestion integral de proveedores, catalogo, stock, solicitudes, compras y calidad. Moneda principal: Bolivianos (Bs.)
-          </CardDescription>
-          <div className="h-1.5 w-40 rounded-full bg-primary" />
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-3 pb-6 md:grid-cols-4">
-          <Card className="border-border bg-muted/30 p-4 shadow-none">
-            <p className="text-sm text-muted-foreground">Materiales</p>
-            <p className="text-2xl font-semibold">{materials.length}</p>
-          </Card>
-          <Card className="border-border bg-muted/30 p-4 shadow-none">
-            <p className="text-sm text-muted-foreground">Solicitudes pendientes</p>
-            <p className="text-2xl font-semibold">{requests.filter((request) => request.status === 'pendiente').length}</p>
-          </Card>
-          <Card className="border-border bg-muted/30 p-4 shadow-none">
-            <p className="text-sm text-muted-foreground">Alertas por stock bajo</p>
-            <p className="text-2xl font-semibold">{stockAlerts.length}</p>
-          </Card>
-          <Card className="border-border bg-muted/30 p-4 shadow-none">
-            <p className="text-sm text-muted-foreground">Tipo de cambio Bs/USD</p>
-            <div className="mt-2 flex items-center gap-2">
-              <Input
-                value={exchangeRate}
-                className="h-8"
-                onChange={(event) => setExchangeRate(Number(event.target.value) || 6.96)}
-              />
-              <Badge className="bg-primary text-primary-foreground">Manual</Badge>
-            </div>
-          </Card>
+      <Card className="overflow-hidden border-none bg-[linear-gradient(135deg,rgba(214,168,90,0.16),rgba(255,255,255,0.96))] shadow-sm dark:bg-[linear-gradient(135deg,rgba(214,168,90,0.18),rgba(22,22,22,0.98))]">
+        <CardContent className="grid gap-4 p-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#9a6b2f]">Centro Inteligente</p>
+            <h2 className="mt-2 text-2xl font-bold tracking-tight">Inventario y compras conectados</h2>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+              Proveedores, stock, defectos, devoluciones y sobrantes ya están leyendo desde API y Neon.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MetricCard label="Materiales" value={String(materials.length)} icon={<Package className="h-4 w-4" />} />
+            <MetricCard label="Solicitudes pendientes" value={String(requests.filter((request) => request.status === 'pending').length)} icon={<ClipboardList className="h-4 w-4" />} />
+            <MetricCard label="Stock bajo" value={String(stockAlerts.length)} icon={<AlertTriangle className="h-4 w-4" />} />
+            <Card className="border-border/70 bg-background/80 p-4 shadow-none">
+              <p className="text-xs text-muted-foreground">Tipo de cambio Bs/USD</p>
+              <div className="mt-2 flex items-center gap-2">
+                <Input
+                  value={exchangeRate}
+                  className="h-9"
+                  onChange={(event) => setExchangeRate(Number(event.target.value) || 6.96)}
+                />
+                <Badge className="bg-[#d6a85a] text-[#1f1f1f]">Manual</Badge>
+              </div>
+            </Card>
+          </div>
         </CardContent>
       </Card>
 
+      {error ? (
+        <Card className="border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+          {error}
+        </Card>
+      ) : null}
+
       <Tabs defaultValue="proveedores" className="w-full">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-8">
-          <TabsTrigger value="proveedores" className="gap-1 text-xs">
-            <Store className="h-4 w-4" />
-            Proveedores
-          </TabsTrigger>
-          <TabsTrigger value="productos" className="gap-1 text-xs">
-            <Package className="h-4 w-4" />
-            Productos
-          </TabsTrigger>
-         
-          <TabsTrigger value="stock" className="gap-1 text-xs">
-            <Warehouse className="h-4 w-4" />
-            Stock
-          </TabsTrigger>
-          <TabsTrigger value="compras" className="gap-1 text-xs">
-            <ShoppingCart className="h-4 w-4" />
-            Compras
-          </TabsTrigger>
-          <TabsTrigger value="defectos" className="gap-1 text-xs">
-            <AlertTriangle className="h-4 w-4" />
-            Defectos
-          </TabsTrigger>
-          <TabsTrigger value="cambios" className="gap-1 text-xs">
-            <ArrowLeftRight className="h-4 w-4" />
-            Restitucion
-          </TabsTrigger>
-          <TabsTrigger value="sobrantes" className="gap-1 text-xs">
-            <Boxes className="h-4 w-4" />
-            Sobrantes
-          </TabsTrigger>
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-2xl bg-muted/60 p-2 md:grid-cols-4 xl:grid-cols-7">
+          <TabsTrigger value="proveedores" className="gap-1 text-xs"><Store className="h-4 w-4" />Proveedores</TabsTrigger>
+          <TabsTrigger value="productos" className="gap-1 text-xs"><Package className="h-4 w-4" />Productos</TabsTrigger>
+          <TabsTrigger value="stock" className="gap-1 text-xs"><Warehouse className="h-4 w-4" />Stock</TabsTrigger>
+          <TabsTrigger value="compras" className="gap-1 text-xs"><ShoppingCart className="h-4 w-4" />Compras</TabsTrigger>
+          <TabsTrigger value="defectos" className="gap-1 text-xs"><AlertTriangle className="h-4 w-4" />Defectos</TabsTrigger>
+          <TabsTrigger value="cambios" className="gap-1 text-xs"><ArrowLeftRight className="h-4 w-4" />Restitución</TabsTrigger>
+          <TabsTrigger value="sobrantes" className="gap-1 text-xs"><Boxes className="h-4 w-4" />Sobrantes</TabsTrigger>
         </TabsList>
 
         <TabsContent value="proveedores" className="mt-6 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Plus className="h-4 w-4" />
-                Registro de Proveedores
-              </CardTitle>
-              <CardDescription>
-                Sin duplicados por nombre/NIT, con historial de compras y ranking automatico por desempeno.
-              </CardDescription>
+              <CardTitle>Registro de proveedores</CardTitle>
+              <CardDescription>Sin duplicados por NIT y con visibilidad de desempeño.</CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-              <Input
-                placeholder="Nombre / razon social"
-                value={supplierDraft.name}
-                onChange={(event) => setSupplierDraft((current) => ({ ...current, name: event.target.value }))}
-              />
-              <Input
-                placeholder="NIT / identificacion"
-                value={supplierDraft.nit}
-                onChange={(event) => setSupplierDraft((current) => ({ ...current, nit: event.target.value }))}
-              />
-              <Input
-                placeholder="Telefono"
-                value={supplierDraft.phone}
-                onChange={(event) => setSupplierDraft((current) => ({ ...current, phone: event.target.value }))}
-              />
-              <Input
-                placeholder="Email"
-                value={supplierDraft.email}
-                onChange={(event) => setSupplierDraft((current) => ({ ...current, email: event.target.value }))}
-              />
-              <Input
-                placeholder="Direccion"
-                value={supplierDraft.address}
-                onChange={(event) => setSupplierDraft((current) => ({ ...current, address: event.target.value }))}
-              />
-              <Select
-                value={supplierDraft.supplierType}
-                onValueChange={(value) => setSupplierDraft((current) => ({ ...current, supplierType: value }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Tipo de proveedor" />
-                </SelectTrigger>
+            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <Input placeholder="Nombre / razón social" value={supplierDraft.name} onChange={(event) => setSupplierDraft((current) => ({ ...current, name: event.target.value }))} />
+              <Input placeholder="NIT" value={supplierDraft.nit} onChange={(event) => setSupplierDraft((current) => ({ ...current, nit: event.target.value }))} />
+              <Input placeholder="Teléfono" value={supplierDraft.phone} onChange={(event) => setSupplierDraft((current) => ({ ...current, phone: event.target.value }))} />
+              <Input placeholder="Email" value={supplierDraft.email} onChange={(event) => setSupplierDraft((current) => ({ ...current, email: event.target.value }))} />
+              <Input placeholder="Dirección" value={supplierDraft.address} onChange={(event) => setSupplierDraft((current) => ({ ...current, address: event.target.value }))} />
+              <Select value={supplierDraft.supplierType} onValueChange={(value) => setSupplierDraft((current) => ({ ...current, supplierType: value }))}>
+                <SelectTrigger><SelectValue placeholder="Tipo" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Madera">Madera</SelectItem>
                   <SelectItem value="Telas">Telas</SelectItem>
@@ -1007,9 +707,10 @@ export function InventoryControlCenter() {
                   <SelectItem value="Insumos">Insumos</SelectItem>
                 </SelectContent>
               </Select>
-              <div className="lg:col-span-3 flex flex-wrap items-center gap-2">
-                <Button onClick={handleSupplierCreate}>Registrar proveedor</Button>
-                {supplierFormError ? <p className="text-sm text-red-600">{supplierFormError}</p> : null}
+              <div className="xl:col-span-3 flex justify-end">
+                <Button onClick={() => void handleSupplierCreate()} disabled={saving} style={{ backgroundColor: '#d6a85a', color: '#1f1f1f' }}>
+                  {saving ? 'Guardando...' : 'Registrar proveedor'}
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -1017,31 +718,25 @@ export function InventoryControlCenter() {
           <Card>
             <CardHeader>
               <CardTitle>Lista de proveedores</CardTitle>
-              <CardDescription>
-                Listado de proveedores registrados con historial de compras.
-              </CardDescription>
+              <CardDescription>Ordenados por ranking de desempeño.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="mb-4 max-w-xs">
-                <Input
-                  placeholder="Buscar proveedor por nombre..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                />
+            <CardContent className="space-y-4">
+              <div className="relative max-w-sm">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input className="pl-9" placeholder="Buscar proveedor..." value={supplierSearch} onChange={(event) => setSupplierSearch(event.target.value)} />
               </div>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Proveedor</TableHead>
                     <TableHead>Tipo</TableHead>
-                    <TableHead>Historial compras</TableHead>
+                    <TableHead>Ranking</TableHead>
+                    <TableHead>Historial</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {supplierRanking
-                    .filter(supplier =>
-                      supplier.name.toLowerCase().includes(searchQuery.toLowerCase())
-                    )
+                    .filter((supplier) => normalizeText(supplier.name).includes(normalizeText(supplierSearch)))
                     .map((supplier) => (
                       <TableRow key={supplier.id}>
                         <TableCell>
@@ -1049,7 +744,8 @@ export function InventoryControlCenter() {
                           <p className="text-xs text-muted-foreground">NIT {supplier.nit}</p>
                         </TableCell>
                         <TableCell>{supplier.supplierType}</TableCell>
-                        <TableCell>{supplier.purchaseHistoryCount} ordenes</TableCell>
+                        <TableCell>{getSupplierScore(supplier)} pts</TableCell>
+                        <TableCell>{supplier.purchaseHistoryCount} órdenes</TableCell>
                       </TableRow>
                     ))}
                 </TableBody>
@@ -1059,170 +755,62 @@ export function InventoryControlCenter() {
         </TabsContent>
 
         <TabsContent value="productos" className="mt-6 space-y-4">
-          {/* Header */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h2 className="text-2xl font-bold tracking-tight">Ítems Inventario</h2>
-              <p className="text-sm text-muted-foreground">{filteredMaterials.length} ítem{filteredMaterials.length !== 1 ? 's' : ''} registrado{filteredMaterials.length !== 1 ? 's' : ''}</p>
+              <h3 className="text-2xl font-bold tracking-tight">Ítems de inventario</h3>
+              <p className="text-sm text-muted-foreground">{filteredMaterials.length} ítems visibles</p>
             </div>
-            <Dialog open={addItemOpen} onOpenChange={(open) => { setAddItemOpen(open); if (!open) setMaterialFormError(''); }}>
+            <Dialog open={addItemOpen} onOpenChange={setAddItemOpen}>
               <DialogTrigger asChild>
-                <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shrink-0">
+                <Button className="gap-2 self-start bg-emerald-600 text-white hover:bg-emerald-700">
                   <Plus className="h-4 w-4" />
-                  Agregar Ítem
+                  Agregar ítem
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
+              <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
                 <DialogHeader>
-                  <DialogTitle>Agregar nuevo ítem al inventario</DialogTitle>
-                  <DialogDescription>
-                    SKU único por item. El stock mínimo es configurable por material para alertas personalizadas.
-                  </DialogDescription>
+                  <DialogTitle>Nuevo material</DialogTitle>
+                  <DialogDescription>Se registrará en Neon con stock inicial, proveedor y trazabilidad.</DialogDescription>
                 </DialogHeader>
-                <div className="grid grid-cols-1 gap-4 pt-2 md:grid-cols-2">
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Nombre del producto</label>
-                    <Input
-                      placeholder="Ej. Madera MDF 18mm"
-                      value={materialDraft.name}
-                      onChange={(event) => setMaterialDraft((c) => ({ ...c, name: event.target.value }))}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">SKU / Código único</label>
-                    <Input
-                      placeholder="Ej. MDF-18-001"
-                      value={materialDraft.sku}
-                      onChange={(event) => setMaterialDraft((c) => ({ ...c, sku: event.target.value }))}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Categoría</label>
-                    <Select
-                      value={materialDraft.category}
-                      onValueChange={(value) => setMaterialDraft((c) => ({ ...c, category: value }))}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Categoría" />
-                      </SelectTrigger>
+                <div className="grid gap-4 pt-2 md:grid-cols-2">
+                  <Field label="Nombre"><Input value={materialDraft.name} onChange={(event) => setMaterialDraft((current) => ({ ...current, name: event.target.value }))} /></Field>
+                  <Field label="SKU"><Input value={materialDraft.sku} onChange={(event) => setMaterialDraft((current) => ({ ...current, sku: event.target.value }))} /></Field>
+                  <Field label="Categoría">
+                    <Select value={materialDraft.category} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, category: value }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Sofa">Sofá</SelectItem>
-                        <SelectItem value="Mesa">Mesa</SelectItem>
                         <SelectItem value="Materia prima">Materia prima</SelectItem>
                         <SelectItem value="Herrajes">Herrajes</SelectItem>
                         <SelectItem value="Telas">Telas</SelectItem>
+                        <SelectItem value="Insumos">Insumos</SelectItem>
                         <SelectItem value="Muebles">Muebles</SelectItem>
                         <SelectItem value="Equipos y Herramientas">Equipos y Herramientas</SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Proveedor</label>
-                    <Select
-                      value={materialDraft.supplierId}
-                      onValueChange={(value) => setMaterialDraft((c) => ({ ...c, supplierId: value }))}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Proveedor asociado" />
-                      </SelectTrigger>
+                  </Field>
+                  <Field label="Proveedor">
+                    <Select value={materialDraft.supplierId} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, supplierId: value }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {suppliers.map((supplier) => (
-                          <SelectItem key={supplier.id} value={supplier.id}>
-                            {supplier.name}
-                          </SelectItem>
+                          <SelectItem key={supplier.id} value={supplier.id}>{supplier.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                  </Field>
+                  <Field label="Unidad"><Input value={materialDraft.unit} onChange={(event) => setMaterialDraft((current) => ({ ...current, unit: event.target.value }))} /></Field>
+                  <Field label="Almacén"><Input value={materialDraft.warehouse} onChange={(event) => setMaterialDraft((current) => ({ ...current, warehouse: event.target.value }))} /></Field>
+                  <Field label="Precio de compra (Bs.)"><Input type="number" min={0} value={materialDraft.purchasePriceBs} onChange={(event) => setMaterialDraft((current) => ({ ...current, purchasePriceBs: event.target.value }))} /></Field>
+                  <Field label="Fecha de compra"><Input type="date" value={materialDraft.purchaseDate} onChange={(event) => setMaterialDraft((current) => ({ ...current, purchaseDate: event.target.value }))} /></Field>
+                  <Field label="Stock inicial"><Input type="number" min={0} value={materialDraft.initialStock} onChange={(event) => setMaterialDraft((current) => ({ ...current, initialStock: event.target.value }))} /></Field>
+                  <Field label="Stock mínimo"><Input type="number" min={0} value={materialDraft.minStock} onChange={(event) => setMaterialDraft((current) => ({ ...current, minStock: event.target.value }))} /></Field>
+                  <div className="md:col-span-2">
+                    <Field label="Imagen URL"><Input value={materialDraft.imageUrl} onChange={(event) => setMaterialDraft((current) => ({ ...current, imageUrl: event.target.value }))} /></Field>
                   </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Unidad de medida</label>
-                    <Input
-                      placeholder="Ej. pza, metro, galón"
-                      value={materialDraft.unit}
-                      onChange={(event) => setMaterialDraft((c) => ({ ...c, unit: event.target.value }))}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Almacén</label>
-                    <Input
-                      placeholder="Ej. Almacen Central - La Paz"
-                      value={materialDraft.warehouse}
-                      onChange={(event) => setMaterialDraft((c) => ({ ...c, warehouse: event.target.value }))}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Precio de compra (Bs.)</label>
-                    <Input
-                      type="number"
-                      min={0}
-                      placeholder="0"
-                      value={materialDraft.purchasePriceBs}
-                      onChange={(event) => setMaterialDraft((c) => ({ ...c, purchasePriceBs: event.target.value }))}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Fecha de compra</label>
-                    <Input
-                      type="date"
-                      value={materialDraft.purchaseDate}
-                      onChange={(event) => setMaterialDraft((c) => ({ ...c, purchaseDate: event.target.value }))}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Stock inicial</label>
-                    <Input
-                      type="number"
-                      min={0}
-                      placeholder="0"
-                      value={materialDraft.initialStock}
-                      onChange={(event) => setMaterialDraft((c) => ({ ...c, initialStock: event.target.value }))}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Stock mínimo (alerta personalizada)</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      placeholder="25"
-                      value={materialDraft.minStock}
-                      onChange={(event) => setMaterialDraft((c) => ({ ...c, minStock: event.target.value }))}
-                    />
-                  </div>
-
-                  <div className="space-y-1 md:col-span-2">
-                    <label className="text-sm font-medium">URL de imagen (opcional)</label>
-                    <Input
-                      placeholder="https://... o dejar vacío para imagen autogenerada"
-                      value={materialDraft.imageUrl}
-                      onChange={(event) => setMaterialDraft((c) => ({ ...c, imageUrl: event.target.value }))}
-                    />
-                  </div>
-
-                  {materialFormError ? (
-                    <p className="text-sm text-red-600 md:col-span-2">{materialFormError}</p>
-                  ) : null}
-
-                  <div className="flex gap-3 md:col-span-2">
-                    <Button
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-                      onClick={() => {
-                        handleMaterialCreate();
-                        if (!materialFormError) setAddItemOpen(false);
-                      }}
-                    >
-                      Guardar ítem
-                    </Button>
-                    <Button variant="outline" className="flex-1" onClick={() => setAddItemOpen(false)}>
-                      Cancelar
+                  <div className="md:col-span-2 flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setAddItemOpen(false)} disabled={saving}>Cancelar</Button>
+                    <Button onClick={() => void handleMaterialCreate()} disabled={saving} style={{ backgroundColor: '#d6a85a', color: '#1f1f1f' }}>
+                      {saving ? 'Guardando...' : 'Guardar ítem'}
                     </Button>
                   </div>
                 </div>
@@ -1230,509 +818,122 @@ export function InventoryControlCenter() {
             </Dialog>
           </div>
 
-          {/* Filters */}
           <Card className="p-4">
-            <div className="flex flex-col gap-3 md:flex-row">
+            <div className="flex flex-col gap-3 xl:flex-row">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por código, ítem n° o descripción..."
-                  className="pl-9"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                />
+                <Input className="pl-9" placeholder="Buscar por descripción, SKU o categoría..." value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} />
               </div>
               <Select value={filterCategory} onValueChange={setFilterCategory}>
-                <SelectTrigger className="w-full md:w-56">
-                  <SelectValue placeholder="Todas las categorías" />
-                </SelectTrigger>
+                <SelectTrigger className="xl:w-56"><SelectValue placeholder="Categoría" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todas las categorías</SelectItem>
-                  {allCategories.map((cat) => (
-                    <SelectItem key={cat} value={cat}>
-                      {cat}
-                    </SelectItem>
+                  {allCategories.map((category) => (
+                    <SelectItem key={category} value={category}>{category}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <Select value={filterWarehouse} onValueChange={setFilterWarehouse}>
-                <SelectTrigger className="w-full md:w-64">
-                  <SelectValue placeholder="Todos los almacenes" />
-                </SelectTrigger>
+                <SelectTrigger className="xl:w-72"><SelectValue placeholder="Almacén" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos los almacenes</SelectItem>
-                  {allWarehouses.map((wh) => (
-                    <SelectItem key={wh} value={wh}>
-                      {wh}
-                    </SelectItem>
+                  {allWarehouses.map((warehouse) => (
+                    <SelectItem key={warehouse} value={warehouse}>{warehouse}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           </Card>
 
-          {/* Table */}
           <Card className="overflow-hidden">
             <Table>
               <TableHeader>
-                <TableRow className="bg-muted/40 hover:bg-muted/40">
-                  <TableHead className="w-12 font-semibold">n°</TableHead>
-                  <TableHead className="font-semibold">Ítem</TableHead>
-                  <TableHead className="font-semibold">Descripción</TableHead>
-                  <TableHead className="font-semibold">Categoría</TableHead>
-                  <TableHead className="font-semibold">Und</TableHead>
-                  <TableHead className="font-semibold">Stock</TableHead>
-                  <TableHead className="font-semibold">Rendimiento</TableHead>
-                  <TableHead className="text-right font-semibold">Acciones</TableHead>
+                <TableRow className="bg-muted/40">
+                  <TableHead>Ítem</TableHead>
+                  <TableHead>Descripción</TableHead>
+                  <TableHead>Categoría</TableHead>
+                  <TableHead>Und</TableHead>
+                  <TableHead>Stock disp.</TableHead>
+                  <TableHead>Valor USD</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredMaterials.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
-                      No se encontraron ítems con los filtros aplicados.
-                    </TableCell>
+                    <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">No hay materiales con esos filtros.</TableCell>
                   </TableRow>
                 ) : (
-                  filteredMaterials.map((material, idx) => {
+                  filteredMaterials.map((material) => {
                     const available = getAvailableStock(material);
                     const lowStock = available < material.minStock;
-                    const rendimiento = Math.min(
-                      100,
-                      Math.round((available / Math.max(material.minStock * 2, 1)) * 100),
-                    );
-                    // Solo para el primer ítem, ejemplo de variantes
-                    const isFirst = idx === 0;
-                    const isExpanded = expandedItemId === material.id;
                     return (
-                      <>
-                        <TableRow
-                          key={material.id}
-                          className={"group cursor-pointer"}
-                          onClick={() => isFirst ? setExpandedItemId(isExpanded ? null : material.id) : undefined}
-                          style={isFirst ? { background: isExpanded ? '#f3f4f6' : undefined } : {}}
-                        >
-                          <TableCell className="text-muted-foreground font-medium">{idx + 1}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-3">
-                              <div className="relative h-9 w-9 shrink-0 overflow-visible rounded-lg border bg-muted group/image-preview">
-                                <Image
-                                  src={material.imageUrl}
-                                  alt={material.name}
-                                  fill
-                                  className="object-cover cursor-pointer"
-                                  unoptimized
-                                />
-                                <div className="absolute left-1/2 top-1/2 z-50 hidden group-hover/image-preview:flex items-center justify-center" style={{transform: 'translate(-50%, -50%)'}}>
-                                  <div className="rounded-lg shadow-2xl border border-border bg-background p-1" style={{width: '180px', height: '120px'}}>
-                                    <Image
-                                      src={material.imageUrl}
-                                      alt={material.name}
-                                      width={180}
-                                      height={120}
-                                      className="object-contain rounded"
-                                      unoptimized
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                              <span className="font-mono text-sm font-semibold">{material.sku}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <span className="font-medium uppercase tracking-wide">{material.name}</span>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="whitespace-nowrap">
-                              {material.category}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">{material.unit}</TableCell>
-                          <TableCell>
-                            <span
-                              className={
-                                lowStock
-                                  ? 'font-semibold text-red-500'
-                                  : 'font-semibold text-emerald-600'
-                              }
-                            >
-                              {available}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Progress
-                                value={rendimiento}
-                                className={`h-2 w-20 ${lowStock ? '[&>div]:bg-red-500' : '[&>div]:bg-emerald-500'}`}
+                      <TableRow key={material.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <div className="relative h-11 w-11 overflow-hidden rounded-xl border bg-muted">
+                              <Image
+                                src={material.imageUrl || makeMockImage(material.name)}
+                                alt={material.name}
+                                fill
+                                className="object-cover"
+                                unoptimized
                               />
-                              <span className="text-xs text-muted-foreground">{rendimiento}%</span>
                             </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center justify-end gap-0.5">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                title="Subir / tomar foto"
-                                className="text-emerald-600 hover:text-emerald-700"
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  setSelectedMaterialId(material.id);
-                                  materialImageInputRef.current?.click();
-                                }}
-                              >
-                                <Camera className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                title="Editar"
-                                className="text-blue-500 hover:text-blue-600"
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  handleEditOpen(material);
-                                }}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                title="Ver detalle"
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  setSelectedMaterialId(material.id);
-                                  setDetailOpen(true);
-                                }}
-                              >
-                                <ChevronDown className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                title="Eliminar"
-                                className="text-red-500 hover:text-red-600"
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  setMaterials((prev) => prev.filter((m) => m.id !== material.id));
-                                }}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                            <div>
+                              <p className="font-mono text-xs text-muted-foreground">{material.sku}</p>
+                              <p className="font-medium">{material.name}</p>
                             </div>
-                          </TableCell>
-                        </TableRow>
-                        {/* Subítems solo para el primer ítem y si está expandido */}
-                        {isFirst && isExpanded && [1, 2].map((variant) => (
-                          <TableRow key={material.id + '-sub-' + variant} className="bg-muted/40">
-                            <TableCell></TableCell>
-                            <TableCell colSpan={7}>
-                              <div className="flex items-center gap-3 pl-8">
-                                <div className="relative h-9 w-9 shrink-0 overflow-visible rounded-lg border bg-muted">
-                                  <Image
-                                    src={material.imageUrl}
-                                    alt={material.name + '-' + variant}
-                                    fill
-                                    className="object-cover"
-                                    unoptimized
-                                  />
-                                </div>
-                                <span className="font-mono text-sm font-semibold">{material.sku + '-' + variant}</span>
-                                <span className="ml-4 text-xs text-muted-foreground">Variante del ítem principal</span>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </>
+                          </div>
+                        </TableCell>
+                        <TableCell>{material.warehouse}</TableCell>
+                        <TableCell><Badge variant="outline">{material.category}</Badge></TableCell>
+                        <TableCell>{material.unit}</TableCell>
+                        <TableCell className={lowStock ? 'font-semibold text-rose-600' : 'font-semibold text-emerald-700'}>{available}</TableCell>
+                        <TableCell>${getCurrentPriceUsd(material).toFixed(2)}</TableCell>
+                        <TableCell>
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => handleEditOpen(material)}><Pencil className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => { setSelectedMaterialId(material.id); setDetailOpen(true); }}><FileText className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" className="text-rose-500 hover:text-rose-600" onClick={() => void handleDeleteMaterial(material.id)}><Trash2 className="h-4 w-4" /></Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
                     );
                   })
                 )}
               </TableBody>
             </Table>
           </Card>
-
-          <input
-            ref={materialImageInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(event) =>
-              handleMaterialImageUpdate(selectedMaterialId ?? '', event.target.files?.[0] ?? null)
-            }
-          />
-
-          <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-            <DialogTrigger className="hidden" />
-            <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
-              <DialogHeader>
-                <DialogTitle>Detalle de material y trazabilidad</DialogTitle>
-                <DialogDescription>
-                  Proyectos recientes en los que se uso y ubicacion exacta de almacen, mas historial de precios.
-                </DialogDescription>
-              </DialogHeader>
-
-              {selectedMaterial ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div className="relative h-48 w-full overflow-hidden rounded-lg bg-slate-100">
-                      <Image src={selectedMaterial.imageUrl} alt={selectedMaterial.name} fill className="object-cover" unoptimized />
-                    </div>
-                    <div className="space-y-2 text-sm">
-                      <p className="text-lg font-semibold">{selectedMaterial.name}</p>
-                      <p>
-                        <span className="text-muted-foreground">SKU:</span> {selectedMaterial.sku}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Proveedor:</span> {getSupplierName(selectedMaterial.supplierId)}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Ubicacion:</span> {selectedMaterial.warehouse}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Stock fisico/reservado/bloqueado:</span>{' '}
-                        {selectedMaterial.stockPhysical} / {selectedMaterial.stockReserved} / {selectedMaterial.blockedByDefect}
-                      </p>
-                    </div>
-                  </div>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-base">Proyectos recientes donde fue usado</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Proyecto</TableHead>
-                            <TableHead>Fecha</TableHead>
-                            <TableHead>Cantidad</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {selectedMaterial.recentUsage.length > 0 ? (
-                            selectedMaterial.recentUsage.map((usage) => (
-                              <TableRow key={`${usage.project}-${usage.date}`}>
-                                <TableCell>{usage.project}</TableCell>
-                                <TableCell>{usage.date}</TableCell>
-                                <TableCell>{usage.quantity}</TableCell>
-                              </TableRow>
-                            ))
-                          ) : (
-                            <TableRow>
-                              <TableCell colSpan={3} className="text-center text-muted-foreground">
-                                Sin uso reciente registrado.
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-base">Control de versiones de precio</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Fecha</TableHead>
-                            <TableHead>Precio Bs.</TableHead>
-                            <TableHead>Tasa</TableHead>
-                            <TableHead>Equivalente USD</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {[...selectedMaterial.priceHistory].reverse().map((version, index) => (
-                            <TableRow key={`${version.date}-${index}`}>
-                              <TableCell>{version.date}</TableCell>
-                              <TableCell>{formatBs(version.priceBs)}</TableCell>
-                              <TableCell>{version.exchangeRate.toFixed(2)}</TableCell>
-                              <TableCell>${(version.priceBs / version.exchangeRate).toFixed(2)}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-                </div>
-              ) : null}
-            </DialogContent>
-          </Dialog>
-
-          {/* Edit Item Modal */}
-          <Dialog open={editItemOpen} onOpenChange={(open) => { setEditItemOpen(open); if (!open) { setEditDraft(null); setEditFormError(''); } }}>
-            <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Editar ítem de inventario</DialogTitle>
-                <DialogDescription>
-                  Modifica los datos del material. El historial de precios se conserva; cambia el último precio si aplica.
-                </DialogDescription>
-              </DialogHeader>
-              {editDraft ? (
-                <div className="grid grid-cols-1 gap-4 pt-2 md:grid-cols-2">
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Nombre del producto</label>
-                    <Input
-                      value={editDraft.name}
-                      onChange={(e) => setEditDraft((d) => d ? { ...d, name: e.target.value } : d)}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">SKU / Código único</label>
-                    <Input
-                      value={editDraft.sku}
-                      onChange={(e) => setEditDraft((d) => d ? { ...d, sku: e.target.value } : d)}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Categoría</label>
-                    <Select
-                      value={editDraft.category}
-                      onValueChange={(v) => setEditDraft((d) => d ? { ...d, category: v } : d)}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Sofa">Sofá</SelectItem>
-                        <SelectItem value="Mesa">Mesa</SelectItem>
-                        <SelectItem value="Materia prima">Materia prima</SelectItem>
-                        <SelectItem value="Herrajes">Herrajes</SelectItem>
-                        <SelectItem value="Telas">Telas</SelectItem>
-                        <SelectItem value="Muebles">Muebles</SelectItem>
-                        <SelectItem value="Equipos y Herramientas">Equipos y Herramientas</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Proveedor</label>
-                    <Select
-                      value={editDraft.supplierId}
-                      onValueChange={(v) => setEditDraft((d) => d ? { ...d, supplierId: v } : d)}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {suppliers.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Unidad de medida</label>
-                    <Input
-                      value={editDraft.unit}
-                      onChange={(e) => setEditDraft((d) => d ? { ...d, unit: e.target.value } : d)}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Almacén</label>
-                    <Input
-                      value={editDraft.warehouse}
-                      onChange={(e) => setEditDraft((d) => d ? { ...d, warehouse: e.target.value } : d)}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Precio actual (Bs.)</label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={editDraft.priceHistory[editDraft.priceHistory.length - 1]?.priceBs ?? 0}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (!Number.isFinite(val)) return;
-                        setEditDraft((d) => {
-                          if (!d) return d;
-                          const hist = [...d.priceHistory];
-                          if (hist.length > 0) {
-                            hist[hist.length - 1] = { ...hist[hist.length - 1], priceBs: val };
-                          }
-                          return { ...d, priceHistory: hist };
-                        });
-                      }}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium">Stock mínimo (alerta)</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={editDraft.minStock}
-                      onChange={(e) => setEditDraft((d) => d ? { ...d, minStock: Number(e.target.value) } : d)}
-                    />
-                  </div>
-
-                  <div className="space-y-1 md:col-span-2">
-                    <label className="text-sm font-medium">URL de imagen</label>
-                    <Input
-                      value={editDraft.imageUrl}
-                      onChange={(e) => setEditDraft((d) => d ? { ...d, imageUrl: e.target.value } : d)}
-                    />
-                  </div>
-
-                  {editFormError ? (
-                    <p className="text-sm text-red-600 md:col-span-2">{editFormError}</p>
-                  ) : null}
-
-                  <div className="flex gap-3 md:col-span-2">
-                    <Button
-                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-                      onClick={handleMaterialUpdate}
-                    >
-                      Guardar cambios
-                    </Button>
-                    <Button variant="outline" className="flex-1" onClick={() => setEditItemOpen(false)}>
-                      Cancelar
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-            </DialogContent>
-          </Dialog>
         </TabsContent>
 
-       
-
-        <TabsContent value="stock" className="mt-6 space-y-4">
+        <TabsContent value="stock" className="mt-6">
           <Card>
             <CardHeader>
-              <CardTitle>Verificacion de Stock en tiempo real</CardTitle>
-              <CardDescription>
-                Diferencia stock fisico, reservado y bloqueado. Permite umbral minimo por material y alerta predictiva de agotamiento.
-              </CardDescription>
+              <CardTitle>Verificación de stock</CardTitle>
+              <CardDescription>Diferencia físico, reservado, bloqueado y disponible con umbrales mínimos.</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Material</TableHead>
-                    <TableHead>Almacen</TableHead>
-                    <TableHead>Fisico</TableHead>
+                    <TableHead>Almacén</TableHead>
+                    <TableHead>Físico</TableHead>
                     <TableHead>Reservado</TableHead>
                     <TableHead>Bloqueado</TableHead>
                     <TableHead>Disponible</TableHead>
-                    <TableHead>Minimo</TableHead>
-                    <TableHead>Configurar minimo</TableHead>
+                    <TableHead>Mínimo</TableHead>
+                    <TableHead>Riesgo</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {materials.map((material) => {
                     const available = getAvailableStock(material);
                     const risk = available <= material.minStock;
+                    const performance = Math.min(100, Math.round((available / Math.max(material.minStock * 2, 1)) * 100));
                     return (
-                      <TableRow key={material.id} className={risk ? 'bg-red-50/60' : ''}>
+                      <TableRow key={material.id} className={risk ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}>
                         <TableCell>
                           <p className="font-medium">{material.name}</p>
                           <p className="text-xs text-muted-foreground">{material.sku}</p>
@@ -1741,23 +942,24 @@ export function InventoryControlCenter() {
                         <TableCell>{material.stockPhysical}</TableCell>
                         <TableCell>{material.stockReserved}</TableCell>
                         <TableCell>{material.blockedByDefect}</TableCell>
-                        <TableCell>
-                          <span className={risk ? 'font-semibold text-red-600' : 'font-semibold text-emerald-700'}>{available}</span>
-                        </TableCell>
-                        <TableCell>{material.minStock}</TableCell>
+                        <TableCell className={risk ? 'font-semibold text-rose-600' : 'font-semibold text-emerald-700'}>{available}</TableCell>
                         <TableCell>
                           <Input
                             type="number"
-                            min={1}
+                            min={0}
                             defaultValue={material.minStock}
-                            className="h-8 w-28"
+                            className="h-8 w-24"
                             onBlur={(event) => {
                               const next = Number(event.target.value);
-                              if (Number.isFinite(next) && next > 0) {
-                                handleMinStockChange(material.id, next);
-                              }
+                              if (Number.isFinite(next)) void handleMinStockChange(material.id, next);
                             }}
                           />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Progress value={performance} className={`h-2 w-24 ${risk ? '[&>div]:bg-rose-500' : '[&>div]:bg-emerald-500'}`} />
+                            <span className="text-xs text-muted-foreground">{performance}%</span>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -1769,46 +971,31 @@ export function InventoryControlCenter() {
         </TabsContent>
 
         <TabsContent value="compras" className="mt-6 space-y-4">
-          {/* Buscadores para ambas secciones */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 xl:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>Generacion de Orden de Compra Global</CardTitle>
-                <CardDescription>
-                  Consolidacion de solicitudes aprobadas por proveedor para optimizar costos y reducir fragmentacion.
-                </CardDescription>
+                <CardTitle>Orden global sugerida</CardTitle>
+                <CardDescription>Consolida solicitudes aprobadas por proveedor.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Input
-                  placeholder="Buscar ítem..."
-                  className="mb-3 max-w-xs"
-                  value={globalOrderSearch || ''}
-                  onChange={e => setGlobalOrderSearch(e.target.value)}
-                />
-                {globalOrderSuggestions.filter(item => {
-                  const material = materials.find((entry) => entry.id === item.materialId);
-                  return !globalOrderSearch || (material?.name?.toLowerCase().includes(globalOrderSearch.toLowerCase()) || material?.sku?.toLowerCase().includes(globalOrderSearch.toLowerCase()));
-                }).length > 0 ? (
-                  <ul className="space-y-2">
-                    {globalOrderSuggestions.filter(item => {
-                      const material = materials.find((entry) => entry.id === item.materialId);
-                      return !globalOrderSearch || (material?.name?.toLowerCase().includes(globalOrderSearch.toLowerCase()) || material?.sku?.toLowerCase().includes(globalOrderSearch.toLowerCase()));
-                    }).map((item) => {
-                      const material = materials.find((entry) => entry.id === item.materialId);
-                      if (!material) return null;
-                      return (
-                        <li key={`${item.supplierId}-${item.materialId}`} className="rounded-lg border p-3">
-                          <p className="font-medium">{material.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            Proveedor sugerido: {getSupplierName(item.supplierId)} | Cantidad consolidada: {item.quantity}
-                          </p>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No hay solicitudes aprobadas para consolidar.</p>
-                )}
+                <Input placeholder="Buscar ítem..." value={globalOrderSearch} onChange={(event) => setGlobalOrderSearch(event.target.value)} />
+                {globalOrderSuggestions
+                  .filter((item) => {
+                    const material = materials.find((entry) => entry.id === item.materialId);
+                    return !globalOrderSearch || normalizeText(material?.name ?? '').includes(normalizeText(globalOrderSearch)) || normalizeText(material?.sku ?? '').includes(normalizeText(globalOrderSearch));
+                  })
+                  .map((item) => {
+                    const material = materials.find((entry) => entry.id === item.materialId);
+                    if (!material) return null;
+                    return (
+                      <div key={`${item.supplierId}-${item.materialId}`} className="rounded-xl border border-border p-3">
+                        <p className="font-medium">{material.name}</p>
+                        <p className="text-sm text-muted-foreground">Proveedor sugerido: {getSupplierName(item.supplierId)}</p>
+                        <p className="text-sm">Cantidad consolidada: {item.quantity}</p>
+                      </div>
+                    );
+                  })}
+                {globalOrderSuggestions.length === 0 ? <p className="text-sm text-muted-foreground">No hay solicitudes aprobadas para consolidar.</p> : null}
                 <Button onClick={handleGenerateGlobalOrder} disabled={globalOrderSuggestions.length === 0}>
                   <FileText className="mr-1 h-4 w-4" />
                   Generar orden global
@@ -1818,98 +1005,94 @@ export function InventoryControlCenter() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Orden de Compra para Reabastecimiento</CardTitle>
-                <CardDescription>
-                  Disparo automatico si stock disponible cae por debajo del minimo personalizado por material.
-                </CardDescription>
+                <CardTitle>Reabastecimiento sugerido</CardTitle>
+                <CardDescription>Materiales por debajo del mínimo configurado.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Input
-                  placeholder="Buscar ítem..."
-                  className="mb-3 max-w-xs"
-                  value={stockOrderSearch || ''}
-                  onChange={e => setStockOrderSearch(e.target.value)}
-                />
-                {stockAlerts.filter(alert => {
-                  const material = materials.find((entry) => entry.id === alert.materialId);
-                  return !stockOrderSearch || (material?.name?.toLowerCase().includes(stockOrderSearch.toLowerCase()) || material?.sku?.toLowerCase().includes(stockOrderSearch.toLowerCase()));
-                }).length > 0 ? (
-                  <ul className="space-y-2">
-                    {stockAlerts.filter(alert => {
-                      const material = materials.find((entry) => entry.id === alert.materialId);
-                      return !stockOrderSearch || (material?.name?.toLowerCase().includes(stockOrderSearch.toLowerCase()) || material?.sku?.toLowerCase().includes(stockOrderSearch.toLowerCase()));
-                    }).map((alert) => {
-                      const material = materials.find((entry) => entry.id === alert.materialId);
-                      if (!material) return null;
-                      return (
-                        <li key={alert.materialId} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                          <p className="font-medium">{material.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            Disponible: {getAvailableStock(material)} | Minimo: {material.minStock}
-                          </p>
-                          <p className="text-sm">Sugerido comprar: {alert.suggestedQty} {material.unit}</p>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No hay materiales debajo del stock minimo.</p>
-                )}
-                <Button variant="secondary" onClick={handleGenerateStockOrder} disabled={stockAlerts.length === 0}>
-                  Generar ordenes automaticas
-                </Button>
+                <Input placeholder="Buscar ítem..." value={stockOrderSearch} onChange={(event) => setStockOrderSearch(event.target.value)} />
+                {stockAlerts
+                  .filter((alert) => {
+                    const material = materials.find((entry) => entry.id === alert.materialId);
+                    return !stockOrderSearch || normalizeText(material?.name ?? '').includes(normalizeText(stockOrderSearch)) || normalizeText(material?.sku ?? '').includes(normalizeText(stockOrderSearch));
+                  })
+                  .map((alert) => {
+                    const material = materials.find((entry) => entry.id === alert.materialId);
+                    if (!material) return null;
+                    return (
+                      <div key={alert.materialId} className="rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/20">
+                        <p className="font-medium">{material.name}</p>
+                        <p className="text-sm text-muted-foreground">Disponible: {getAvailableStock(material)} | Mínimo: {material.minStock}</p>
+                        <p className="text-sm">Sugerido comprar: {alert.suggestedQty} {material.unit}</p>
+                      </div>
+                    );
+                  })}
+                {stockAlerts.length === 0 ? <p className="text-sm text-muted-foreground">No hay materiales debajo del stock mínimo.</p> : null}
+                <Button variant="secondary" onClick={handleGenerateStockOrder} disabled={stockAlerts.length === 0}>Generar sugerencia</Button>
               </CardContent>
             </Card>
           </div>
-        // Estados para los buscadores de órdenes de compra
-        const [globalOrderSearch, setGlobalOrderSearch] = useState('');
-        const [stockOrderSearch, setStockOrderSearch] = useState('');
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Órdenes de compra registradas</CardTitle>
+              <CardDescription>Lectura directa de órdenes sembradas o registradas en base de datos.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Referencia</TableHead>
+                    <TableHead>Proveedor</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead>Ítems</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {purchaseOrders.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">No hay órdenes registradas.</TableCell>
+                    </TableRow>
+                  ) : (
+                    purchaseOrders.map((order) => (
+                      <TableRow key={order.id}>
+                        <TableCell className="font-medium">{order.referenceCode}</TableCell>
+                        <TableCell>{getSupplierName(order.supplierId)}</TableCell>
+                        <TableCell><Badge variant="outline">{order.status}</Badge></TableCell>
+                        <TableCell>{new Date(order.orderedAt).toLocaleDateString('es-BO')}</TableCell>
+                        <TableCell>{order.items.length}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="defectos" className="mt-6 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Alarmas por Material Defectuoso</CardTitle>
-              <CardDescription>
-                Bloqueo inmediato en inventario, alerta automatica y reporte al proveedor.
-              </CardDescription>
+              <CardTitle>Alarmas por material defectuoso</CardTitle>
+              <CardDescription>Bloquea inventario y lleva el flujo del incidente.</CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-              <Select
-                value={defectDraft.materialId}
-                onValueChange={(value) => setDefectDraft((current) => ({ ...current, materialId: value }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Material" />
-                </SelectTrigger>
+            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <Select value={defectDraft.materialId} onValueChange={(value) => setDefectDraft((current) => ({ ...current, materialId: value }))}>
+                <SelectTrigger><SelectValue placeholder="Material" /></SelectTrigger>
                 <SelectContent>
                   {materials.map((material) => (
-                    <SelectItem key={material.id} value={material.id}>
-                      {material.name}
-                    </SelectItem>
+                    <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Input
-                placeholder="Tipo de defecto"
-                value={defectDraft.defectType}
-                onChange={(event) => setDefectDraft((current) => ({ ...current, defectType: event.target.value }))}
-              />
-              <Input
-                type="number"
-                min={1}
-                value={defectDraft.affectedQuantity}
-                onChange={(event) => setDefectDraft((current) => ({ ...current, affectedQuantity: event.target.value }))}
-                placeholder="Cantidad afectada"
-              />
-              <Button onClick={handleDefectCreate}>Registrar alarma</Button>
+              <Input placeholder="Tipo de defecto" value={defectDraft.defectType} onChange={(event) => setDefectDraft((current) => ({ ...current, defectType: event.target.value }))} />
+              <Input type="number" min={1} value={defectDraft.affectedQuantity} onChange={(event) => setDefectDraft((current) => ({ ...current, affectedQuantity: event.target.value }))} />
+              <Button onClick={() => void handleDefectCreate()} disabled={saving}>Registrar alarma</Button>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Lista de alertas</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>Lista de alertas</CardTitle></CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
@@ -1920,7 +1103,7 @@ export function InventoryControlCenter() {
                     <TableHead>Proveedor</TableHead>
                     <TableHead>Estado</TableHead>
                     <TableHead>Reporte</TableHead>
-                    <TableHead>Accion</TableHead>
+                    <TableHead>Acción</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1930,19 +1113,9 @@ export function InventoryControlCenter() {
                       <TableCell>{alert.defectType}</TableCell>
                       <TableCell>{alert.affectedQuantity}</TableCell>
                       <TableCell>{getSupplierName(alert.supplierId)}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{alert.status}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={alert.supplierReportSent ? 'secondary' : 'destructive'}>
-                          {alert.supplierReportSent ? 'Enviado' : 'Pendiente'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Button variant="outline" size="sm" onClick={() => handleDefectStatusAdvance(alert.id)}>
-                          Avanzar flujo
-                        </Button>
-                      </TableCell>
+                      <TableCell><Badge variant="outline">{alert.status}</Badge></TableCell>
+                      <TableCell><Badge variant={alert.supplierReportSent ? 'secondary' : 'destructive'}>{alert.supplierReportSent ? 'Enviado' : 'Pendiente'}</Badge></TableCell>
+                      <TableCell><Button variant="outline" size="sm" onClick={() => void handleDefectStatusAdvance(alert.id)}>Avanzar flujo</Button></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1954,51 +1127,26 @@ export function InventoryControlCenter() {
         <TabsContent value="cambios" className="mt-6 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Gestion de Cambio / Restitucion</CardTitle>
-              <CardDescription>
-                Registro de devoluciones por orden de compra asociada y seguimiento de reclamos hasta resolucion.
-              </CardDescription>
+              <CardTitle>Gestión de cambio / restitución</CardTitle>
+              <CardDescription>Registro de devoluciones y reclamos con orden de compra asociada.</CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-              <Input
-                placeholder="Orden de compra asociada"
-                value={claimDraft.purchaseOrderRef}
-                onChange={(event) => setClaimDraft((current) => ({ ...current, purchaseOrderRef: event.target.value }))}
-              />
-
-              <Select
-                value={claimDraft.materialId}
-                onValueChange={(value) => setClaimDraft((current) => ({ ...current, materialId: value }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Producto" />
-                </SelectTrigger>
+            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <Input placeholder="Orden de compra asociada" value={claimDraft.purchaseOrderRef} onChange={(event) => setClaimDraft((current) => ({ ...current, purchaseOrderRef: event.target.value }))} />
+              <Select value={claimDraft.materialId} onValueChange={(value) => setClaimDraft((current) => ({ ...current, materialId: value }))}>
+                <SelectTrigger><SelectValue placeholder="Material" /></SelectTrigger>
                 <SelectContent>
                   {materials.map((material) => (
-                    <SelectItem key={material.id} value={material.id}>
-                      {material.name}
-                    </SelectItem>
+                    <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-
-              <Textarea
-                className="md:col-span-2"
-                placeholder="Motivo del reclamo"
-                value={claimDraft.reason}
-                onChange={(event) => setClaimDraft((current) => ({ ...current, reason: event.target.value }))}
-              />
-
-              <Button className="md:col-span-2 lg:col-span-4" onClick={handleClaimCreate}>
-                Crear reclamo
-              </Button>
+              <Textarea className="md:col-span-2" placeholder="Motivo del reclamo" value={claimDraft.reason} onChange={(event) => setClaimDraft((current) => ({ ...current, reason: event.target.value }))} />
+              <Button className="md:col-span-2 xl:col-span-4" onClick={() => void handleClaimCreate()} disabled={saving}>Crear reclamo</Button>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Seguimiento de reclamos</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>Seguimiento de reclamos</CardTitle></CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
@@ -2007,7 +1155,7 @@ export function InventoryControlCenter() {
                     <TableHead>Producto</TableHead>
                     <TableHead>Motivo</TableHead>
                     <TableHead>Estado</TableHead>
-                    <TableHead>Accion</TableHead>
+                    <TableHead>Acción</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2015,17 +1163,9 @@ export function InventoryControlCenter() {
                     <TableRow key={claim.id}>
                       <TableCell>{claim.purchaseOrderRef}</TableCell>
                       <TableCell>{getMaterialName(claim.materialId)}</TableCell>
-                      <TableCell className="max-w-sm truncate" title={claim.reason}>
-                        {claim.reason}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{claim.status}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Button size="sm" variant="outline" onClick={() => handleClaimStatus(claim.id)}>
-                          Avanzar estado
-                        </Button>
-                      </TableCell>
+                      <TableCell className="max-w-sm truncate" title={claim.reason}>{claim.reason}</TableCell>
+                      <TableCell><Badge variant="outline">{claim.status}</Badge></TableCell>
+                      <TableCell><Button size="sm" variant="outline" onClick={() => void handleClaimStatus(claim.id)}>Avanzar estado</Button></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -2037,67 +1177,33 @@ export function InventoryControlCenter() {
         <TabsContent value="sobrantes" className="mt-6 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Control de Sobrantes</CardTitle>
-              <CardDescription>
-                Clasifica sobrantes reutilizables o desecho. Permite reingreso al inventario para material recuperable.
-              </CardDescription>
+              <CardTitle>Control de sobrantes</CardTitle>
+              <CardDescription>Clasifica material reutilizable o desecho y permite reintegro de stock.</CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-              <Select
-                value={surplusDraft.materialId}
-                onValueChange={(value) => setSurplusDraft((current) => ({ ...current, materialId: value }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Producto" />
-                </SelectTrigger>
+            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <Select value={surplusDraft.materialId} onValueChange={(value) => setSurplusDraft((current) => ({ ...current, materialId: value }))}>
+                <SelectTrigger><SelectValue placeholder="Material" /></SelectTrigger>
                 <SelectContent>
                   {materials.map((material) => (
-                    <SelectItem key={material.id} value={material.id}>
-                      {material.name}
-                    </SelectItem>
+                    <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-
-              <Input
-                type="number"
-                min={1}
-                value={surplusDraft.quantity}
-                onChange={(event) => setSurplusDraft((current) => ({ ...current, quantity: event.target.value }))}
-                placeholder="Cantidad sobrante"
-              />
-
-              <Input
-                placeholder="Origen"
-                value={surplusDraft.origin}
-                onChange={(event) => setSurplusDraft((current) => ({ ...current, origin: event.target.value }))}
-              />
-
-              <Select
-                value={surplusDraft.classification}
-                onValueChange={(value: SurplusClass) =>
-                  setSurplusDraft((current) => ({ ...current, classification: value }))
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Clasificacion" />
-                </SelectTrigger>
+              <Input type="number" min={1} value={surplusDraft.quantity} onChange={(event) => setSurplusDraft((current) => ({ ...current, quantity: event.target.value }))} />
+              <Input placeholder="Origen" value={surplusDraft.origin} onChange={(event) => setSurplusDraft((current) => ({ ...current, origin: event.target.value }))} />
+              <Select value={surplusDraft.classification} onValueChange={(value: SurplusClass) => setSurplusDraft((current) => ({ ...current, classification: value }))}>
+                <SelectTrigger><SelectValue placeholder="Clasificación" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="reutilizable">Reutilizable</SelectItem>
                   <SelectItem value="desecho">Desecho</SelectItem>
                 </SelectContent>
               </Select>
-
-              <Button className="md:col-span-2 lg:col-span-4" onClick={handleSurplusCreate}>
-                Registrar sobrante
-              </Button>
+              <Button className="md:col-span-2 xl:col-span-4" onClick={() => void handleSurplusCreate()} disabled={saving}>Registrar sobrante</Button>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Listado de sobrantes</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>Listado de sobrantes</CardTitle></CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
@@ -2105,9 +1211,9 @@ export function InventoryControlCenter() {
                     <TableHead>Producto</TableHead>
                     <TableHead>Cantidad</TableHead>
                     <TableHead>Origen</TableHead>
-                    <TableHead>Clasificacion</TableHead>
+                    <TableHead>Clasificación</TableHead>
                     <TableHead>Estado</TableHead>
-                    <TableHead>Accion</TableHead>
+                    <TableHead>Acción</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2116,29 +1222,14 @@ export function InventoryControlCenter() {
                       <TableCell>{getMaterialName(item.materialId)}</TableCell>
                       <TableCell>{item.quantity}</TableCell>
                       <TableCell>{item.origin}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{item.classification}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={item.reintegrated ? 'secondary' : 'default'}>
-                          {item.reintegrated ? 'Reingresado' : 'Pendiente'}
-                        </Badge>
-                      </TableCell>
+                      <TableCell><Badge variant="outline">{item.classification}</Badge></TableCell>
+                      <TableCell><Badge variant={item.reintegrated ? 'secondary' : 'default'}>{item.reintegrated ? 'Reingresado' : 'Pendiente'}</Badge></TableCell>
                       <TableCell>
                         <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={item.classification !== 'reutilizable' || item.reintegrated}
-                            onClick={() => handleSurplusReintegration(item.id)}
-                          >
+                          <Button size="sm" variant="outline" disabled={item.classification !== 'reutilizable' || item.reintegrated} onClick={() => void handleSurplusReintegration(item.id)}>
                             Reingresar
                           </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => setSurplus((current) => current.filter((entry) => entry.id !== item.id))}
-                          >
+                          <Button size="icon" variant="ghost" onClick={() => void handleDeleteSurplus(item.id)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -2151,6 +1242,151 @@ export function InventoryControlCenter() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Detalle de material y trazabilidad</DialogTitle>
+            <DialogDescription>Historial de precios, uso reciente y ubicación principal del material.</DialogDescription>
+          </DialogHeader>
+          {selectedMaterial ? (
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="relative h-56 overflow-hidden rounded-2xl bg-slate-100">
+                  <Image src={selectedMaterial.imageUrl || makeMockImage(selectedMaterial.name)} alt={selectedMaterial.name} fill className="object-cover" unoptimized />
+                </div>
+                <div className="space-y-2 text-sm">
+                  <p className="text-lg font-semibold">{selectedMaterial.name}</p>
+                  <p><span className="text-muted-foreground">SKU:</span> {selectedMaterial.sku}</p>
+                  <p><span className="text-muted-foreground">Proveedor:</span> {getSupplierName(selectedMaterial.supplierId)}</p>
+                  <p><span className="text-muted-foreground">Ubicación:</span> {selectedMaterial.warehouse}</p>
+                  <p><span className="text-muted-foreground">Stock físico/reservado/bloqueado:</span> {selectedMaterial.stockPhysical} / {selectedMaterial.stockReserved} / {selectedMaterial.blockedByDefect}</p>
+                </div>
+              </div>
+
+              <Card>
+                <CardHeader><CardTitle className="text-base">Proyectos recientes</CardTitle></CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Proyecto</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Cantidad</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedMaterial.recentUsage.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={3} className="text-center text-muted-foreground">Sin uso reciente registrado.</TableCell>
+                        </TableRow>
+                      ) : (
+                        selectedMaterial.recentUsage.map((usage) => (
+                          <TableRow key={`${usage.project}-${usage.date}`}>
+                            <TableCell>{usage.project}</TableCell>
+                            <TableCell>{usage.date}</TableCell>
+                            <TableCell>{usage.quantity}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader><CardTitle className="text-base">Control de versiones de precio</CardTitle></CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Precio Bs.</TableHead>
+                        <TableHead>Tasa</TableHead>
+                        <TableHead>Equivalente USD</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {[...selectedMaterial.priceHistory].reverse().map((version, index) => (
+                        <TableRow key={`${version.date}-${index}`}>
+                          <TableCell>{version.date}</TableCell>
+                          <TableCell>{formatBs(version.priceBs)}</TableCell>
+                          <TableCell>{version.exchangeRate.toFixed(2)}</TableCell>
+                          <TableCell>${(version.priceBs / Math.max(version.exchangeRate, 1)).toFixed(2)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editItemOpen} onOpenChange={setEditItemOpen}>
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Editar material</DialogTitle>
+            <DialogDescription>Ajusta datos principales sin perder historial de precios.</DialogDescription>
+          </DialogHeader>
+          {editDraft ? (
+            <div className="grid gap-4 pt-2 md:grid-cols-2">
+              <Field label="Nombre"><Input value={editDraft.name} onChange={(event) => setEditDraft((current) => current ? { ...current, name: event.target.value } : current)} /></Field>
+              <Field label="SKU"><Input value={editDraft.sku} onChange={(event) => setEditDraft((current) => current ? { ...current, sku: event.target.value } : current)} /></Field>
+              <Field label="Categoría"><Input value={editDraft.category} onChange={(event) => setEditDraft((current) => current ? { ...current, category: event.target.value } : current)} /></Field>
+              <Field label="Proveedor">
+                <Select value={editDraft.supplierId} onValueChange={(value) => setEditDraft((current) => current ? { ...current, supplierId: value } : current)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {suppliers.map((supplier) => (
+                      <SelectItem key={supplier.id} value={supplier.id}>{supplier.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Unidad"><Input value={editDraft.unit} onChange={(event) => setEditDraft((current) => current ? { ...current, unit: event.target.value } : current)} /></Field>
+              <Field label="Almacén"><Input value={editDraft.warehouse} onChange={(event) => setEditDraft((current) => current ? { ...current, warehouse: event.target.value } : current)} /></Field>
+              <Field label="Precio actual (Bs.)"><Input type="number" min={0} value={String(getCurrentPriceBs(editDraft))} onChange={(event) => setEditDraft((current) => current ? { ...current, priceHistory: [{ date: current.purchaseDate ?? toIsoDate(), priceBs: Number(event.target.value || 0), exchangeRate }] } : current)} /></Field>
+              <Field label="Stock mínimo"><Input type="number" min={0} value={String(editDraft.minStock)} onChange={(event) => setEditDraft((current) => current ? { ...current, minStock: Number(event.target.value || 0) } : current)} /></Field>
+              <div className="md:col-span-2">
+                <Field label="Imagen URL"><Input value={editDraft.imageUrl} onChange={(event) => setEditDraft((current) => current ? { ...current, imageUrl: event.target.value } : current)} /></Field>
+              </div>
+              <div className="md:col-span-2 flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setEditItemOpen(false)} disabled={saving}>Cancelar</Button>
+                <Button onClick={() => void handleMaterialUpdate()} disabled={saving} style={{ backgroundColor: '#d6a85a', color: '#1f1f1f' }}>
+                  {saving ? 'Guardando...' : 'Guardar cambios'}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-sm font-medium">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function MetricCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+  return (
+    <Card className="border-border/70 bg-background/80 p-4 shadow-none">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#d6a85a]/15 text-[#9a6b2f]">
+          {icon}
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="text-2xl font-semibold">{value}</p>
+        </div>
+      </div>
+    </Card>
   );
 }
