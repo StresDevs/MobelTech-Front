@@ -8,9 +8,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { Textarea } from '@/components/ui/textarea';
-import { CURRENCY_FORMAT } from '@/lib/constants';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { AlertCircle, Check, ClipboardList, Search, X } from 'lucide-react';
+import { AlertCircle, CalendarDays, Check, ClipboardList, Hash, Package, Search, ShoppingBag, X } from 'lucide-react';
 
 type Material = {
   id: string;
@@ -120,17 +119,52 @@ export function MaterialRequestsReview() {
   const rejectedRequests = filteredRequests.filter((request) => request.status === 'rejected');
 
   const selectedRequest = requests.find((request) => request.id === selectedRequestId) ?? null;
+  const contractorsById = useMemo(
+    () => new Map(contractors.map((contractor) => [contractor.id, contractor])),
+    [contractors],
+  );
+  const ordersById = useMemo(
+    () => new Map(orders.map((order) => [order.id, order])),
+    [orders],
+  );
+  const materialsById = useMemo(
+    () => new Map(materials.map((material) => [material.id, material])),
+    [materials],
+  );
 
   function getContractorName(contractorId: string) {
-    return contractors.find((entry) => entry.id === contractorId)?.name ?? 'Contratista';
+    return contractorsById.get(contractorId)?.name ?? 'Contratista';
   }
 
   function getOrderName(orderId?: string | null) {
-    return orders.find((entry) => entry.id === orderId)?.items?.[0]?.description ?? 'Trabajo sin detalle';
+    return ordersById.get(orderId ?? '')?.items?.[0]?.description ?? 'Trabajo sin detalle';
   }
 
   function getMaterial(materialId: string) {
-    return materials.find((entry) => entry.id === materialId);
+    return materialsById.get(materialId);
+  }
+
+  function getMaterialLabel(item: MaterialRequestItem) {
+    const material = getMaterial(item.materialId);
+    const quantityLabel = `${item.quantity} ${material?.unit ?? 'u'}`;
+    return {
+      name: material?.name ?? 'Material no encontrado',
+      quantityLabel,
+      notes: item.notes?.trim() || null,
+    };
+  }
+
+  function formatRequestDate(value: string) {
+    return new Date(value).toLocaleString('es-BO', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+  }
+
+  function getRequestSummary(request: MaterialRequest) {
+    const totalLines = request.items.length;
+    const totalQuantity = request.items.reduce((sum, item) => sum + item.quantity, 0);
+    return `${totalLines} ${totalLines === 1 ? 'material' : 'materiales'} · ${totalQuantity} unidades`;
   }
 
   async function updateRequestStatus(status: 'approved' | 'rejected') {
@@ -216,6 +250,7 @@ export function MaterialRequestsReview() {
           openRequest={setSelectedRequestId}
           getContractorName={getContractorName}
           getOrderName={getOrderName}
+          materialsById={materialsById}
         />
         <RequestsColumn
           title="Aprobadas"
@@ -224,6 +259,7 @@ export function MaterialRequestsReview() {
           openRequest={setSelectedRequestId}
           getContractorName={getContractorName}
           getOrderName={getOrderName}
+          materialsById={materialsById}
         />
         <RequestsColumn
           title="Rechazadas"
@@ -232,75 +268,137 @@ export function MaterialRequestsReview() {
           openRequest={setSelectedRequestId}
           getContractorName={getContractorName}
           getOrderName={getOrderName}
+          materialsById={materialsById}
         />
       </div>
 
       <Dialog open={Boolean(selectedRequest)} onOpenChange={(open) => !open && setSelectedRequestId(null)}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Detalle de solicitud</DialogTitle>
-          </DialogHeader>
-
+        <DialogContent className="max-w-5xl overflow-hidden p-0">
           {selectedRequest ? (
-            <div className="space-y-5">
-              <div className="grid gap-4 md:grid-cols-4">
-                <DetailPill label="Contratista" value={getContractorName(selectedRequest.contractorId)} />
-                <DetailPill label="Trabajo" value={getOrderName(selectedRequest.productionOrderId)} />
-                <DetailPill label="Fecha" value={new Date(selectedRequest.requestDate).toLocaleString('es-BO')} />
-                <DetailPill label="Estado" value={STATUS_META[selectedRequest.status].label} />
-              </div>
-
-              <div className="space-y-3">
-                {selectedRequest.items.map((item) => {
-                  const material = getMaterial(item.materialId);
-                  return (
-                    <Card key={`${selectedRequest.id}-${item.materialId}`} className="p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="font-semibold">{material?.name ?? 'Material no encontrado'}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {item.quantity} {material?.unit ?? 'u'} · {CURRENCY_FORMAT}{material?.unitPrice ?? 0}
-                          </p>
-                          {item.notes ? <p className="mt-1 text-xs italic text-muted-foreground">Notas: {item.notes}</p> : null}
-                        </div>
-                        <Badge variant="outline">Subtotal {CURRENCY_FORMAT}{(material?.unitPrice ?? 0) * item.quantity}</Badge>
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-
-              {selectedRequest.status === 'rejected' && selectedRequest.rejectionComments ? (
-                <Card className="border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-                  <p className="font-semibold">Motivo del rechazo</p>
-                  <p className="mt-1">{selectedRequest.rejectionComments}</p>
-                </Card>
-              ) : null}
-
-              {selectedRequest.status === 'pending' ? (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Comentario si rechazas</label>
-                    <Textarea
-                      value={rejectionComments}
-                      onChange={(event) => setRejectionComments(event.target.value)}
-                      placeholder="Explica claramente que debe corregir el contratista..."
-                    />
+            <div className="grid max-h-[85vh] md:grid-cols-[320px_minmax(0,1fr)]">
+              <aside className="border-b border-border/70 bg-muted/20 p-6 md:border-b-0 md:border-r">
+                <DialogHeader className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Badge className={STATUS_META[selectedRequest.status].className}>{STATUS_META[selectedRequest.status].label}</Badge>
+                    <Badge variant="outline" className="gap-1">
+                      <Hash className="h-3.5 w-3.5" />
+                      {selectedRequest.id.slice(0, 8)}
+                    </Badge>
                   </div>
+                  <DialogTitle className="text-left text-2xl">Detalle de solicitud</DialogTitle>
+                  <p className="text-sm text-muted-foreground">{getRequestSummary(selectedRequest)}</p>
+                </DialogHeader>
 
-                  <DialogFooter className="gap-2">
-                    <Button variant="outline" onClick={() => setSelectedRequestId(null)}>
-                      Cerrar
-                    </Button>
-                    <Button variant="destructive" onClick={() => void updateRequestStatus('rejected')} disabled={saving}>
-                      {saving ? 'Procesando...' : 'Rechazar'}
-                    </Button>
-                    <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void updateRequestStatus('approved')} disabled={saving}>
-                      {saving ? 'Procesando...' : 'Aprobar'}
-                    </Button>
-                  </DialogFooter>
-                </>
-              ) : null}
+                <div className="mt-6 space-y-3">
+                  <InfoRow icon={<ShoppingBag className="h-4 w-4" />} label="Contratista" value={getContractorName(selectedRequest.contractorId)} />
+                  <InfoRow icon={<Package className="h-4 w-4" />} label="Trabajo" value={getOrderName(selectedRequest.productionOrderId)} />
+                  <InfoRow icon={<CalendarDays className="h-4 w-4" />} label="Fecha" value={formatRequestDate(selectedRequest.requestDate)} />
+                  <InfoRow icon={<Check className="h-4 w-4" />} label="Estado" value={STATUS_META[selectedRequest.status].label} />
+                </div>
+
+                {selectedRequest.status === 'rejected' && selectedRequest.rejectionComments ? (
+                  <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em]">Motivo de rechazo</p>
+                    <p className="mt-2 leading-6">{selectedRequest.rejectionComments}</p>
+                  </div>
+                ) : null}
+
+                <div className="mt-6 rounded-2xl border border-border/70 bg-background p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Resumen</p>
+                  <div className="mt-3 space-y-2 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Líneas</span>
+                      <span className="font-semibold">{selectedRequest.items.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Unidades</span>
+                      <span className="font-semibold">
+                        {selectedRequest.items.reduce((sum, item) => sum + item.quantity, 0)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+
+              <div className="flex min-h-0 flex-col">
+                <div className="border-b border-border/70 px-6 py-5">
+                  <p className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">Materiales solicitados</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Solo se muestran nombres, unidades y cantidades para revisar rápidamente lo pedido.
+                  </p>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+                  <div className="space-y-3">
+                    {selectedRequest.items.map((item, index) => {
+                      const material = getMaterial(item.materialId);
+                      const materialInfo = getMaterialLabel(item);
+                      return (
+                        <Card key={`${selectedRequest.id}-${item.materialId}`} className="border-border/70 p-4 shadow-sm">
+                          <div className="flex items-start gap-4">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#eab676]/15 text-[#9a6b2f]">
+                              <span className="text-sm font-bold">{index + 1}</span>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                <div className="min-w-0">
+                                  <p className="truncate font-semibold text-foreground">{materialInfo.name}</p>
+                                  <p className="mt-1 text-sm text-muted-foreground">
+                                    Cantidad solicitada: <span className="font-semibold text-foreground">{materialInfo.quantityLabel}</span>
+                                  </p>
+                                </div>
+                                <Badge variant="outline" className="self-start">
+                                  {material?.unit ? `Unidad: ${material.unit}` : 'Sin unidad'}
+                                </Badge>
+                              </div>
+
+                              {materialInfo.notes ? (
+                                <div className="mt-3 rounded-xl bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                                  <span className="font-medium text-foreground">Notas: </span>
+                                  {materialInfo.notes}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {selectedRequest.status === 'pending' ? (
+                  <div className="border-t border-border/70 px-6 py-5">
+                    <div className="space-y-3">
+                      <label className="text-sm font-medium">Comentario si rechazas</label>
+                      <Textarea
+                        value={rejectionComments}
+                        onChange={(event) => setRejectionComments(event.target.value)}
+                        placeholder="Explica claramente qué debe corregir el contratista..."
+                      />
+                    </div>
+
+                    <DialogFooter className="mt-4 gap-2">
+                      <Button variant="outline" onClick={() => setSelectedRequestId(null)}>
+                        Cerrar
+                      </Button>
+                      <Button variant="destructive" onClick={() => void updateRequestStatus('rejected')} disabled={saving}>
+                        {saving ? 'Procesando...' : 'Rechazar'}
+                      </Button>
+                      <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void updateRequestStatus('approved')} disabled={saving}>
+                        {saving ? 'Procesando...' : 'Aprobar'}
+                      </Button>
+                    </DialogFooter>
+                  </div>
+                ) : (
+                  <div className="border-t border-border/70 px-6 py-4">
+                    <DialogFooter className="gap-2">
+                      <Button variant="outline" onClick={() => setSelectedRequestId(null)}>
+                        Cerrar
+                      </Button>
+                    </DialogFooter>
+                  </div>
+                )}
+              </div>
             </div>
           ) : null}
         </DialogContent>
@@ -332,6 +430,7 @@ function RequestsColumn({
   openRequest,
   getContractorName,
   getOrderName,
+  materialsById,
 }: {
   title: string;
   description: string;
@@ -339,6 +438,7 @@ function RequestsColumn({
   openRequest: (requestId: string) => void;
   getContractorName: (contractorId: string) => string;
   getOrderName: (orderId?: string | null) => string;
+  materialsById: Map<string, Material>;
 }) {
   return (
     <Card className="p-5">
@@ -367,6 +467,21 @@ function RequestsColumn({
               </div>
               <Badge className={STATUS_META[request.status].className}>{STATUS_META[request.status].label}</Badge>
             </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {request.items.slice(0, 3).map((item) => {
+                const material = materialsById.get(item.materialId);
+                return (
+                  <Badge key={`${request.id}-${item.materialId}`} variant="outline" className="max-w-full">
+                    <span className="truncate">
+                      {material?.name ?? 'Material'} · {item.quantity} {material?.unit ?? 'u'}
+                    </span>
+                  </Badge>
+                );
+              })}
+              {request.items.length > 3 ? (
+                <Badge variant="outline">+{request.items.length - 3} más</Badge>
+              ) : null}
+            </div>
             {request.status === 'rejected' && request.rejectionComments ? (
               <p className="mt-3 line-clamp-2 text-xs text-rose-700">{request.rejectionComments}</p>
             ) : null}
@@ -389,6 +504,20 @@ function DetailPill({ label, value }: { label: string; value: string }) {
     <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
       <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
       <p className="mt-1 font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-background p-3">
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#eab676]/15 text-[#9a6b2f]">
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
+        <p className="mt-1 text-sm font-semibold leading-5">{value}</p>
+      </div>
     </div>
   );
 }
