@@ -734,7 +734,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
               {p.convertedToQuotationId && (
                 <div>
                   <p className="text-xs text-muted-foreground">Cotización generada</p>
-                  <p className="text-sm font-medium mt-0.5 text-purple-600">#{p.convertedToQuotationId}</p>
+                  <p className="text-sm font-medium mt-0.5 text-purple-600">#{p.uid ?? p.convertedToQuotationId}</p>
                 </div>
               )}
               {p.notes && (

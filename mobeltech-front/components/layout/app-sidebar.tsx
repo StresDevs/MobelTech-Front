@@ -83,6 +83,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   if (currentRole === 'contractor') {
     availableModules = [
       { id: 'assigned-jobs', label: 'Trabajos Asignados', path: '/assigned-jobs', icon: 'Factory', roles: ['contractor'] },
+      { id: 'furniture', label: 'Muebles', path: '/furniture', icon: 'Package', roles: ['contractor'] },
       { id: 'schedule', label: 'Cronograma', path: '/schedule', icon: 'Calendar', roles: ['contractor'] },
       { id: 'contractor-requests', label: 'Solicitud de Material', path: '/contractor-requests', icon: 'ShoppingCart', roles: ['contractor'] },
     ];

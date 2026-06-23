@@ -43,6 +43,13 @@ export const MODULES = [
     roles: ['admin', 'architect', 'partner'],
   },
   {
+    id: 'furniture',
+    label: 'Muebles',
+    path: '/furniture',
+    icon: 'Package',
+    roles: ['admin', 'architect', 'contractor', 'partner'],
+  },
+  {
     id: 'production',
     label: 'Producción',
     path: '/production',
@@ -105,22 +112,22 @@ export const ROLE_PERMISSIONS = {
   admin: {
     label: 'Administrador',
     description: 'Acceso total a todos los módulos',
-    modules: ['dashboard', 'clients', 'production', 'inventory', 'warehouse', 'finance'],
+    modules: ['dashboard', 'clients', 'prequotations', 'quotations', 'furniture', 'production', 'inventory', 'warehouse', 'finance'],
   },
   architect: {
     label: 'Arquitecta',
     description: 'Acceso ejecutivo y comercial',
-    modules: ['dashboard', 'clients', 'prequotations', 'quotations', 'production', 'inventory', 'warehouse', 'finance'],
+    modules: ['dashboard', 'clients', 'prequotations', 'quotations', 'furniture', 'production', 'inventory', 'warehouse', 'finance'],
   },
   contractor: {
     label: 'Contratista',
     description: 'Acceso operativo a trabajos y solicitudes',
-    modules: ['assigned-jobs', 'schedule', 'contractor-requests'],
+    modules: ['assigned-jobs', 'furniture', 'schedule', 'contractor-requests'],
   },
   partner: {
     label: 'Socio',
     description: 'Acceso de lectura para seguimiento del negocio',
-    modules: ['dashboard', 'clients', 'prequotations', 'quotations', 'schedule', 'inventory', 'finance'],
+    modules: ['dashboard', 'clients', 'prequotations', 'quotations', 'furniture', 'schedule', 'inventory', 'finance'],
   },
 } as Record<UserRole, { label: string; description: string; modules: string[] }>;
 

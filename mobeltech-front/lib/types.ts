@@ -55,6 +55,7 @@ export interface QuotationAudit {
 
 export interface Quotation {
   id: string;
+  uid?: string | null;
   clientId: string;
   projectId?: string;
   items: QuotationItem[];
@@ -446,6 +447,9 @@ export interface QuotationEnvironmentProject {
   assignedContractorId?: string | null;
   ambience: string;
   description?: string | null;
+  sketchupFileName?: string | null;
+  sketchupFileUrl?: string | null;
+  sketchupFileSize?: string | null;
   price: number;
   estimatedStartDate: string;
   estimatedEndDate: string;

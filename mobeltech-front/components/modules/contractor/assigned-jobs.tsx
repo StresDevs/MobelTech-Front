@@ -21,6 +21,7 @@ type ContractorRecord = {
 
 type QuotationRecord = {
   id: string;
+  uid?: string | null;
   clientId: string;
   totalAmount?: number;
   items: Array<{
@@ -39,6 +40,7 @@ type ClientRecord = {
 
 type ProductionOrderRecord = {
   id: string;
+  projectId?: string | null;
   quotationId?: string | null;
   assignedContractorId?: string | null;
   startDate: string | Date;
@@ -69,6 +71,17 @@ type ContractorPaymentPlan = {
   totalAmount: number;
   paidAmount: number;
   remainingAmount: number;
+};
+
+type FurnitureFileRecord = {
+  id: string;
+  quotationId?: string | null;
+  projectEnvironmentId?: string | null;
+  assignedContractorId?: string | null;
+  fileName: string;
+  fileSize?: string | null;
+  version: number;
+  ambience?: string | null;
 };
 
 function normalizeDate(value?: string | Date | null) {
@@ -138,6 +151,7 @@ export default function AssignedJobs() {
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [quotations, setQuotations] = useState<QuotationRecord[]>([]);
+  const [furnitureFiles, setFurnitureFiles] = useState<FurnitureFileRecord[]>([]);
   const [paymentPlans, setPaymentPlans] = useState<ContractorPaymentPlan[]>([]);
   const [contractor, setContractor] = useState<ContractorRecord | null>(null);
 
@@ -170,16 +184,18 @@ export default function AssignedJobs() {
         setClients([]);
         setQuotations([]);
         setPaymentPlans([]);
+        setFurnitureFiles([]);
         setLoading(false);
         return;
       }
 
-      const [jobsResponse, notificationsResponse, clientsResponse, quotationsResponse, plansResponse] = await Promise.all([
+      const [jobsResponse, notificationsResponse, clientsResponse, quotationsResponse, plansResponse, furnitureFilesResponse] = await Promise.all([
         fetch(`${apiBase}/api/production-orders?contractorId=${encodeURIComponent(activeContractor.id)}`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/notifications?recipientUserId=${encodeURIComponent(user.id)}&unreadOnly=true`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/clients`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/quotations`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/contractor-finance/plans?contractorId=${encodeURIComponent(activeContractor.id)}`, { cache: 'no-store' }),
+        fetch(`${apiBase}/api/furniture-files?contractorId=${encodeURIComponent(activeContractor.id)}`, { cache: 'no-store' }),
       ]);
 
       if (!jobsResponse.ok) throw new Error('No se pudieron cargar los trabajos asignados');
@@ -192,6 +208,7 @@ export default function AssignedJobs() {
       setClients(await clientsResponse.json());
       setQuotations(await quotationsResponse.json());
       setPaymentPlans(plansResponse.ok ? await plansResponse.json() : []);
+      setFurnitureFiles(furnitureFilesResponse.ok ? await furnitureFilesResponse.json() : []);
     } catch (err) {
       if (!silent) setError(err instanceof Error ? err.message : 'Error cargando trabajos del contratista');
     } finally {
@@ -253,6 +270,32 @@ export default function AssignedJobs() {
     const plan = paymentPlans.find((entry) => entry.productionOrderId === job.id);
     if (plan) return plan.totalAmount;
     return getQuotation(job)?.totalAmount ?? 0;
+  }
+
+  function getSketchupFile(job: ProductionOrderRecord) {
+    return furnitureFiles.find((file) => file.quotationId === job.quotationId && (!job.projectId || file.assignedContractorId === job.assignedContractorId));
+  }
+
+  async function downloadSketchupFile(file: FurnitureFileRecord) {
+    if (!apiBase || !user) return;
+    const response = await fetch(`${apiBase}/api/furniture-files/${file.id}/download?performedBy=${encodeURIComponent(user.name)}`);
+    if (!response.ok) {
+      setError('No se pudo descargar el archivo SketchUp.');
+      return;
+    }
+
+    const payload = await response.json() as { fileName: string; mimeType?: string | null; fileData: string };
+    const byteCharacters = atob(payload.fileData);
+    const bytes = new Uint8Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i += 1) bytes[i] = byteCharacters.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: payload.mimeType || 'application/octet-stream' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = payload.fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   async function generateWorkOrderPdf(job: ProductionOrderRecord) {
@@ -425,7 +468,7 @@ export default function AssignedJobs() {
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Inicio</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Fin estimado</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Estado</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">PDF</th>
+                <th className="px-4 py-3 text-right font-medium text-muted-foreground">SketchUp</th>
               </tr>
             </thead>
             <tbody>
@@ -436,6 +479,7 @@ export default function AssignedJobs() {
               ) : jobs.map((job) => {
                 const client = getClient(job);
                 const description = getLeadDescription(job);
+                const sketchupFile = getSketchupFile(job);
                 return (
                   <tr key={job.id} className="border-b border-border/70 last:border-b-0">
                     <td className="px-4 py-3">
@@ -455,9 +499,9 @@ export default function AssignedJobs() {
                     <td className="px-4 py-3">{formatDate(job.estimatedDeliveryDate)}</td>
                     <td className="px-4 py-3"><Badge className={statusClass(job.status)}>{statusLabel(job.status)}</Badge></td>
                     <td className="px-4 py-3 text-right">
-                      <Button size="sm" variant="outline" onClick={() => void generateWorkOrderPdf(job)} className="gap-2">
+                      <Button size="sm" variant="outline" onClick={() => sketchupFile ? void downloadSketchupFile(sketchupFile) : void generateWorkOrderPdf(job)} className="gap-2" disabled={!sketchupFile}>
                         <Download className="h-4 w-4" />
-                        Descargar
+                        {sketchupFile ? 'Descargar' : 'Sin archivo'}
                       </Button>
                     </td>
                   </tr>

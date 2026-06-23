@@ -31,6 +31,7 @@ import {
   Hammer,
   X,
   Download,
+  Upload,
   ArrowUpDown,
   RefreshCw,
   FolderPlus,
@@ -88,6 +89,7 @@ type ApiQuotation = Quotation & {
   prequotation?: {
     id: string;
     title: string;
+    uid?: string | null;
   } | null;
   updatedAt?: Date;
 };
@@ -112,6 +114,25 @@ function formatDateTime(d: Date) {
 
 function formatCurrency(n: number) {
   return `Bs. ${n.toLocaleString('es-BO')}`;
+}
+
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function readFileAsBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? '');
+      resolve(result.includes(',') ? result.split(',')[1] ?? '' : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('No se pudo leer el archivo.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function parseLocalDate(value?: string | null) {
@@ -275,6 +296,7 @@ export function QuotationsModule() {
     const result = enriched.filter(({ q, client, contractors, itemsText }) => {
       const matchSearch =
         !term ||
+        (q.uid ?? '').toLowerCase().includes(term) ||
         q.id.toLowerCase().includes(term) ||
         (client?.name ?? '').toLowerCase().includes(term) ||
         contractors.some((c) => c.name.toLowerCase().includes(term)) ||
@@ -523,7 +545,8 @@ export function QuotationsModule() {
           {filtered.map(({ q, client, project, contractors, prequotation }) => {
             const cfg = STATUS_CONFIG[q.status];
             const itemCount = q.items.reduce((s, i) => s + i.quantity, 0);
-            const quotationHeadline = prequotation?.title ?? q.items[0]?.description ?? `Cotización ${q.id}`;
+            const quotationCode = q.uid ?? prequotation?.uid ?? q.id;
+            const quotationHeadline = prequotation?.title ?? q.items[0]?.description ?? `Cotización ${quotationCode}`;
             return (
               <Card
                 key={q.id}
@@ -545,7 +568,7 @@ export function QuotationsModule() {
                       <p className="text-sm font-semibold truncate">
                         {quotationHeadline}{' '}
                         <span className="text-muted-foreground font-normal">·</span>{' '}
-                        <span className="font-mono text-xs text-muted-foreground">{q.id}</span>
+                        <span className="font-mono text-xs text-muted-foreground">#{quotationCode}</span>
                       </p>
                       <span
                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${cfg.color}`}
@@ -664,12 +687,13 @@ function QuotationDetail({
   onSave,
   saving,
 }: DetailProps) {
-  const { currentRole } = useRole();
+  const { currentRole, userName } = useRole();
 
   const currentQuotation = quotation;
   const cfg = STATUS_CONFIG[currentQuotation.status];
   const subtotal = currentQuotation.items.reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0);
-  const quotationHeadline = prequotationTitle ?? currentQuotation.items[0]?.description ?? `Cotización #${quotation.id}`;
+  const quotationCode = currentQuotation.uid ?? currentQuotation.prequotation?.uid ?? currentQuotation.id;
+  const quotationHeadline = prequotationTitle ?? currentQuotation.items[0]?.description ?? `Cotización #${quotationCode}`;
 
   const [editing, setEditing] = useState(false);
   const [editableItems, setEditableItems] = useState<QuotationItem[]>(() =>
@@ -692,6 +716,10 @@ function QuotationDetail({
     estimatedStartDate: string;
     estimatedEndDate: string;
     assignedContractorId: string;
+    sketchupFileName: string;
+    sketchupFileUrl: string;
+    sketchupFileSize: string;
+    sketchupFileData: string;
   }>>([
     {
       key: 'env-1',
@@ -701,6 +729,10 @@ function QuotationDetail({
       estimatedStartDate: '',
       estimatedEndDate: '',
       assignedContractorId: '',
+      sketchupFileName: '',
+      sketchupFileUrl: '',
+      sketchupFileSize: '',
+      sketchupFileData: '',
     },
   ]);
 
@@ -732,6 +764,10 @@ function QuotationDetail({
         estimatedStartDate: '',
         estimatedEndDate: '',
         assignedContractorId: '',
+        sketchupFileName: '',
+        sketchupFileUrl: '',
+        sketchupFileSize: '',
+        sketchupFileData: '',
       },
     ]);
   }
@@ -744,6 +780,11 @@ function QuotationDetail({
       estimatedStartDate: row.estimatedStartDate,
       estimatedEndDate: row.estimatedEndDate,
       assignedContractorId: isUuid(row.assignedContractorId) ? row.assignedContractorId : null,
+      sketchupFileName: row.sketchupFileName.trim() || null,
+      sketchupFileUrl: row.sketchupFileUrl.trim() || null,
+      sketchupFileSize: row.sketchupFileSize.trim() || null,
+      sketchupFileData: row.sketchupFileData || null,
+      uploadedBy: userName,
     }));
 
     const hasInvalidRow = preparedRows.some((row) => {
@@ -792,6 +833,10 @@ function QuotationDetail({
           estimatedStartDate: '',
           estimatedEndDate: '',
           assignedContractorId: '',
+          sketchupFileName: '',
+          sketchupFileUrl: '',
+          sketchupFileSize: '',
+          sketchupFileData: '',
         },
       ]);
       setShowEnvironmentBuilder(false);
@@ -824,7 +869,7 @@ function QuotationDetail({
             </span>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Cliente: {clientName ?? 'Cliente'} · Cotización #{quotation.id} · Creada el {formatDate(quotation.createdDate)}
+            Cliente: {clientName ?? 'Cliente'} · Cotización #{quotationCode} · Creada el {formatDate(quotation.createdDate)}
             {projectName ? ` · ${projectName}` : ''}
           </p>
         </div>
@@ -986,15 +1031,16 @@ function QuotationDetail({
 
             {currentQuotation.environmentProjects && currentQuotation.environmentProjects.length > 0 ? (
               <div className="overflow-x-auto rounded-xl border border-border">
-                <table className="w-full min-w-[760px] text-sm">
+                <table className="w-full min-w-[900px] text-sm">
                   <thead className="bg-muted/35">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Ambiente</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Descripción</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Contratista</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">SketchUp</th>
                       <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Precio</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Inicio</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Fin</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Contratista</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1002,10 +1048,21 @@ function QuotationDetail({
                       <tr key={environment.id} className="border-t border-border">
                         <td className="px-4 py-3 font-medium">{environment.ambience}</td>
                         <td className="px-4 py-3 text-muted-foreground">{environment.description || '—'}</td>
+                        <td className="px-4 py-3">{environment.contractorName || 'Sin asignar'}</td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {environment.sketchupFileName ? (
+                            environment.sketchupFileUrl ? (
+                              <a className="font-medium text-[#b87932] hover:underline" href={environment.sketchupFileUrl} target="_blank" rel="noreferrer">
+                                {environment.sketchupFileName}
+                              </a>
+                            ) : (
+                              environment.sketchupFileName
+                            )
+                          ) : '—'}
+                        </td>
                         <td className="px-4 py-3 text-right font-mono">{formatCurrency(environment.price)}</td>
                         <td className="px-4 py-3">{environment.estimatedStartDate}</td>
                         <td className="px-4 py-3">{environment.estimatedEndDate}</td>
-                        <td className="px-4 py-3">{environment.contractorName || 'Sin asignar'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1216,7 +1273,7 @@ function QuotationDetail({
 
             <div className="space-y-3">
               {environmentRows.map((row) => (
-                <div key={row.key} className="grid gap-3 rounded-2xl border border-border bg-muted/15 p-4 lg:grid-cols-[1.05fr_1.35fr_0.75fr_1.6fr_1fr_auto]">
+                <div key={row.key} className="grid gap-3 rounded-2xl border border-border bg-muted/15 p-4 lg:grid-cols-[1fr_1.25fr_1fr_1.2fr_0.75fr_1.5fr_auto]">
                   <Input
                     placeholder="Ambiente"
                     value={row.ambience}
@@ -1227,6 +1284,46 @@ function QuotationDetail({
                     value={row.description}
                     onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, description: e.target.value } : item))}
                   />
+                  <select
+                    value={row.assignedContractorId}
+                    onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, assignedContractorId: e.target.value } : item))}
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value="">Asignar contratista</option>
+                    {contractorOptions.filter((contractor) => isUuid(contractor.id)).map((contractor) => (
+                      <option key={contractor.id} value={contractor.id}>
+                        {contractor.name}
+                      </option>
+                    ))}
+                  </select>
+                  <label className="flex h-10 cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/50">
+                    <Upload className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {row.sketchupFileName || 'Archivo SketchUp'}
+                    </span>
+                    <input
+                      type="file"
+                      accept=".skp,.skb,application/octet-stream"
+                      className="sr-only"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        const fileData = file ? await readFileAsBase64(file) : '';
+                        setEnvironmentRows((current) =>
+                          current.map((item) =>
+                            item.key === row.key
+                              ? {
+                                  ...item,
+                                  sketchupFileName: file?.name ?? '',
+                                  sketchupFileSize: file ? formatFileSize(file.size) : '',
+                                  sketchupFileUrl: '',
+                                  sketchupFileData: fileData,
+                                }
+                              : item,
+                          ),
+                        );
+                      }}
+                    />
+                  </label>
                   <Input
                     type="number"
                     min="0"
@@ -1286,18 +1383,6 @@ function QuotationDetail({
                       />
                     </PopoverContent>
                   </Popover>
-                  <select
-                    value={row.assignedContractorId}
-                    onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, assignedContractorId: e.target.value } : item))}
-                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                  >
-                    <option value="">Asignar contratista</option>
-                    {contractorOptions.filter((contractor) => isUuid(contractor.id)).map((contractor) => (
-                      <option key={contractor.id} value={contractor.id}>
-                        {contractor.name}
-                      </option>
-                    ))}
-                  </select>
                   <Button
                     variant="outline"
                     type="button"
