@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Download, History, Loader2, Upload } from 'lucide-react';
+import { ArrowLeft, Box, ChevronRight, Download, FileArchive, History, Loader2, Search, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -33,16 +33,23 @@ type FurnitureFile = {
   }>;
 };
 
+type EnvironmentProject = {
+  id: string;
+  ambience: string;
+  description?: string | null;
+  assignedContractorId?: string | null;
+  contractorName?: string | null;
+};
+
 type QuotationOption = {
   id: string;
   uid?: string | null;
   clientId: string;
   clientName?: string | null;
-  environmentProjects?: Array<{
-    id: string;
-    ambience: string;
-    assignedContractorId?: string | null;
-  }>;
+  totalAmount?: number;
+  createdDate: string | Date;
+  items?: Array<{ description: string }>;
+  environmentProjects?: EnvironmentProject[];
 };
 
 type ContractorRecord = {
@@ -83,24 +90,40 @@ function downloadBase64File(fileName: string, data: string, mimeType?: string | 
   URL.revokeObjectURL(url);
 }
 
+function formatDate(value?: string | Date | null) {
+  if (!value) return 'N/A';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return 'N/A';
+  return date.toLocaleDateString('es-BO', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatDateTime(value?: string | Date | null) {
+  if (!value) return 'N/A';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return 'N/A';
+  return date.toLocaleString('es-BO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 export function FurnitureModule() {
   const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '', []);
   const { currentRole, userName } = useRole();
   const { user } = useAuth();
   const canUpload = currentRole !== 'partner';
+  const isContractor = currentRole === 'contractor';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [files, setFiles] = useState<FurnitureFile[]>([]);
   const [quotations, setQuotations] = useState<QuotationOption[]>([]);
   const [contractorId, setContractorId] = useState<string | null>(null);
-  const [selectedQuotationId, setSelectedQuotationId] = useState('');
+  const [search, setSearch] = useState('');
+  const [selectedQuotationId, setSelectedQuotationId] = useState<string | null>(null);
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [notes, setNotes] = useState('');
 
   async function resolveContractorId() {
-    if (currentRole !== 'contractor' || !apiBase || !user) return null;
+    if (!isContractor || !apiBase || !user) return null;
     const response = await fetch(`${apiBase}/api/contractors`, { cache: 'no-store' });
     if (!response.ok) return null;
     const rows = (await response.json()) as ContractorRecord[];
@@ -134,9 +157,36 @@ export function FurnitureModule() {
     void loadData();
   }, [apiBase, user?.id, currentRole]);
 
-  const selectedQuotation = quotations.find((quotation) => quotation.id === selectedQuotationId);
-  const environmentOptions = selectedQuotation?.environmentProjects ?? [];
-  const selectedEnvironment = environmentOptions.find((environment) => environment.id === selectedEnvironmentId);
+  const visibleQuotations = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return quotations
+      .filter((quotation) => {
+        if (isContractor && contractorId) {
+          return (quotation.environmentProjects ?? []).some((environment) => environment.assignedContractorId === contractorId);
+        }
+        return true;
+      })
+      .filter((quotation) => {
+        if (!term) return true;
+        const text = [
+          quotation.uid,
+          quotation.id,
+          quotation.clientName,
+          quotation.items?.[0]?.description,
+          ...(quotation.environmentProjects ?? []).map((environment) => environment.ambience),
+        ].filter(Boolean).join(' ').toLowerCase();
+        return text.includes(term);
+      });
+  }, [contractorId, isContractor, quotations, search]);
+
+  const selectedQuotation = visibleQuotations.find((quotation) => quotation.id === selectedQuotationId) ?? null;
+  const selectedFiles = files.filter((file) => file.quotationId === selectedQuotation?.id);
+  const environmentOptions = useMemo(() => {
+    const environments = selectedQuotation?.environmentProjects ?? [];
+    if (!isContractor || !contractorId) return environments;
+    return environments.filter((environment) => environment.assignedContractorId === contractorId);
+  }, [contractorId, isContractor, selectedQuotation]);
+  const selectedEnvironment = environmentOptions.find((environment) => environment.id === selectedEnvironmentId) ?? environmentOptions[0] ?? null;
 
   async function uploadFile() {
     if (!selectedFile || !selectedQuotation || !apiBase || !canUpload) return;
@@ -157,7 +207,7 @@ export function FurnitureModule() {
           mimeType: selectedFile.type || 'application/octet-stream',
           fileData,
           uploadedBy: userName,
-          notes: notes.trim() || null,
+          notes: notes.trim() || selectedEnvironment?.ambience || null,
         }),
       });
       if (!response.ok) throw new Error('No se pudo subir el archivo SketchUp.');
@@ -183,88 +233,190 @@ export function FurnitureModule() {
   }
 
   if (loading) {
-    return <PageLoadingState title="Cargando muebles" description="Sincronizando archivos SketchUp y trazabilidad." />;
+    return <PageLoadingState title="Cargando muebles" description="Sincronizando cotizaciones, ambientes y archivos SketchUp." />;
+  }
+
+  if (selectedQuotation) {
+    const quotationCode = selectedQuotation.uid ?? selectedQuotation.id;
+    const title = selectedQuotation.items?.[0]?.description ?? `Cotización #${quotationCode}`;
+
+    return (
+      <div className="space-y-5">
+        <div className="flex items-start gap-4">
+          <button onClick={() => setSelectedQuotationId(null)} className="mt-0.5 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="truncate text-xl font-bold">{title}</h1>
+              <Badge variant="outline">UID {quotationCode}</Badge>
+              {selectedEnvironment ? <Badge className="bg-emerald-100 text-emerald-700">{selectedEnvironment.ambience}</Badge> : null}
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {selectedQuotation.clientName ?? 'Cliente'} · {selectedFiles.length} archivo{selectedFiles.length === 1 ? '' : 's'} SketchUp
+            </p>
+          </div>
+        </div>
+
+        {error ? <Card className="border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</Card> : null}
+
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-5">
+            <Card className="overflow-hidden">
+              <div className="grid grid-cols-2 border-b border-border">
+                <div className="border-b-2 px-5 py-4 text-center text-sm font-medium" style={{ borderColor: '#eab676' }}>
+                  <FileArchive className="mr-2 inline h-4 w-4" />
+                  Versiones ({selectedFiles.length})
+                </div>
+                
+              </div>
+
+              <div className="space-y-4 p-5">
+                {canUpload ? (
+                  <div className="rounded-xl border border-dashed border-border bg-muted/20 p-5">
+                    <div className="grid gap-3 lg:grid-cols-[1fr_1.2fr_auto]">
+                      <select value={selectedEnvironmentId} onChange={(event) => setSelectedEnvironmentId(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm">
+                        <option value="">Ambiente general</option>
+                        {environmentOptions.map((environment) => (
+                          <option key={environment.id} value={environment.id}>{environment.ambience}</option>
+                        ))}
+                      </select>
+                      <Input type="file" accept=".skp,.skb,application/octet-stream" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
+                      <Button onClick={uploadFile} disabled={saving || !selectedFile} className="gap-2" style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
+                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                        Subir versión
+                      </Button>
+                    </div>
+                    <Input className="mt-3" placeholder="Nota opcional para esta versión" value={notes} onChange={(event) => setNotes(event.target.value)} />
+                  </div>
+                ) : null}
+
+                {selectedFiles.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border bg-muted/20 p-8 text-center text-sm text-muted-foreground">
+                    Todavía no hay archivos SketchUp para esta cotización.
+                  </div>
+                ) : selectedFiles.map((file) => (
+                  <div key={file.id} className="rounded-xl border border-border p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <FileArchive className="h-4 w-4 text-red-500" />
+                          <p className="truncate font-semibold">{file.fileName}</p>
+                          <Badge className="bg-amber-100 text-amber-700">v{file.version}</Badge>
+                          {file.fileSize ? <Badge variant="secondary">{file.fileSize}</Badge> : null}
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {file.ambience ?? 'General'} · {file.uploadedBy} · {formatDateTime(file.createdAt)}
+                        </p>
+                      </div>
+                      <Button variant="outline" size="sm" className="gap-2" onClick={() => void downloadFile(file)}>
+                        <Download className="h-4 w-4" />
+                        Descargar
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card className="p-5">
+              <p className="mb-3 text-sm font-semibold">Historial de actividad</p>
+              <div className="space-y-2">
+                {selectedFiles.flatMap((file) => file.logs ?? []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Sin actividad registrada todavía.</p>
+                ) : selectedFiles.flatMap((file) => file.logs ?? []).map((log) => (
+                  <div key={log.id} className="rounded-lg border border-border px-3 py-2 text-xs">
+                    <p className="font-medium">{log.performedBy}</p>
+                    <p className="text-muted-foreground">{log.description} · {formatDateTime(log.performedAt)}</p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+
+          <div className="space-y-4">
+            <Card className="p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Resumen</p>
+              <div className="mt-4 space-y-4 text-sm">
+                <SummaryRow label="Cliente" value={selectedQuotation.clientName ?? 'Cliente'} />
+                <SummaryRow label="Cotización" value={`#${quotationCode}`} />
+                <SummaryRow label="Proyecto / ambiente" value={selectedEnvironment?.ambience ?? 'General'} />
+                <SummaryRow label="Creada" value={formatDate(selectedQuotation.createdDate)} />
+                <SummaryRow label="Última versión" value={selectedFiles[0] ? `v${selectedFiles[0].version}` : 'Sin archivo'} />
+              </div>
+            </Card>
+            <Card className="p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Permisos</p>
+              <p className="mt-3 text-sm text-muted-foreground">
+                {canUpload ? 'Puedes subir nuevas versiones y descargar archivos SketchUp.' : 'Tu rol puede ver y descargar archivos SketchUp.'}
+              </p>
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight">Muebles</h2>
-        <p className="text-sm text-muted-foreground">Archivos SketchUp por cliente, cotización y ambiente.</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight">Muebles</h2>
+          <p className="text-sm text-muted-foreground">
+            {isContractor ? 'Cotizaciones y ambientes asignados a tu perfil.' : 'Selecciona una cotización y administra sus archivos SketchUp.'}
+          </p>
+        </div>
+        <div className="relative w-full sm:w-80">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar cotización o cliente..." className="pl-9" />
+        </div>
       </div>
 
       {error ? <Card className="border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</Card> : null}
 
-      {canUpload ? (
-        <Card className="p-4">
-          <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_1.2fr_1fr_auto]">
-            <select value={selectedQuotationId} onChange={(event) => {
-              setSelectedQuotationId(event.target.value);
-              setSelectedEnvironmentId('');
-            }} className="h-10 rounded-md border border-input bg-background px-3 text-sm">
-              <option value="">Seleccionar cotización</option>
-              {quotations.map((quotation) => (
-                <option key={quotation.id} value={quotation.id}>
-                  #{quotation.uid ?? quotation.id} · {quotation.clientName ?? 'Cliente'}
-                </option>
-              ))}
-            </select>
-            <select value={selectedEnvironmentId} onChange={(event) => setSelectedEnvironmentId(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm" disabled={!selectedQuotationId}>
-              <option value="">Ambiente general</option>
-              {environmentOptions.map((environment) => (
-                <option key={environment.id} value={environment.id}>{environment.ambience}</option>
-              ))}
-            </select>
-            <Input type="file" accept=".skp,.skb,application/octet-stream" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
-            <Input placeholder="Notas" value={notes} onChange={(event) => setNotes(event.target.value)} />
-            <Button onClick={uploadFile} disabled={saving || !selectedQuotationId || !selectedFile} className="gap-2" style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-              Subir
-            </Button>
-          </div>
-        </Card>
-      ) : null}
-
-      <div className="grid gap-3">
-        {files.length === 0 ? (
-          <Card className="p-8 text-center text-sm text-muted-foreground">Todavía no hay archivos SketchUp registrados.</Card>
-        ) : files.map((file) => (
-          <Card key={file.id} className="p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="truncate font-semibold">{file.fileName}</p>
-                  <Badge variant="outline">v{file.version}</Badge>
-                  {file.fileSize ? <Badge variant="secondary">{file.fileSize}</Badge> : null}
+      <div className="space-y-3">
+        {visibleQuotations.length === 0 ? (
+          <Card className="p-8 text-center text-sm text-muted-foreground">No hay cotizaciones disponibles para Muebles.</Card>
+        ) : visibleQuotations.map((quotation) => {
+          const quotationFiles = files.filter((file) => file.quotationId === quotation.id);
+          const environments = isContractor && contractorId
+            ? (quotation.environmentProjects ?? []).filter((environment) => environment.assignedContractorId === contractorId)
+            : quotation.environmentProjects ?? [];
+          const title = quotation.items?.[0]?.description ?? `Cotización #${quotation.uid ?? quotation.id}`;
+          return (
+            <Card key={quotation.id} onClick={() => {
+              setSelectedQuotationId(quotation.id);
+              setSelectedEnvironmentId(environments[0]?.id ?? '');
+            }} className="cursor-pointer p-4 transition-all hover:border-foreground/20 hover:shadow-md">
+              <div className="flex items-center gap-4">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
+                  <Box className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {file.clientName ?? 'Cliente'} · Cotización #{file.quotationUid ?? file.quotationId ?? 'N/A'} · {file.ambience ?? 'General'}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">Subido por {file.uploadedBy} · {new Date(file.createdAt).toLocaleString('es-BO')}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate font-semibold">{title}</p>
+                    <Badge variant="outline">UID {quotation.uid ?? quotation.id.slice(0, 8)}</Badge>
+                    <Badge className="bg-blue-100 text-blue-700">{quotationFiles.length} archivo{quotationFiles.length === 1 ? '' : 's'}</Badge>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {quotation.clientName ?? 'Cliente'} · {environments.length || 1} ambiente{(environments.length || 1) === 1 ? '' : 's'} · {formatDate(quotation.createdDate)}
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
               </div>
-              <Button variant="outline" size="sm" className="gap-2" onClick={() => void downloadFile(file)}>
-                <Download className="h-4 w-4" />
-                Descargar
-              </Button>
-            </div>
-            {file.logs && file.logs.length > 0 ? (
-              <div className="mt-4 border-t border-border pt-3">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
-                  <History className="h-3.5 w-3.5" />
-                  Historial
-                </div>
-                <div className="space-y-1.5">
-                  {file.logs.map((log) => (
-                    <p key={log.id} className="text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">{log.performedBy}</span> · {log.description} · {new Date(log.performedAt).toLocaleString('es-BO')}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-0.5 font-medium">{value}</p>
     </div>
   );
 }

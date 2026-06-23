@@ -352,12 +352,12 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
           <table className="min-w-[980px] w-full border-collapse">
             <thead className="bg-muted/30 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
               <tr>
-                <th className="px-5 py-4 font-semibold">Material</th>
-                <th className="px-5 py-4 font-semibold">Unidad</th>
-                <th className="px-5 py-4 font-semibold">Stock</th>
-                <th className="px-5 py-4 font-semibold">Cantidad</th>
-                <th className="px-5 py-4 font-semibold">Notas</th>
-                <th className="px-5 py-4 font-semibold">Acción</th>
+                <th className="px-4 py-2.5 font-semibold">Material</th>
+                <th className="px-4 py-2.5 font-semibold">Unidad</th>
+                <th className="px-4 py-2.5 font-semibold">Stock</th>
+                <th className="px-4 py-2.5 font-semibold">Cantidad</th>
+                <th className="px-4 py-2.5 font-semibold">Notas</th>
+                <th className="px-4 py-2.5 font-semibold">Acción</th>
               </tr>
             </thead>
             <tbody>
@@ -365,30 +365,28 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
                 const cartItem = cart.find((item) => item.materialId === material.id);
                 return (
                   <tr key={material.id} className={index % 2 === 0 ? 'bg-background' : 'bg-muted/10'}>
-                    <td className="border-t border-border/60 px-5 py-4 align-top">
+                    <td className="border-t border-border/60 px-4 py-2.5 align-middle">
                       <div className="space-y-1">
-                        <p className="font-semibold leading-6">{material.name}</p>
+                        <p className="font-semibold leading-5">{material.name}</p>
                         {cartItem ? (
                           <Badge className="mt-1 w-fit rounded-full bg-[#d6a85a] text-white">{cartItem.quantity} en carrito</Badge>
-                        ) : (
-                          <p className="text-xs text-muted-foreground">Disponible para solicitar</p>
-                        )}
+                        ) : null}
                       </div>
                     </td>
-                    <td className="border-t border-border/60 px-5 py-4 align-top text-sm text-muted-foreground">
+                    <td className="border-t border-border/60 px-4 py-2.5 align-middle text-sm text-muted-foreground">
                       {material.unit}
                     </td>
-                    <td className="border-t border-border/60 px-5 py-4 align-top">
-                      <Badge variant="outline" className="rounded-full bg-background/80 px-3 py-1">
+                    <td className="border-t border-border/60 px-4 py-2.5 align-middle">
+                      <Badge variant="outline" className="rounded-full bg-background/80 px-2.5 py-0.5">
                         {material.stock}
                       </Badge>
                     </td>
-                    <td className="border-t border-border/60 px-5 py-4 align-top">
-                      <div className="flex w-36 items-stretch overflow-hidden rounded-xl border border-input bg-background shadow-sm">
+                    <td className="border-t border-border/60 px-4 py-2.5 align-middle">
+                      <div className="flex w-32 items-stretch overflow-hidden rounded-lg border border-input bg-background shadow-sm">
                         <Button
                           type="button"
                           variant="ghost"
-                          className="h-11 w-11 rounded-none border-r border-input px-0"
+                          className="h-9 w-9 rounded-none border-r border-input px-0"
                           onClick={() => updateMaterialQuantity(material.id, -1)}
                           disabled={(quantities[material.id] || 0) <= 0}
                         >
@@ -407,12 +405,12 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
                             }))
                           }
                           placeholder="0"
-                          className="h-11 w-full rounded-none border-0 text-center shadow-none [appearance:textfield] focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                          className="h-9 w-full rounded-none border-0 text-center shadow-none [appearance:textfield] focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         />
                         <Button
                           type="button"
                           variant="ghost"
-                          className="h-11 w-11 rounded-none border-l border-input px-0"
+                          className="h-9 w-9 rounded-none border-l border-input px-0"
                           onClick={() => updateMaterialQuantity(material.id, 1)}
                         >
                           <Plus className="h-4 w-4" />
@@ -420,19 +418,19 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
                         </Button>
                       </div>
                     </td>
-                    <td className="border-t border-border/60 px-5 py-4 align-top">
+                    <td className="border-t border-border/60 px-4 py-2.5 align-middle">
                       <Input
                         value={notes[material.id] || ''}
                         onChange={(event) => setNotes((current) => ({ ...current, [material.id]: event.target.value }))}
                         placeholder="Opcional"
-                        className="min-w-[240px]"
+                        className="h-9 min-w-[220px]"
                       />
                     </td>
-                    <td className="border-t border-border/60 px-5 py-4 align-top">
+                    <td className="border-t border-border/60 px-4 py-2.5 align-middle">
                       <Button
                         onClick={() => addToCart(material.id)}
                         disabled={Boolean(selectedJobId) && (quantities[material.id] || 0) <= 0}
-                        className="w-full rounded-xl bg-[#d6a85a] text-white hover:bg-[#c3964b]"
+                        className="h-9 w-full rounded-lg bg-[#d6a85a] text-white hover:bg-[#c3964b]"
                       >
                         Agregar
                       </Button>
