@@ -3,14 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocalData } from '@/lib/contexts/LocalDataContext';
 import { Prequotation, PrequotationStatus } from '@/lib/types';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
 import {
   Plus,
-  Search,
   FileText,
   FileSpreadsheet,
   Clock,
@@ -18,17 +16,17 @@ import {
   AlertCircle,
   XCircle,
   ChevronRight,
-  Filter,
 } from 'lucide-react';
 import { PrequotationDetail } from './prequotation-detail';
 import { NewPrequotationDialog } from './new-prequotation-dialog';
+import { useRole } from '@/hooks/use-role-context';
 
 const STATUS_CONFIG: Record<
   PrequotationStatus,
   { label: string; color: string; icon: React.ReactNode; dot: string }
 > = {
   draft: {
-    label: 'Borrador',
+    label: 'Elaboración',
     color: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
     icon: <Clock className="w-3 h-3" />,
     dot: 'bg-zinc-400',
@@ -83,6 +81,7 @@ function getInitials(name: string) {
 }
 
 export function PrequotationsModule() {
+  const { currentRole } = useRole();
   const { quotations } = useLocalData();
   const [data, setData] = useState<Prequotation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,6 +101,7 @@ export function PrequotationsModule() {
       ...p,
       createdAt: new Date(p.createdAt),
       updatedAt: new Date(p.updatedAt),
+      uidAssignedAt: p.uidAssignedAt ? new Date(p.uidAssignedAt) : null,
       totalAmount: p.totalAmount != null ? Number(p.totalAmount) : undefined,
       advanceAmount: p.advanceAmount != null ? Number(p.advanceAmount) : undefined,
       versions: (p.versions ?? []).map((v: any) => ({
@@ -122,15 +122,6 @@ export function PrequotationsModule() {
       showBillingOnly,
       ...overrides,
     };
-  }
-
-  function buildPrequotationQuery(filters: PrequotationFilters) {
-    const params = new URLSearchParams();
-    if (filters.search.trim()) params.set('search', filters.search.trim());
-    if (filters.statusFilter !== 'all') params.set('status', filters.statusFilter);
-    if (filters.showBillingOnly) params.set('billingRequested', 'true');
-    const query = params.toString();
-    return query ? `?${query}` : '';
   }
 
   async function saveFilterPreference(filters: PrequotationFilters) {
@@ -160,7 +151,7 @@ export function PrequotationsModule() {
     }
   }
 
-  async function loadPrequotations(filters = getCurrentFilters()) {
+  async function loadPrequotations() {
     if (!apiBase) {
       setError('Falta configurar NEXT_PUBLIC_API_URL en el front.');
       setLoading(false);
@@ -169,7 +160,7 @@ export function PrequotationsModule() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/prequotations${buildPrequotationQuery(filters)}`, { cache: 'no-store' });
+      const response = await fetch(`${apiBase}/api/prequotations`, { cache: 'no-store' });
       if (!response.ok) throw new Error('No se pudieron cargar las precotizaciones');
       const json = await response.json();
       setData(json.map(normalizePrequotation));
@@ -201,7 +192,7 @@ export function PrequotationsModule() {
 
   useEffect(() => {
     if (typeof window === 'undefined') {
-      void loadPrequotations(DEFAULT_FILTERS);
+      void loadPrequotations();
       return;
     }
 
@@ -218,26 +209,25 @@ export function PrequotationsModule() {
       if (prequotationId) {
         setLoading(true);
         const loadedDetail = await loadPrequotationById(prequotationId);
-        if (!loadedDetail) await loadPrequotations(savedFilters);
+        if (!loadedDetail) await loadPrequotations();
         else setLoading(false);
         return;
       }
 
-      await loadPrequotations(savedFilters);
+      await loadPrequotations();
     })();
   }, []);
 
   useEffect(() => {
-    if (!filtersReady || selected) return;
+    if (!filtersReady) return;
 
     const nextFilters = getCurrentFilters();
     const timeout = window.setTimeout(() => {
       void saveFilterPreference(nextFilters);
-      void loadPrequotations(nextFilters);
     }, 250);
 
     return () => window.clearTimeout(timeout);
-  }, [search, statusFilter, showBillingOnly, filtersReady, selected]);
+  }, [search, statusFilter, showBillingOnly, filtersReady]);
 
   async function loadClients() {
     if (!apiBase) return;
@@ -278,7 +268,19 @@ export function PrequotationsModule() {
     setShowNew(true);
   }, []);
 
-  const filtered = data;
+  const filtered = useMemo(() => {
+    const searchTerm = search.trim().toLowerCase();
+    return data.filter((p) => {
+      const clientName = clients.find((client) => client.id === p.clientId)?.name ?? '';
+      const matchesSearch =
+        !searchTerm ||
+        [p.title, clientName, p.createdBy]
+          .some((value) => String(value ?? '').toLowerCase().includes(searchTerm));
+      const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
+      const matchesBilling = !showBillingOnly || !!p.billingRequested;
+      return matchesSearch && matchesStatus && matchesBilling;
+    });
+  }, [data, search, statusFilter, showBillingOnly, clients]);
 
   const statusCounts = ALL_STATUSES.reduce<Record<string, number>>((acc, s) => {
     acc[s] = data.filter((p) => p.status === s).length;
@@ -358,10 +360,12 @@ export function PrequotationsModule() {
             onChange={(e) => setSearch((e.target as HTMLInputElement).value)}
             className="max-w-xs"
           />
-          <Button onClick={() => setShowNew(true)} className="flex items-center gap-2">
-            <Plus className="w-4 h-4" />
-            Nueva
-          </Button>
+          {currentRole !== 'partner' ? (
+            <Button onClick={() => setShowNew(true)} className="flex items-center gap-2">
+              <Plus className="w-4 h-4" />
+              Nueva
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -409,17 +413,22 @@ export function PrequotationsModule() {
           const client = clients.find((c) => c.id === p.clientId);
           const cfg = STATUS_CONFIG[p.status];
           const latestVersion = p.versions[p.versions.length - 1];
+          const isConverted = Boolean(p.convertedToQuotationId);
           return (
             <Card
               key={p.id}
               onClick={() => {
                 void openPrequotation(p);
               }}
-              className="p-4 cursor-pointer hover:shadow-md transition-all hover:border-foreground/20 group"
+              className={`p-4 cursor-pointer transition-all group ${
+                isConverted
+                  ? 'border-dashed bg-muted/45 opacity-75 hover:opacity-90 hover:border-muted-foreground/40'
+                  : 'hover:shadow-md hover:border-foreground/20'
+              }`}
             >
               <div className="flex items-center gap-4">
                 {/* File icon */}
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-muted">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-muted ${isConverted ? 'grayscale opacity-60' : ''}`}>
                   {latestVersion?.fileType === 'excel' ? (
                     <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
                   ) : (
@@ -430,7 +439,12 @@ export function PrequotationsModule() {
                 {/* Main info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-semibold truncate">{p.title}</p>
+                    <p className={`text-sm font-semibold truncate ${isConverted ? 'text-muted-foreground line-through decoration-muted-foreground/70' : ''}`}>{p.title}</p>
+                    {p.uid && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border border-border bg-muted text-muted-foreground">
+                        UID {p.uid}
+                      </span>
+                    )}
                     <span
                       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${cfg.color}`}
                     >
@@ -438,13 +452,13 @@ export function PrequotationsModule() {
                       {cfg.label}
                     </span>
                     {p.convertedToQuotationId && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                         <CheckCircle2 className="w-3 h-3" />
-                        Cotización generada
+                        Convertida a cotización oficial
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 mt-1 flex-wrap">
+                  <div className={`flex items-center gap-3 mt-1 flex-wrap ${isConverted ? 'text-muted-foreground/75' : ''}`}>
                     <span className="text-xs text-muted-foreground">{client?.name ?? '—'}</span>
                     <span className="text-xs text-muted-foreground/50">·</span>
                     <span className="text-xs text-muted-foreground">v{p.currentVersion}</span>

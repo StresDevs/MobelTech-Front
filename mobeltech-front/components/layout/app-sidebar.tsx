@@ -93,17 +93,17 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     { label: 'Contratistas', href: '/finance/contractors' },
     { label: 'Pedidos', href: '/finance/orders' },
     { label: 'Estado Proyectos', href: '/finance/project-status' },
-  ];
+  ].filter((item) => currentRole !== 'partner' || ['/finance/clients', '/finance/contractors'].includes(item.href));
 
   const productionSubItems = [
     { label: 'Cronograma', href: '/schedule' },
     { label: 'Solicitud de Material', href: '/contractor-requests' },
-  ];
+  ].filter((item) => currentRole !== 'partner' || item.href === '/schedule');
 
   const logisticsSubItems = [
     { label: 'Inventario y Compras', href: '/inventory' },
     { label: 'Almacén', href: '/warehouse' },
-  ];
+  ].filter((item) => currentRole !== 'partner' || item.href === '/inventory');
 
   return (
     <aside className={`border-r border-border bg-background h-full flex flex-col gap-6 overflow-y-auto transition-all duration-300 ${

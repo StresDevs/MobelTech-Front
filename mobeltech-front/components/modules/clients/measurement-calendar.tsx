@@ -7,12 +7,15 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { ChevronLeft, ChevronRight, Plus, FileDown, Phone, MapPin, Mail, Clock, Search, UserPlus, BellRing, Sofa } from 'lucide-react';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useRole } from '@/hooks/use-role-context';
+import { ChevronLeft, ChevronRight, Plus, FileDown, FileUp, Phone, MapPin, Mail, Clock, Search, UserPlus, BellRing, Sofa, CalendarDays } from 'lucide-react';
 
 const SLOTS_PER_DAY = 4;
 const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -86,6 +89,51 @@ function toLocalDateString(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+function formatDisplayDate(value?: string | Date | null) {
+  if (!value) return '—';
+
+  let date: Date;
+  if (value instanceof Date) {
+    date = value;
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const parsed = parseLocalDate(value);
+    if (!parsed) return '—';
+    date = parsed;
+  } else {
+    date = new Date(value);
+  }
+
+  if (Number.isNaN(date.getTime())) return '—';
+
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}/${date.getFullYear()}`;
+}
+
+function normalizeQuotationDeliveryDate(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const parts = trimmed.split('/');
+  if (parts.length !== 3) return null;
+
+  const [dayRaw, monthRaw, yearRaw] = parts;
+  const day = Number.parseInt(dayRaw ?? '', 10);
+  const month = Number.parseInt(monthRaw ?? '', 10);
+  const year = Number.parseInt(yearRaw ?? '', 10);
+
+  if (Number.isNaN(day) || Number.isNaN(month) || Number.isNaN(year)) return null;
+
+  const candidate = new Date(year, month - 1, day);
+  if (candidate.getFullYear() !== year || candidate.getMonth() !== month - 1 || candidate.getDate() !== day) return null;
+
+  return toLocalDateString(candidate);
+}
+
 function parseLocalDate(value: string) {
   const [yearRaw, monthRaw, dayRaw] = value.split('-');
   const year = Number.parseInt(yearRaw ?? '', 10);
@@ -137,7 +185,7 @@ function getQuotationDeliveryMeta(value?: string | null) {
   }
 
   return {
-    label: `Entrega ${value}`,
+    label: `Entrega ${formatDisplayDate(deliveryDate)}`,
     tone: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
   };
 }
@@ -160,10 +208,15 @@ function bumpTimeIfPast(date: Date, time: string) {
 
 export function MeasurementCalendar() {
   const router = useRouter();
+  const { currentRole } = useRole();
   const apiBase = useMemo(() => {
     const value = process.env.NEXT_PUBLIC_API_URL?.trim();
     return value ? value.replace(/\/$/, '') : '';
   }, []);
+  const canUploadDocuments = useMemo(() => {
+    const role = String(currentRole).toLowerCase();
+    return ['admin', 'architect', 'gerente', 'gerencia', 'manager'].includes(role);
+  }, [currentRole]);
 
   const [currentDate, setCurrentDate] = useState(() => {
     const now = new Date();
@@ -338,7 +391,7 @@ export function MeasurementCalendar() {
       const payload = {
         clientId,
         date: toLocalDateString(appointmentDate),
-        time: formData.time,
+        time: formData.time.slice(0, 5),
         address: formData.address.trim(),
         phone: formData.phone.trim(),
         referenceNotes: formData.notes.trim() || null,
@@ -346,7 +399,7 @@ export function MeasurementCalendar() {
           .split(',')
           .map((item) => item.trim())
           .filter(Boolean),
-        quotationDeliveryDate: formData.quotationDeliveryDate || null,
+        quotationDeliveryDate: normalizeQuotationDeliveryDate(formData.quotationDeliveryDate),
         prequotationLink: null,
         notes: formData.notes.trim() || null,
         status: 'scheduled',
@@ -479,6 +532,7 @@ export function MeasurementCalendar() {
                       measurement={measurement}
                       clients={clients}
                       disabled={past && !measurement}
+                      canUploadDocuments={canUploadDocuments}
                       onClickDoc={handleDocClick}
                       onClickAvailable={() => openNewMeasurement(day, index)}
                       onClickClient={(id) => setClientDetailId(id)}
@@ -528,6 +582,7 @@ export function MeasurementCalendar() {
                     measurement={measurement}
                     clients={clients}
                     disabled={past && !measurement}
+                    canUploadDocuments={canUploadDocuments}
                     onClickDoc={handleDocClick}
                     onClickAvailable={() => openNewMeasurement(day, index)}
                     onClickClient={(id) => setClientDetailId(id)}
@@ -546,10 +601,14 @@ export function MeasurementCalendar() {
               Agendar Medición
               {newMeasurementSlot && (
                 <span className="font-normal text-sm text-muted-foreground ml-2">
-                  {newMeasurementSlot.day} de {monthName} · Slot {newMeasurementSlot.slotIndex + 1}
+                  {formatDisplayDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), newMeasurementSlot.day))} · Slot{' '}
+                  {newMeasurementSlot.slotIndex + 1}
                 </span>
               )}
             </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              Completa los datos del cliente, la fecha y la hora para registrar la medición.
+            </DialogDescription>
           </DialogHeader>
 
           <Tabs defaultValue={formData.clientId ? 'existing' : 'new'} className="w-full">
@@ -619,13 +678,30 @@ export function MeasurementCalendar() {
                 <Input type="time" value={formData.time} onChange={(e) => setFormData({ ...formData, time: e.target.value })} className="h-9" />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Entrega de cotización</Label>
-                <Input
-                  type="date"
-                  value={formData.quotationDeliveryDate}
-                  onChange={(e) => setFormData({ ...formData, quotationDeliveryDate: e.target.value })}
-                  className="h-9"
-                />
+                <Label className="text-xs">Fecha entrega de precotización</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 w-full justify-between px-3 text-left font-normal"
+                    >
+                      <span className={formData.quotationDeliveryDate ? 'text-foreground' : 'text-muted-foreground'}>
+                        {formData.quotationDeliveryDate ? formatDisplayDate(formData.quotationDeliveryDate) : 'dd/mm/aaaa'}
+                      </span>
+                      <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={formData.quotationDeliveryDate ? parseLocalDate(formData.quotationDeliveryDate) ?? undefined : undefined}
+                      onSelect={(date) => setFormData({ ...formData, quotationDeliveryDate: date ? toLocalDateString(date) : '' })}
+                      captionLayout="dropdown"
+                    />
+                  </PopoverContent>
+                </Popover>
+                <p className="text-[11px] text-muted-foreground">Formato visual: dd/mm/yyyy</p>
               </div>
             </div>
             <div className="space-y-1.5">
@@ -669,6 +745,7 @@ export function MeasurementCalendar() {
       <Dialog open={!!detailClient} onOpenChange={(open) => !open && setClientDetailId(null)}>
         <DialogContent className="max-w-sm p-0 overflow-hidden">
           <DialogTitle className="sr-only">Detalle del cliente</DialogTitle>
+          <DialogDescription className="sr-only">Información del cliente seleccionado.</DialogDescription>
           {detailClient && (
             <>
               <div className="px-6 pt-6 pb-4 flex flex-col items-center gap-3" style={{ background: 'linear-gradient(135deg, #eab676 0%, #d6a85a 100%)' }}>
@@ -687,7 +764,7 @@ export function MeasurementCalendar() {
                 <InfoRow icon={Phone} label="Teléfono" value={detailClient.phone} />
                 <InfoRow icon={MapPin} label="Dirección" value={detailClient.address} />
                 <InfoRow icon={Mail} label="Email" value={detailClient.email ?? '—'} />
-                <InfoRow icon={Clock} label="Registrado" value={new Date(detailClient.createdAt).toLocaleDateString('es-BO', { year: 'numeric', month: 'long', day: 'numeric' })} />
+                <InfoRow icon={Clock} label="Registrado" value={formatDisplayDate(detailClient.createdAt)} />
               </div>
 
               <div className="px-6 pb-5">
@@ -704,33 +781,43 @@ export function MeasurementCalendar() {
         <DialogContent className="max-w-2xl p-0 overflow-hidden">
           <DialogHeader className="px-6 pt-6 pb-2">
             <DialogTitle className="text-lg">Sin precotización enlazada</DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              Esta medición no tiene una precotización asociada todavía.
+            </DialogDescription>
           </DialogHeader>
 
           {missingPrequotationMeasurement && (
             <div className="px-6 pb-6 space-y-4">
               <div className="rounded-xl border border-border bg-muted/30 p-5 text-center space-y-3">
                 <div className="mx-auto h-14 w-14 rounded-full bg-[#eab676]/15 flex items-center justify-center">
-                  <FileDown className="h-6 w-6 text-[#d6a85a]" />
+                  {canUploadDocuments ? (
+                    <FileUp className="h-6 w-6 text-[#d6a85a]" />
+                  ) : (
+                    <FileDown className="h-6 w-6 text-[#d6a85a]" />
+                  )}
                 </div>
                 <p className="text-base font-semibold">No hay precotizaciones ancladas</p>
                 <p className="text-sm text-muted-foreground">
-                  Esta medición todavía no tiene una precotización vinculada. ¿Deseas crear una ahora?
+                  Esta medición todavía no tiene una precotización vinculada.
                 </p>
+                {!canUploadDocuments && <p className="text-xs text-muted-foreground">Este rol solo puede revisar documentos existentes.</p>}
               </div>
 
               <DialogFooter className="gap-2">
                 <Button variant="outline" onClick={() => setMissingPrequotationMeasurement(null)}>
                   Cancelar
                 </Button>
-                <Button
-                  style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
-                  onClick={() => {
-                    setMissingPrequotationMeasurement(null);
-                    router.push(`/prequotations?measurementId=${missingPrequotationMeasurement.id}&clientId=${missingPrequotationMeasurement.clientId}`);
-                  }}
-                >
-                  Sí, crear una
-                </Button>
+                {canUploadDocuments && (
+                  <Button
+                    style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
+                    onClick={() => {
+                      setMissingPrequotationMeasurement(null);
+                      router.push(`/prequotations?measurementId=${missingPrequotationMeasurement.id}&clientId=${missingPrequotationMeasurement.clientId}`);
+                    }}
+                  >
+                    Sí, crear una
+                  </Button>
+                )}
               </DialogFooter>
             </div>
           )}
@@ -782,6 +869,7 @@ function DesktopSlot({
   onClickDoc,
   clients,
   disabled,
+  canUploadDocuments,
 }: {
   measurement: ApiMeasurement | null;
   onClickAvailable: () => void;
@@ -789,6 +877,7 @@ function DesktopSlot({
   onClickDoc: (measurement: ApiMeasurement) => void;
   clients: ApiClient[];
   disabled: boolean;
+  canUploadDocuments: boolean;
 }) {
   if (!measurement) {
     if (disabled) {
@@ -854,9 +943,9 @@ function DesktopSlot({
           size="icon"
           className="h-6 w-6"
           onClick={() => onClickDoc(measurement)}
-          title="Ver documento de precotización"
+          title={canUploadDocuments ? 'Subir documento de precotización' : 'Ver documento de precotización'}
         >
-          <FileDown className="w-3 h-3" />
+          {canUploadDocuments ? <FileUp className="w-3 h-3" /> : <FileDown className="w-3 h-3" />}
         </Button>
       </div>
     </div>
@@ -871,6 +960,7 @@ function MobileSlot({
   onClickDoc,
   clients,
   disabled,
+  canUploadDocuments,
 }: {
   slotIndex: number;
   measurement: ApiMeasurement | null;
@@ -879,6 +969,7 @@ function MobileSlot({
   onClickDoc: (measurement: ApiMeasurement) => void;
   clients: ApiClient[];
   disabled: boolean;
+  canUploadDocuments: boolean;
 }) {
   if (!measurement) {
     if (disabled) {
@@ -931,9 +1022,10 @@ function MobileSlot({
         size="sm"
         className="h-7 text-[10px] px-2 shrink-0"
         onClick={() => onClickDoc(measurement)}
+        title={canUploadDocuments ? 'Subir documento de precotización' : 'Ver documento de precotización'}
       >
-        <FileDown className="w-3 h-3 mr-1" />
-        PDF
+        {canUploadDocuments ? <FileUp className="w-3 h-3 mr-1" /> : <FileDown className="w-3 h-3 mr-1" />}
+        {canUploadDocuments ? 'Subir' : 'Ver'}
       </Button>
     </div>
   );

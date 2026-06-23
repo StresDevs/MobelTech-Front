@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { CURRENCY_FORMAT } from '@/lib/constants';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +20,7 @@ import {
   ArrowLeftRight,
   Boxes,
   ClipboardList,
+  ChevronDown,
   FileText,
   Package,
   Pencil,
@@ -132,9 +133,17 @@ type PurchaseOrderRecord = {
   }>;
 };
 
+type WarehouseRecord = {
+  id: string;
+  name: string;
+  code: string;
+  status: string;
+};
+
 type InventoryOverview = {
   suppliers: SupplierRecord[];
   materials: MaterialRecord[];
+  warehouses: WarehouseRecord[];
   requests: MaterialRequestRecord[];
   defects: DefectAlertRecord[];
   claims: ReturnClaimRecord[];
@@ -147,6 +156,7 @@ const requesterSuggestions = ['Carlos Mamani', 'Ana Rojas', 'Diego Flores', 'Mar
 const EMPTY_OVERVIEW: InventoryOverview = {
   suppliers: [],
   materials: [],
+  warehouses: [],
   requests: [],
   defects: [],
   claims: [],
@@ -172,6 +182,20 @@ function makeMockImage(label: string, tone = '#0f766e') {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+function getValidationMessage(body: { error?: string; details?: Record<string, string[]> } | null, fallback: string) {
+  const firstDetail = body?.details ? Object.values(body.details).flat()[0] : null;
+  return firstDetail || body?.error || fallback;
+}
+
+function readImageAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function getSupplierScore(supplier: SupplierRecord) {
   const delayPenalty = Math.max(0, 100 - supplier.deliveryDelays * 12);
   const defectPenalty = Math.max(0, 100 - supplier.defectsRate * 20);
@@ -181,6 +205,7 @@ function getSupplierScore(supplier: SupplierRecord) {
 
 export function InventoryControlCenter() {
   const { user } = useAuth();
+  const isReadOnly = user?.role === 'partner';
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -200,6 +225,7 @@ export function InventoryControlCenter() {
   const [addItemOpen, setAddItemOpen] = useState(false);
   const [editItemOpen, setEditItemOpen] = useState(false);
   const [editDraft, setEditDraft] = useState<MaterialRecord | null>(null);
+  const [expandedLocationId, setExpandedLocationId] = useState<string | null>(null);
 
   const [supplierDraft, setSupplierDraft] = useState({
     name: '',
@@ -216,7 +242,7 @@ export function InventoryControlCenter() {
     supplierId: '',
     sku: '',
     unit: 'unidad',
-    warehouse: 'Almacén Central - La Paz',
+    warehouse: '',
     purchaseDate: toIsoDate(),
     purchasePriceBs: '0',
     initialStock: '0',
@@ -261,6 +287,7 @@ export function InventoryControlCenter() {
       setMaterialDraft((current) => ({
         ...current,
         supplierId: current.supplierId || json.suppliers[0]?.id || '',
+        warehouse: current.warehouse || json.warehouses[0]?.name || '',
       }));
       setDefectDraft((current) => ({
         ...current,
@@ -287,6 +314,7 @@ export function InventoryControlCenter() {
 
   const suppliers = overview.suppliers;
   const materials = overview.materials;
+  const warehouses = overview.warehouses;
   const requests = overview.requests;
   const defectAlerts = overview.defects;
   const returnClaims = overview.claims;
@@ -299,7 +327,10 @@ export function InventoryControlCenter() {
   );
 
   const allCategories = useMemo(() => Array.from(new Set(materials.map((m) => m.category))), [materials]);
-  const allWarehouses = useMemo(() => Array.from(new Set(materials.map((m) => m.warehouse))), [materials]);
+  const allWarehouses = useMemo(
+    () => warehouses.length > 0 ? warehouses.map((warehouse) => warehouse.name) : Array.from(new Set(materials.map((m) => m.warehouse))).filter(Boolean),
+    [materials, warehouses],
+  );
 
   const filteredMaterials = useMemo(() => {
     return materials.filter((material) => {
@@ -376,7 +407,7 @@ export function InventoryControlCenter() {
       const response = await request;
       const body = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(body?.error || fallbackMessage);
+        throw new Error(getValidationMessage(body, fallbackMessage));
       }
       return body as T;
     } catch (err) {
@@ -411,6 +442,27 @@ export function InventoryControlCenter() {
   }
 
   async function handleMaterialCreate() {
+    if (!materialDraft.name.trim()) {
+      setError('El nombre del material es obligatorio.');
+      return;
+    }
+    if (!materialDraft.supplierId) {
+      setError('Selecciona un proveedor antes de crear el material.');
+      return;
+    }
+    if (!materialDraft.unit.trim()) {
+      setError('La unidad es obligatoria.');
+      return;
+    }
+    if (!materialDraft.warehouse.trim()) {
+      setError('La ubicación es obligatoria.');
+      return;
+    }
+    if (!materialDraft.purchaseDate) {
+      setError('La fecha de compra es obligatoria.');
+      return;
+    }
+
     const created = await performMutation(
       fetch(`${apiBase}/api/inventory/materials`, {
         method: 'POST',
@@ -434,6 +486,44 @@ export function InventoryControlCenter() {
       purchaseDate: toIsoDate(),
     }));
     await loadOverview();
+  }
+
+  async function handleMaterialImageUpload(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Selecciona un archivo de imagen válido.');
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setError('La imagen no debe superar 3MB.');
+      return;
+    }
+
+    try {
+      const imageUrl = await readImageAsDataUrl(file);
+      setMaterialDraft((current) => ({ ...current, imageUrl }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cargar la imagen.');
+    }
+  }
+
+  async function handleEditImageUpload(file: File | undefined) {
+    if (!file || !editDraft) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Selecciona un archivo de imagen válido.');
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setError('La imagen no debe superar 3MB.');
+      return;
+    }
+
+    try {
+      const imageUrl = await readImageAsDataUrl(file);
+      setEditDraft((current) => current ? { ...current, imageUrl } : current);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cargar la imagen.');
+    }
   }
 
   function handleEditOpen(material: MaterialRecord) {
@@ -641,30 +731,24 @@ export function InventoryControlCenter() {
 
   return (
     <div className="space-y-6">
-      <Card className="overflow-hidden border-none bg-[linear-gradient(135deg,rgba(214,168,90,0.16),rgba(255,255,255,0.96))] shadow-sm dark:bg-[linear-gradient(135deg,rgba(214,168,90,0.18),rgba(22,22,22,0.98))]">
-        <CardContent className="grid gap-4 p-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+      <Card className="border-border/70 shadow-sm">
+        <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#9a6b2f]">Centro Inteligente</p>
-            <h2 className="mt-2 text-2xl font-bold tracking-tight">Inventario y compras conectados</h2>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              Proveedores, stock, defectos, devoluciones y sobrantes ya están leyendo desde API y Neon.
-            </p>
+            <h2 className="text-lg font-semibold tracking-tight">Inventario y compras</h2>
+            <p className="text-xs text-muted-foreground">Control operativo de materiales, proveedores y stock.</p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <MetricCard label="Materiales" value={String(materials.length)} icon={<Package className="h-4 w-4" />} />
-            <MetricCard label="Solicitudes pendientes" value={String(requests.filter((request) => request.status === 'pending').length)} icon={<ClipboardList className="h-4 w-4" />} />
-            <MetricCard label="Stock bajo" value={String(stockAlerts.length)} icon={<AlertTriangle className="h-4 w-4" />} />
-            <Card className="border-border/70 bg-background/80 p-4 shadow-none">
-              <p className="text-xs text-muted-foreground">Tipo de cambio Bs/USD</p>
-              <div className="mt-2 flex items-center gap-2">
-                <Input
-                  value={exchangeRate}
-                  className="h-9"
-                  onChange={(event) => setExchangeRate(Number(event.target.value) || 6.96)}
-                />
-                <Badge className="bg-[#d6a85a] text-[#1f1f1f]">Manual</Badge>
-              </div>
-            </Card>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="gap-1"><Package className="h-3.5 w-3.5" />{materials.length} materiales</Badge>
+            <Badge variant="outline" className="gap-1"><ClipboardList className="h-3.5 w-3.5" />{requests.filter((request) => request.status === 'pending').length} pendientes</Badge>
+            <Badge variant="outline" className="gap-1"><AlertTriangle className="h-3.5 w-3.5" />{stockAlerts.length} stock bajo</Badge>
+            <div className="flex items-center gap-2 rounded-md border border-border/70 px-2 py-1">
+              <span className="text-xs text-muted-foreground">Bs/USD</span>
+              <Input
+                value={exchangeRate}
+                className="h-7 w-20 border-0 px-1 text-xs shadow-none focus-visible:ring-0"
+                onChange={(event) => setExchangeRate(Number(event.target.value) || 6.96)}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -687,33 +771,35 @@ export function InventoryControlCenter() {
         </TabsList>
 
         <TabsContent value="proveedores" className="mt-6 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Registro de proveedores</CardTitle>
-              <CardDescription>Sin duplicados por NIT y con visibilidad de desempeño.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <Input placeholder="Nombre / razón social" value={supplierDraft.name} onChange={(event) => setSupplierDraft((current) => ({ ...current, name: event.target.value }))} />
-              <Input placeholder="NIT" value={supplierDraft.nit} onChange={(event) => setSupplierDraft((current) => ({ ...current, nit: event.target.value }))} />
-              <Input placeholder="Teléfono" value={supplierDraft.phone} onChange={(event) => setSupplierDraft((current) => ({ ...current, phone: event.target.value }))} />
-              <Input placeholder="Email" value={supplierDraft.email} onChange={(event) => setSupplierDraft((current) => ({ ...current, email: event.target.value }))} />
-              <Input placeholder="Dirección" value={supplierDraft.address} onChange={(event) => setSupplierDraft((current) => ({ ...current, address: event.target.value }))} />
-              <Select value={supplierDraft.supplierType} onValueChange={(value) => setSupplierDraft((current) => ({ ...current, supplierType: value }))}>
-                <SelectTrigger><SelectValue placeholder="Tipo" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Madera">Madera</SelectItem>
-                  <SelectItem value="Telas">Telas</SelectItem>
-                  <SelectItem value="Herrajes">Herrajes</SelectItem>
-                  <SelectItem value="Insumos">Insumos</SelectItem>
-                </SelectContent>
-              </Select>
-              <div className="xl:col-span-3 flex justify-end">
-                <Button onClick={() => void handleSupplierCreate()} disabled={saving} style={{ backgroundColor: '#d6a85a', color: '#1f1f1f' }}>
-                  {saving ? 'Guardando...' : 'Registrar proveedor'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          {!isReadOnly ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Registro de proveedores</CardTitle>
+                <CardDescription>Sin duplicados por NIT y con visibilidad de desempeño.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <Input placeholder="Nombre / razón social" value={supplierDraft.name} onChange={(event) => setSupplierDraft((current) => ({ ...current, name: event.target.value }))} />
+                <Input placeholder="NIT" value={supplierDraft.nit} onChange={(event) => setSupplierDraft((current) => ({ ...current, nit: event.target.value }))} />
+                <Input placeholder="Teléfono" value={supplierDraft.phone} onChange={(event) => setSupplierDraft((current) => ({ ...current, phone: event.target.value }))} />
+                <Input placeholder="Email" value={supplierDraft.email} onChange={(event) => setSupplierDraft((current) => ({ ...current, email: event.target.value }))} />
+                <Input placeholder="Dirección" value={supplierDraft.address} onChange={(event) => setSupplierDraft((current) => ({ ...current, address: event.target.value }))} />
+                <Select value={supplierDraft.supplierType} onValueChange={(value) => setSupplierDraft((current) => ({ ...current, supplierType: value }))}>
+                  <SelectTrigger><SelectValue placeholder="Tipo" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Madera">Madera</SelectItem>
+                    <SelectItem value="Telas">Telas</SelectItem>
+                    <SelectItem value="Herrajes">Herrajes</SelectItem>
+                    <SelectItem value="Insumos">Insumos</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="flex justify-end xl:col-span-3">
+                  <Button onClick={() => void handleSupplierCreate()} disabled={saving} style={{ backgroundColor: '#d6a85a', color: '#1f1f1f' }}>
+                    {saving ? 'Guardando...' : 'Registrar proveedor'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader>
@@ -760,7 +846,7 @@ export function InventoryControlCenter() {
               <h3 className="text-2xl font-bold tracking-tight">Ítems de inventario</h3>
               <p className="text-sm text-muted-foreground">{filteredMaterials.length} ítems visibles</p>
             </div>
-            <Dialog open={addItemOpen} onOpenChange={setAddItemOpen}>
+            {!isReadOnly ? <Dialog open={addItemOpen} onOpenChange={setAddItemOpen}>
               <DialogTrigger asChild>
                 <Button className="gap-2 self-start bg-emerald-600 text-white hover:bg-emerald-700">
                   <Plus className="h-4 w-4" />
@@ -774,7 +860,7 @@ export function InventoryControlCenter() {
                 </DialogHeader>
                 <div className="grid gap-4 pt-2 md:grid-cols-2">
                   <Field label="Nombre"><Input value={materialDraft.name} onChange={(event) => setMaterialDraft((current) => ({ ...current, name: event.target.value }))} /></Field>
-                  <Field label="SKU"><Input value={materialDraft.sku} onChange={(event) => setMaterialDraft((current) => ({ ...current, sku: event.target.value }))} /></Field>
+                  <Field label="Código"><Input value={materialDraft.sku} onChange={(event) => setMaterialDraft((current) => ({ ...current, sku: event.target.value }))} placeholder="Auto si lo dejas vacío" /></Field>
                   <Field label="Categoría">
                     <Select value={materialDraft.category} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, category: value }))}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
@@ -799,13 +885,33 @@ export function InventoryControlCenter() {
                     </Select>
                   </Field>
                   <Field label="Unidad"><Input value={materialDraft.unit} onChange={(event) => setMaterialDraft((current) => ({ ...current, unit: event.target.value }))} /></Field>
-                  <Field label="Almacén"><Input value={materialDraft.warehouse} onChange={(event) => setMaterialDraft((current) => ({ ...current, warehouse: event.target.value }))} /></Field>
+                  <Field label="Ubicación">
+                    <Select value={materialDraft.warehouse} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, warehouse: value }))}>
+                      <SelectTrigger><SelectValue placeholder="Elige ubicación" /></SelectTrigger>
+                      <SelectContent>
+                        {allWarehouses.map((warehouse) => (
+                          <SelectItem key={warehouse} value={warehouse}>{warehouse}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
                   <Field label="Precio de compra (Bs.)"><Input type="number" min={0} value={materialDraft.purchasePriceBs} onChange={(event) => setMaterialDraft((current) => ({ ...current, purchasePriceBs: event.target.value }))} /></Field>
                   <Field label="Fecha de compra"><Input type="date" value={materialDraft.purchaseDate} onChange={(event) => setMaterialDraft((current) => ({ ...current, purchaseDate: event.target.value }))} /></Field>
                   <Field label="Stock inicial"><Input type="number" min={0} value={materialDraft.initialStock} onChange={(event) => setMaterialDraft((current) => ({ ...current, initialStock: event.target.value }))} /></Field>
                   <Field label="Stock mínimo"><Input type="number" min={0} value={materialDraft.minStock} onChange={(event) => setMaterialDraft((current) => ({ ...current, minStock: event.target.value }))} /></Field>
-                  <div className="md:col-span-2">
-                    <Field label="Imagen URL"><Input value={materialDraft.imageUrl} onChange={(event) => setMaterialDraft((current) => ({ ...current, imageUrl: event.target.value }))} /></Field>
+                  <div className="grid gap-3 rounded-xl border border-border/70 bg-muted/20 p-3 md:col-span-2 md:grid-cols-[160px_1fr]">
+                    <div className="relative h-28 overflow-hidden rounded-lg border bg-background">
+                      <Image src={materialDraft.imageUrl || makeMockImage(materialDraft.name || 'Material')} alt="Vista previa del material" fill className="object-cover" unoptimized />
+                    </div>
+                    <div className="space-y-3">
+                      <Field label="Subir imagen">
+                        <Input type="file" accept="image/*" onChange={(event) => void handleMaterialImageUpload(event.target.files?.[0])} />
+                      </Field>
+                      <Field label="O pegar URL de imagen">
+                        <Input value={materialDraft.imageUrl} onChange={(event) => setMaterialDraft((current) => ({ ...current, imageUrl: event.target.value }))} placeholder="https://... o imagen cargada" />
+                      </Field>
+                      <p className="text-xs text-muted-foreground">Formatos de imagen comunes. Máximo recomendado: 3MB.</p>
+                    </div>
                   </div>
                   <div className="md:col-span-2 flex justify-end gap-2">
                     <Button variant="outline" onClick={() => setAddItemOpen(false)} disabled={saving}>Cancelar</Button>
@@ -815,14 +921,14 @@ export function InventoryControlCenter() {
                   </div>
                 </div>
               </DialogContent>
-            </Dialog>
+            </Dialog> : null}
           </div>
 
           <Card className="p-4">
             <div className="flex flex-col gap-3 xl:flex-row">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input className="pl-9" placeholder="Buscar por descripción, SKU o categoría..." value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} />
+                <Input className="pl-9" placeholder="Buscar por descripción, código o categoría..." value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} />
               </div>
               <Select value={filterCategory} onValueChange={setFilterCategory}>
                 <SelectTrigger className="xl:w-56"><SelectValue placeholder="Categoría" /></SelectTrigger>
@@ -834,9 +940,9 @@ export function InventoryControlCenter() {
                 </SelectContent>
               </Select>
               <Select value={filterWarehouse} onValueChange={setFilterWarehouse}>
-                <SelectTrigger className="xl:w-72"><SelectValue placeholder="Almacén" /></SelectTrigger>
+                <SelectTrigger className="xl:w-72"><SelectValue placeholder="Ubicación" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los almacenes</SelectItem>
+                  <SelectItem value="all">Todas las ubicaciones</SelectItem>
                   {allWarehouses.map((warehouse) => (
                     <SelectItem key={warehouse} value={warehouse}>{warehouse}</SelectItem>
                   ))}
@@ -848,12 +954,11 @@ export function InventoryControlCenter() {
           <Card className="overflow-hidden">
             <Table>
               <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead>Ítem</TableHead>
-                  <TableHead>Descripción</TableHead>
-                  <TableHead>Categoría</TableHead>
-                  <TableHead>Und</TableHead>
-                  <TableHead>Stock disp.</TableHead>
+                  <TableRow className="bg-muted/40">
+                    <TableHead>Ítem</TableHead>
+                    <TableHead>Categoría</TableHead>
+                    <TableHead>Und</TableHead>
+                    <TableHead>Stock disp.</TableHead>
                   <TableHead>Valor USD</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
@@ -861,44 +966,65 @@ export function InventoryControlCenter() {
               <TableBody>
                 {filteredMaterials.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">No hay materiales con esos filtros.</TableCell>
+                    <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">No hay materiales con esos filtros.</TableCell>
                   </TableRow>
                 ) : (
                   filteredMaterials.map((material) => {
                     const available = getAvailableStock(material);
                     const lowStock = available < material.minStock;
                     return (
-                      <TableRow key={material.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <div className="relative h-11 w-11 overflow-hidden rounded-xl border bg-muted">
-                              <Image
-                                src={material.imageUrl || makeMockImage(material.name)}
-                                alt={material.name}
-                                fill
-                                className="object-cover"
-                                unoptimized
-                              />
+                      <Fragment key={material.id}>
+                        <TableRow>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <div className="group relative h-11 w-11 overflow-visible rounded-xl border bg-muted">
+                                <Image
+                                  src={material.imageUrl || makeMockImage(material.name)}
+                                  alt={material.name}
+                                  fill
+                                  className="rounded-xl object-cover"
+                                  unoptimized
+                                />
+                                <div className="pointer-events-none absolute left-14 top-1/2 z-30 h-40 w-56 -translate-y-1/2 scale-95 overflow-hidden rounded-2xl border bg-background opacity-0 shadow-2xl transition-all duration-200 group-hover:scale-100 group-hover:opacity-100">
+                                  <Image
+                                    src={material.imageUrl || makeMockImage(material.name)}
+                                    alt={`Preview ${material.name}`}
+                                    fill
+                                    className="object-cover"
+                                    unoptimized
+                                  />
+                                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/65 to-transparent p-3">
+                                    <p className="truncate text-xs font-medium text-white">{material.name}</p>
+                                  </div>
+                                </div>
+                              </div>
+                              <div>
+                                <p className="font-mono text-xs text-muted-foreground">{material.sku}</p>
+                                <p className="font-medium">{material.name}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-mono text-xs text-muted-foreground">{material.sku}</p>
-                              <p className="font-medium">{material.name}</p>
+                          </TableCell>
+                          <TableCell><Badge variant="outline">{material.category}</Badge></TableCell>
+                          <TableCell>{material.unit}</TableCell>
+                          <TableCell className={lowStock ? 'font-semibold text-rose-600' : 'font-semibold text-emerald-700'}>{available}</TableCell>
+                          <TableCell>${getCurrentPriceUsd(material).toFixed(2)}</TableCell>
+                          <TableCell>
+                            <div className="flex justify-end gap-1">
+                              <Button variant="ghost" size="icon" onClick={() => setExpandedLocationId((current) => current === material.id ? null : material.id)}><ChevronDown className={`h-4 w-4 transition-transform ${expandedLocationId === material.id ? 'rotate-180' : ''}`} /></Button>
+                              {!isReadOnly ? <Button variant="ghost" size="icon" onClick={() => handleEditOpen(material)}><Pencil className="h-4 w-4" /></Button> : null}
+                              <Button variant="ghost" size="icon" onClick={() => { setSelectedMaterialId(material.id); setDetailOpen(true); }}><FileText className="h-4 w-4" /></Button>
+                              {!isReadOnly ? <Button variant="ghost" size="icon" className="text-rose-500 hover:text-rose-600" onClick={() => void handleDeleteMaterial(material.id)}><Trash2 className="h-4 w-4" /></Button> : null}
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>{material.warehouse}</TableCell>
-                        <TableCell><Badge variant="outline">{material.category}</Badge></TableCell>
-                        <TableCell>{material.unit}</TableCell>
-                        <TableCell className={lowStock ? 'font-semibold text-rose-600' : 'font-semibold text-emerald-700'}>{available}</TableCell>
-                        <TableCell>${getCurrentPriceUsd(material).toFixed(2)}</TableCell>
-                        <TableCell>
-                          <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="icon" onClick={() => handleEditOpen(material)}><Pencil className="h-4 w-4" /></Button>
-                            <Button variant="ghost" size="icon" onClick={() => { setSelectedMaterialId(material.id); setDetailOpen(true); }}><FileText className="h-4 w-4" /></Button>
-                            <Button variant="ghost" size="icon" className="text-rose-500 hover:text-rose-600" onClick={() => void handleDeleteMaterial(material.id)}><Trash2 className="h-4 w-4" /></Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                          </TableCell>
+                        </TableRow>
+                        {expandedLocationId === material.id ? (
+                          <TableRow className="bg-muted/25">
+                            <TableCell colSpan={6} className="py-3 text-sm">
+                              <span className="font-medium">Ubicación:</span> <span className="text-muted-foreground">{material.warehouse || 'Sin ubicación asignada'}</span>
+                            </TableCell>
+                          </TableRow>
+                        ) : null}
+                      </Fragment>
                     );
                   })
                 )}
@@ -918,7 +1044,7 @@ export function InventoryControlCenter() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Material</TableHead>
-                    <TableHead>Almacén</TableHead>
+                    <TableHead>Ubicación</TableHead>
                     <TableHead>Físico</TableHead>
                     <TableHead>Reservado</TableHead>
                     <TableHead>Bloqueado</TableHead>
@@ -944,16 +1070,20 @@ export function InventoryControlCenter() {
                         <TableCell>{material.blockedByDefect}</TableCell>
                         <TableCell className={risk ? 'font-semibold text-rose-600' : 'font-semibold text-emerald-700'}>{available}</TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
-                            min={0}
-                            defaultValue={material.minStock}
-                            className="h-8 w-24"
-                            onBlur={(event) => {
-                              const next = Number(event.target.value);
-                              if (Number.isFinite(next)) void handleMinStockChange(material.id, next);
-                            }}
-                          />
+                          {isReadOnly ? (
+                            <span className="font-medium">{material.minStock}</span>
+                          ) : (
+                            <Input
+                              type="number"
+                              min={0}
+                              defaultValue={material.minStock}
+                              className="h-8 w-24"
+                              onBlur={(event) => {
+                                const next = Number(event.target.value);
+                                if (Number.isFinite(next)) void handleMinStockChange(material.id, next);
+                              }}
+                            />
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
@@ -996,10 +1126,12 @@ export function InventoryControlCenter() {
                     );
                   })}
                 {globalOrderSuggestions.length === 0 ? <p className="text-sm text-muted-foreground">No hay solicitudes aprobadas para consolidar.</p> : null}
-                <Button onClick={handleGenerateGlobalOrder} disabled={globalOrderSuggestions.length === 0}>
-                  <FileText className="mr-1 h-4 w-4" />
-                  Generar orden global
-                </Button>
+                {!isReadOnly ? (
+                  <Button onClick={handleGenerateGlobalOrder} disabled={globalOrderSuggestions.length === 0}>
+                    <FileText className="mr-1 h-4 w-4" />
+                    Generar orden global
+                  </Button>
+                ) : null}
               </CardContent>
             </Card>
 
@@ -1027,7 +1159,9 @@ export function InventoryControlCenter() {
                     );
                   })}
                 {stockAlerts.length === 0 ? <p className="text-sm text-muted-foreground">No hay materiales debajo del stock mínimo.</p> : null}
-                <Button variant="secondary" onClick={handleGenerateStockOrder} disabled={stockAlerts.length === 0}>Generar sugerencia</Button>
+                {!isReadOnly ? (
+                  <Button variant="secondary" onClick={handleGenerateStockOrder} disabled={stockAlerts.length === 0}>Generar sugerencia</Button>
+                ) : null}
               </CardContent>
             </Card>
           </div>
@@ -1071,25 +1205,27 @@ export function InventoryControlCenter() {
         </TabsContent>
 
         <TabsContent value="defectos" className="mt-6 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Alarmas por material defectuoso</CardTitle>
-              <CardDescription>Bloquea inventario y lleva el flujo del incidente.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Select value={defectDraft.materialId} onValueChange={(value) => setDefectDraft((current) => ({ ...current, materialId: value }))}>
-                <SelectTrigger><SelectValue placeholder="Material" /></SelectTrigger>
-                <SelectContent>
-                  {materials.map((material) => (
-                    <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input placeholder="Tipo de defecto" value={defectDraft.defectType} onChange={(event) => setDefectDraft((current) => ({ ...current, defectType: event.target.value }))} />
-              <Input type="number" min={1} value={defectDraft.affectedQuantity} onChange={(event) => setDefectDraft((current) => ({ ...current, affectedQuantity: event.target.value }))} />
-              <Button onClick={() => void handleDefectCreate()} disabled={saving}>Registrar alarma</Button>
-            </CardContent>
-          </Card>
+          {!isReadOnly ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Alarmas por material defectuoso</CardTitle>
+                <CardDescription>Bloquea inventario y lleva el flujo del incidente.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Select value={defectDraft.materialId} onValueChange={(value) => setDefectDraft((current) => ({ ...current, materialId: value }))}>
+                  <SelectTrigger><SelectValue placeholder="Material" /></SelectTrigger>
+                  <SelectContent>
+                    {materials.map((material) => (
+                      <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input placeholder="Tipo de defecto" value={defectDraft.defectType} onChange={(event) => setDefectDraft((current) => ({ ...current, defectType: event.target.value }))} />
+                <Input type="number" min={1} value={defectDraft.affectedQuantity} onChange={(event) => setDefectDraft((current) => ({ ...current, affectedQuantity: event.target.value }))} />
+                <Button onClick={() => void handleDefectCreate()} disabled={saving}>Registrar alarma</Button>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader><CardTitle>Lista de alertas</CardTitle></CardHeader>
@@ -1103,7 +1239,7 @@ export function InventoryControlCenter() {
                     <TableHead>Proveedor</TableHead>
                     <TableHead>Estado</TableHead>
                     <TableHead>Reporte</TableHead>
-                    <TableHead>Acción</TableHead>
+                    {!isReadOnly ? <TableHead>Acción</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1115,7 +1251,7 @@ export function InventoryControlCenter() {
                       <TableCell>{getSupplierName(alert.supplierId)}</TableCell>
                       <TableCell><Badge variant="outline">{alert.status}</Badge></TableCell>
                       <TableCell><Badge variant={alert.supplierReportSent ? 'secondary' : 'destructive'}>{alert.supplierReportSent ? 'Enviado' : 'Pendiente'}</Badge></TableCell>
-                      <TableCell><Button variant="outline" size="sm" onClick={() => void handleDefectStatusAdvance(alert.id)}>Avanzar flujo</Button></TableCell>
+                      {!isReadOnly ? <TableCell><Button variant="outline" size="sm" onClick={() => void handleDefectStatusAdvance(alert.id)}>Avanzar flujo</Button></TableCell> : null}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1125,25 +1261,27 @@ export function InventoryControlCenter() {
         </TabsContent>
 
         <TabsContent value="cambios" className="mt-6 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Gestión de cambio / restitución</CardTitle>
-              <CardDescription>Registro de devoluciones y reclamos con orden de compra asociada.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Input placeholder="Orden de compra asociada" value={claimDraft.purchaseOrderRef} onChange={(event) => setClaimDraft((current) => ({ ...current, purchaseOrderRef: event.target.value }))} />
-              <Select value={claimDraft.materialId} onValueChange={(value) => setClaimDraft((current) => ({ ...current, materialId: value }))}>
-                <SelectTrigger><SelectValue placeholder="Material" /></SelectTrigger>
-                <SelectContent>
-                  {materials.map((material) => (
-                    <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Textarea className="md:col-span-2" placeholder="Motivo del reclamo" value={claimDraft.reason} onChange={(event) => setClaimDraft((current) => ({ ...current, reason: event.target.value }))} />
-              <Button className="md:col-span-2 xl:col-span-4" onClick={() => void handleClaimCreate()} disabled={saving}>Crear reclamo</Button>
-            </CardContent>
-          </Card>
+          {!isReadOnly ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Gestión de cambio / restitución</CardTitle>
+                <CardDescription>Registro de devoluciones y reclamos con orden de compra asociada.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Input placeholder="Orden de compra asociada" value={claimDraft.purchaseOrderRef} onChange={(event) => setClaimDraft((current) => ({ ...current, purchaseOrderRef: event.target.value }))} />
+                <Select value={claimDraft.materialId} onValueChange={(value) => setClaimDraft((current) => ({ ...current, materialId: value }))}>
+                  <SelectTrigger><SelectValue placeholder="Material" /></SelectTrigger>
+                  <SelectContent>
+                    {materials.map((material) => (
+                      <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Textarea className="md:col-span-2" placeholder="Motivo del reclamo" value={claimDraft.reason} onChange={(event) => setClaimDraft((current) => ({ ...current, reason: event.target.value }))} />
+                <Button className="md:col-span-2 xl:col-span-4" onClick={() => void handleClaimCreate()} disabled={saving}>Crear reclamo</Button>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader><CardTitle>Seguimiento de reclamos</CardTitle></CardHeader>
@@ -1155,7 +1293,7 @@ export function InventoryControlCenter() {
                     <TableHead>Producto</TableHead>
                     <TableHead>Motivo</TableHead>
                     <TableHead>Estado</TableHead>
-                    <TableHead>Acción</TableHead>
+                    {!isReadOnly ? <TableHead>Acción</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1165,7 +1303,7 @@ export function InventoryControlCenter() {
                       <TableCell>{getMaterialName(claim.materialId)}</TableCell>
                       <TableCell className="max-w-sm truncate" title={claim.reason}>{claim.reason}</TableCell>
                       <TableCell><Badge variant="outline">{claim.status}</Badge></TableCell>
-                      <TableCell><Button size="sm" variant="outline" onClick={() => void handleClaimStatus(claim.id)}>Avanzar estado</Button></TableCell>
+                      {!isReadOnly ? <TableCell><Button size="sm" variant="outline" onClick={() => void handleClaimStatus(claim.id)}>Avanzar estado</Button></TableCell> : null}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1175,32 +1313,34 @@ export function InventoryControlCenter() {
         </TabsContent>
 
         <TabsContent value="sobrantes" className="mt-6 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Control de sobrantes</CardTitle>
-              <CardDescription>Clasifica material reutilizable o desecho y permite reintegro de stock.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Select value={surplusDraft.materialId} onValueChange={(value) => setSurplusDraft((current) => ({ ...current, materialId: value }))}>
-                <SelectTrigger><SelectValue placeholder="Material" /></SelectTrigger>
-                <SelectContent>
-                  {materials.map((material) => (
-                    <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input type="number" min={1} value={surplusDraft.quantity} onChange={(event) => setSurplusDraft((current) => ({ ...current, quantity: event.target.value }))} />
-              <Input placeholder="Origen" value={surplusDraft.origin} onChange={(event) => setSurplusDraft((current) => ({ ...current, origin: event.target.value }))} />
-              <Select value={surplusDraft.classification} onValueChange={(value: SurplusClass) => setSurplusDraft((current) => ({ ...current, classification: value }))}>
-                <SelectTrigger><SelectValue placeholder="Clasificación" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="reutilizable">Reutilizable</SelectItem>
-                  <SelectItem value="desecho">Desecho</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button className="md:col-span-2 xl:col-span-4" onClick={() => void handleSurplusCreate()} disabled={saving}>Registrar sobrante</Button>
-            </CardContent>
-          </Card>
+          {!isReadOnly ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Control de sobrantes</CardTitle>
+                <CardDescription>Clasifica material reutilizable o desecho y permite reintegro de stock.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Select value={surplusDraft.materialId} onValueChange={(value) => setSurplusDraft((current) => ({ ...current, materialId: value }))}>
+                  <SelectTrigger><SelectValue placeholder="Material" /></SelectTrigger>
+                  <SelectContent>
+                    {materials.map((material) => (
+                      <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input type="number" min={1} value={surplusDraft.quantity} onChange={(event) => setSurplusDraft((current) => ({ ...current, quantity: event.target.value }))} />
+                <Input placeholder="Origen" value={surplusDraft.origin} onChange={(event) => setSurplusDraft((current) => ({ ...current, origin: event.target.value }))} />
+                <Select value={surplusDraft.classification} onValueChange={(value: SurplusClass) => setSurplusDraft((current) => ({ ...current, classification: value }))}>
+                  <SelectTrigger><SelectValue placeholder="Clasificación" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="reutilizable">Reutilizable</SelectItem>
+                    <SelectItem value="desecho">Desecho</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button className="md:col-span-2 xl:col-span-4" onClick={() => void handleSurplusCreate()} disabled={saving}>Registrar sobrante</Button>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader><CardTitle>Listado de sobrantes</CardTitle></CardHeader>
@@ -1213,7 +1353,7 @@ export function InventoryControlCenter() {
                     <TableHead>Origen</TableHead>
                     <TableHead>Clasificación</TableHead>
                     <TableHead>Estado</TableHead>
-                    <TableHead>Acción</TableHead>
+                    {!isReadOnly ? <TableHead>Acción</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1224,16 +1364,18 @@ export function InventoryControlCenter() {
                       <TableCell>{item.origin}</TableCell>
                       <TableCell><Badge variant="outline">{item.classification}</Badge></TableCell>
                       <TableCell><Badge variant={item.reintegrated ? 'secondary' : 'default'}>{item.reintegrated ? 'Reingresado' : 'Pendiente'}</Badge></TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button size="sm" variant="outline" disabled={item.classification !== 'reutilizable' || item.reintegrated} onClick={() => void handleSurplusReintegration(item.id)}>
-                            Reingresar
-                          </Button>
-                          <Button size="icon" variant="ghost" onClick={() => void handleDeleteSurplus(item.id)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
+                      {!isReadOnly ? (
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" disabled={item.classification !== 'reutilizable' || item.reintegrated} onClick={() => void handleSurplusReintegration(item.id)}>
+                              Reingresar
+                            </Button>
+                            <Button size="icon" variant="ghost" onClick={() => void handleDeleteSurplus(item.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      ) : null}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1257,7 +1399,7 @@ export function InventoryControlCenter() {
                 </div>
                 <div className="space-y-2 text-sm">
                   <p className="text-lg font-semibold">{selectedMaterial.name}</p>
-                  <p><span className="text-muted-foreground">SKU:</span> {selectedMaterial.sku}</p>
+                  <p><span className="text-muted-foreground">Código:</span> {selectedMaterial.sku}</p>
                   <p><span className="text-muted-foreground">Proveedor:</span> {getSupplierName(selectedMaterial.supplierId)}</p>
                   <p><span className="text-muted-foreground">Ubicación:</span> {selectedMaterial.warehouse}</p>
                   <p><span className="text-muted-foreground">Stock físico/reservado/bloqueado:</span> {selectedMaterial.stockPhysical} / {selectedMaterial.stockReserved} / {selectedMaterial.blockedByDefect}</p>
@@ -1333,7 +1475,7 @@ export function InventoryControlCenter() {
           {editDraft ? (
             <div className="grid gap-4 pt-2 md:grid-cols-2">
               <Field label="Nombre"><Input value={editDraft.name} onChange={(event) => setEditDraft((current) => current ? { ...current, name: event.target.value } : current)} /></Field>
-              <Field label="SKU"><Input value={editDraft.sku} onChange={(event) => setEditDraft((current) => current ? { ...current, sku: event.target.value } : current)} /></Field>
+              <Field label="Código"><Input value={editDraft.sku} onChange={(event) => setEditDraft((current) => current ? { ...current, sku: event.target.value } : current)} placeholder="Auto si lo dejas vacío" /></Field>
               <Field label="Categoría"><Input value={editDraft.category} onChange={(event) => setEditDraft((current) => current ? { ...current, category: event.target.value } : current)} /></Field>
               <Field label="Proveedor">
                 <Select value={editDraft.supplierId} onValueChange={(value) => setEditDraft((current) => current ? { ...current, supplierId: value } : current)}>
@@ -1346,11 +1488,31 @@ export function InventoryControlCenter() {
                 </Select>
               </Field>
               <Field label="Unidad"><Input value={editDraft.unit} onChange={(event) => setEditDraft((current) => current ? { ...current, unit: event.target.value } : current)} /></Field>
-              <Field label="Almacén"><Input value={editDraft.warehouse} onChange={(event) => setEditDraft((current) => current ? { ...current, warehouse: event.target.value } : current)} /></Field>
+              <Field label="Ubicación">
+                <Select value={editDraft.warehouse} onValueChange={(value) => setEditDraft((current) => current ? { ...current, warehouse: value } : current)}>
+                  <SelectTrigger><SelectValue placeholder="Elige ubicación" /></SelectTrigger>
+                  <SelectContent>
+                    {allWarehouses.map((warehouse) => (
+                      <SelectItem key={warehouse} value={warehouse}>{warehouse}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
               <Field label="Precio actual (Bs.)"><Input type="number" min={0} value={String(getCurrentPriceBs(editDraft))} onChange={(event) => setEditDraft((current) => current ? { ...current, priceHistory: [{ date: current.purchaseDate ?? toIsoDate(), priceBs: Number(event.target.value || 0), exchangeRate }] } : current)} /></Field>
               <Field label="Stock mínimo"><Input type="number" min={0} value={String(editDraft.minStock)} onChange={(event) => setEditDraft((current) => current ? { ...current, minStock: Number(event.target.value || 0) } : current)} /></Field>
-              <div className="md:col-span-2">
-                <Field label="Imagen URL"><Input value={editDraft.imageUrl} onChange={(event) => setEditDraft((current) => current ? { ...current, imageUrl: event.target.value } : current)} /></Field>
+              <div className="grid gap-3 rounded-xl border border-border/70 bg-muted/20 p-3 md:col-span-2 md:grid-cols-[160px_1fr]">
+                <div className="relative h-28 overflow-hidden rounded-lg border bg-background">
+                  <Image src={editDraft.imageUrl || makeMockImage(editDraft.name || 'Material')} alt="Vista previa del material" fill className="object-cover" unoptimized />
+                </div>
+                <div className="space-y-3">
+                  <Field label="Subir imagen">
+                    <Input type="file" accept="image/*" onChange={(event) => void handleEditImageUpload(event.target.files?.[0])} />
+                  </Field>
+                  <Field label="O pegar URL de imagen">
+                    <Input value={editDraft.imageUrl} onChange={(event) => setEditDraft((current) => current ? { ...current, imageUrl: event.target.value } : current)} placeholder="https://... o imagen cargada" />
+                  </Field>
+                  <p className="text-xs text-muted-foreground">La imagen se guarda en la ficha del ítem.</p>
+                </div>
               </div>
               <div className="md:col-span-2 flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setEditItemOpen(false)} disabled={saving}>Cancelar</Button>

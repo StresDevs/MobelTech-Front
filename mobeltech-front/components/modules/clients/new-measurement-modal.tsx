@@ -9,6 +9,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
@@ -52,6 +53,9 @@ export function NewMeasurementModal({ onMeasurementAdded }: { onMeasurementAdded
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Nueva Solicitud de Medición</DialogTitle>
+          <DialogDescription>
+            Selecciona un cliente existente o crea uno nuevo para agendar la medición.
+          </DialogDescription>
         </DialogHeader>
 
         <Tabs defaultValue="existing" className="w-full">

@@ -1,6 +1,6 @@
 // Business entity types for MobelTech admin system
 
-export type UserRole = 'admin' | 'contractor' | 'architect';
+export type UserRole = 'admin' | 'contractor' | 'architect' | 'partner';
 
 export interface User {
   id: string;
@@ -8,6 +8,9 @@ export interface User {
   email: string;
   role: UserRole;
   avatar?: string;
+  username?: string;
+  mustChangePassword?: boolean;
+  status?: 'active' | 'inactive';
 }
 
 export interface Client {
@@ -415,6 +418,8 @@ export interface PrequotationLog {
 
 export interface Prequotation {
   id: string;
+  uid?: string;
+  uidAssignedAt?: Date | null;
   clientId: string;
   measurementId?: string | null;
   title: string;

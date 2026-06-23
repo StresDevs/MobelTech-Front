@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
+import { Calendar as DateRangeCalendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRole } from '@/hooks/use-role-context';
 import {
   CalendarDays,
+  CalendarRange,
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
@@ -23,6 +25,8 @@ import {
 
 type PhaseName = 'cortado' | 'canteado' | 'ensamblado' | 'instalacion' | 'entregado';
 type ScheduleType = 'tentative' | 'actual';
+type ScheduleViewMode = 'mine' | 'global';
+type CuttingMachine = 'cortadora-1' | 'cortadora-2';
 
 type ProductionOrder = {
   id: string;
@@ -46,6 +50,7 @@ type SchedulePhase = {
   phase: PhaseName;
   startDate: string;
   endDate: string;
+  cuttingMachine?: CuttingMachine | null;
 };
 
 type Contractor = {
@@ -77,6 +82,10 @@ const PHASES: Array<{ key: PhaseName; label: string; color: string }> = [
   { key: 'instalacion', label: 'Instalacion', color: '#8b5cf6' },
   { key: 'entregado', label: 'Entrega', color: '#14b8a6' },
 ];
+const CUTTING_MACHINES: Array<{ value: CuttingMachine; label: string }> = [
+  { value: 'cortadora-1', label: 'Cortadora 1' },
+  { value: 'cortadora-2', label: 'Cortadora 2' },
+];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -91,6 +100,13 @@ function toInputDate(value: Date) {
   return value.toISOString().slice(0, 10);
 }
 
+function toLocalDateString(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function addDays(value: string, days: number) {
   const date = parseDate(value) ?? new Date();
   date.setDate(date.getDate() + days);
@@ -103,6 +119,14 @@ function formatShortDate(value?: string | Date | null) {
   return new Intl.DateTimeFormat('es-BO', { day: '2-digit', month: 'short' }).format(date);
 }
 
+function formatDisplayDate(value?: string | Date | null) {
+  const date = parseDate(value);
+  if (!date) return 'dd/mm/yyyy';
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}/${date.getFullYear()}`;
+}
+
 function getDefaultPhasePlan(startDate?: string | null) {
   let cursor = startDate ? String(startDate).slice(0, 10) : toInputDate(new Date());
   return PHASES.map((phase) => {
@@ -113,6 +137,7 @@ function getDefaultPhasePlan(startDate?: string | null) {
       phase: phase.key,
       startDate: start,
       endDate: end,
+      cuttingMachine: phase.key === 'cortado' ? 'cortadora-1' as CuttingMachine : null,
     };
   });
 }
@@ -126,6 +151,9 @@ function normalizePhaseRows(rows: SchedulePhase[] | undefined, type: ScheduleTyp
       phase: phase.key,
       startDate: found?.startDate?.slice(0, 10) ?? fallback[index].startDate,
       endDate: found?.endDate?.slice(0, 10) ?? fallback[index].endDate,
+      cuttingMachine: phase.key === 'cortado'
+        ? (found?.cuttingMachine as CuttingMachine | null | undefined) ?? 'cortadora-1'
+        : null,
     };
   });
 }
@@ -269,6 +297,8 @@ export function GanttSchedule() {
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [selectedContractorFilter, setSelectedContractorFilter] = useState('all');
   const [selectedClientFilter, setSelectedClientFilter] = useState('all');
+  const [selectedMachineFilter, setSelectedMachineFilter] = useState<'all' | CuttingMachine>('all');
+  const [scheduleViewMode, setScheduleViewMode] = useState<ScheduleViewMode>('mine');
   const [visibleMonthIndex, setVisibleMonthIndex] = useState(0);
 
   const isContractor = currentRole === 'contractor';
@@ -319,15 +349,19 @@ export function GanttSchedule() {
   const visibleOrders = useMemo(() => {
     if (!isContractor) return orders;
     if (!myContractor) return [];
+    if (scheduleViewMode === 'global') return orders;
     return orders.filter((order) => order.assignedContractorId === myContractor.id);
-  }, [isContractor, myContractor, orders]);
+  }, [isContractor, myContractor, orders, scheduleViewMode]);
   const filteredOrders = useMemo(() => {
     return visibleOrders.filter((order) => {
       const matchesContractor = selectedContractorFilter === 'all' || order.assignedContractorId === selectedContractorFilter;
       const matchesClient = selectedClientFilter === 'all' || getQuotation(order)?.clientId === selectedClientFilter;
-      return matchesContractor && matchesClient;
+      const matchesMachine = selectedMachineFilter === 'all' || (order.schedulePhases ?? []).some(
+        (phase) => phase.phase === 'cortado' && phase.cuttingMachine === selectedMachineFilter,
+      );
+      return matchesContractor && matchesClient && matchesMachine;
     });
-  }, [selectedClientFilter, selectedContractorFilter, visibleOrders]);
+  }, [selectedClientFilter, selectedContractorFilter, selectedMachineFilter, visibleOrders]);
 
   const timeline = useMemo(() => rangeFromOrders(filteredOrders), [filteredOrders]);
   const dayColumns = useMemo(() => {
@@ -434,17 +468,23 @@ export function GanttSchedule() {
     startEditing(order, 'tentative');
   }
 
-  function updatePhase(index: number, key: 'startDate' | 'endDate', value: string) {
+  function updatePhaseRange(index: number, startDate: string, endDate: string) {
     setEditing((current) => {
       if (!current) return current;
       const next = current.phases.map((phase, phaseIndex) => (
-        phaseIndex === index ? { ...phase, [key]: value } : phase
+        phaseIndex === index
+          ? {
+              ...phase,
+              startDate,
+              endDate,
+            }
+          : phase
       ));
 
-      if (key === 'endDate' && index < next.length - 1) {
+      if (endDate && index < next.length - 1) {
         next[index + 1] = {
           ...next[index + 1],
-          startDate: addDays(value, 1),
+          startDate: addDays(endDate, 1),
         };
       }
 
@@ -452,11 +492,55 @@ export function GanttSchedule() {
     });
   }
 
+  function updateCuttingMachine(value: CuttingMachine) {
+    setEditing((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        phases: current.phases.map((phase) => (
+          phase.phase === 'cortado' ? { ...phase, cuttingMachine: value } : phase
+        )),
+      };
+    });
+  }
+
+  function validateCuttingMachineAvailability() {
+    if (!editing) return null;
+    const cuttingPhase = editing.phases.find((phase) => phase.phase === 'cortado');
+    if (!cuttingPhase?.cuttingMachine) {
+      return 'Selecciona la cortadora que se usara en la etapa de corte.';
+    }
+
+    const start = parseDate(cuttingPhase.startDate);
+    const end = parseDate(cuttingPhase.endDate);
+    if (!start || !end) return null;
+
+    const conflict = orders.find((order) => {
+      if (order.id === editing.order.id) return false;
+      return (order.schedulePhases ?? []).some((phase) => {
+        if (phase.type !== editing.type || phase.phase !== 'cortado' || phase.cuttingMachine !== cuttingPhase.cuttingMachine) return false;
+        const otherStart = parseDate(phase.startDate);
+        const otherEnd = parseDate(phase.endDate);
+        if (!otherStart || !otherEnd) return false;
+        return start.getTime() <= otherEnd.getTime() && end.getTime() >= otherStart.getTime();
+      });
+    });
+
+    if (!conflict) return null;
+    const machineLabel = CUTTING_MACHINES.find((machine) => machine.value === cuttingPhase.cuttingMachine)?.label ?? 'cortadora';
+    return `${machineLabel} ya esta ocupada en esas fechas por ${getFurnitureName(conflict)}.`;
+  }
+
   async function saveSchedule() {
     if (!editing || !apiBase) return;
     const validation = validateSuccessivePhases(editing.phases);
     if (validation) {
       setError(validation);
+      return;
+    }
+    const machineValidation = validateCuttingMachineAvailability();
+    if (machineValidation) {
+      setError(machineValidation);
       return;
     }
 
@@ -514,15 +598,18 @@ export function GanttSchedule() {
           const left = Math.max(0, ((visibleStart.getTime() - visibleTimelineStart.getTime()) / DAY_MS / visibleTimelineDays) * 100);
           const width = Math.max(2, (((visibleEnd.getTime() - visibleStart.getTime()) / DAY_MS + 1) / visibleTimelineDays) * 100);
           const color = type === 'tentative' ? '#a1a1aa' : phaseConfig?.color ?? '#eab676';
+          const machineLabel = row.phase === 'cortado'
+            ? CUTTING_MACHINES.find((machine) => machine.value === row.cuttingMachine)?.label
+            : null;
 
           return (
             <div
               key={`${type}-${row.phase}`}
               className="absolute top-1 h-6 rounded-md px-2 text-[11px] font-semibold leading-6 text-white shadow-sm"
               style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%`, backgroundColor: color }}
-              title={`${phaseConfig?.label}: ${formatShortDate(row.startDate)} - ${formatShortDate(row.endDate)}`}
+              title={`${phaseConfig?.label}: ${formatShortDate(row.startDate)} - ${formatShortDate(row.endDate)}${machineLabel ? ` · ${machineLabel}` : ''}`}
             >
-              <span className="block truncate">{phaseConfig?.label}</span>
+              <span className="block truncate">{phaseConfig?.label}{machineLabel ? ` · ${machineLabel.replace('Cortadora ', 'C')}` : ''}</span>
             </div>
           );
         })}
@@ -573,6 +660,35 @@ export function GanttSchedule() {
       {error ? (
         <Card className="border-red-200 bg-red-50/90 p-4 text-sm text-red-700">
           {error}
+        </Card>
+      ) : null}
+
+      {isContractor ? (
+        <Card className="p-2">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setScheduleViewMode('mine')}
+              className={`rounded-md px-4 py-3 text-left text-sm transition-colors ${
+                scheduleViewMode === 'mine'
+                  ? 'bg-[#eab676] font-semibold text-[#1f1f1f]'
+                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+              }`}
+            >
+              Ver mi cronograma
+            </button>
+            <button
+              type="button"
+              onClick={() => setScheduleViewMode('global')}
+              className={`rounded-md px-4 py-3 text-left text-sm transition-colors ${
+                scheduleViewMode === 'global'
+                  ? 'bg-[#eab676] font-semibold text-[#1f1f1f]'
+                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+              }`}
+            >
+              Ver cronograma global
+            </button>
+          </div>
         </Card>
       ) : null}
 
@@ -630,6 +746,18 @@ export function GanttSchedule() {
                   {availableClients.map((client) => (
                     <option key={client.id} value={client.id}>
                       {client.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={selectedMachineFilter}
+                  onChange={(event) => setSelectedMachineFilter(event.target.value as 'all' | CuttingMachine)}
+                  className="h-10 min-w-[180px] rounded-md border border-border/70 bg-background/90 px-3 text-sm text-foreground shadow-sm"
+                >
+                  <option value="all">Todas las cortadoras</option>
+                  {CUTTING_MACHINES.map((machine) => (
+                    <option key={machine.value} value={machine.value}>
+                      {machine.label}
                     </option>
                   ))}
                 </select>
@@ -703,20 +831,24 @@ export function GanttSchedule() {
           {filteredOrders.map((order) => {
             const contractor = getContractor(order);
             const client = getClient(order);
-            const canEditActual = isContractor && myContractor?.id === order.assignedContractorId;
+            const canEditActual = isContractor && scheduleViewMode === 'mine' && myContractor?.id === order.assignedContractorId;
+            const canOpenTentative = canCreateTentative;
 
             return (
               <div key={order.id} className="grid border-b border-border" style={{ gridTemplateColumns: `280px ${timelineColumnWidth}` }}>
                 <button
                   type="button"
-                  onClick={() => (canEditActual ? startEditing(order, 'actual') : canCreateTentative ? startEditing(order, 'tentative') : undefined)}
-                  className="border-r border-border px-4 py-4 text-left transition-colors hover:bg-muted/40"
+                  onClick={() => (canEditActual ? startEditing(order, 'actual') : canOpenTentative ? startEditing(order, 'tentative') : undefined)}
+                  className={`border-r border-border px-4 py-4 text-left transition-colors ${
+                    canEditActual || canOpenTentative ? 'hover:bg-muted/40' : 'cursor-default'
+                  }`}
                 >
                   <p className="text-sm font-semibold">{getFurnitureName(order)}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{client?.name ?? 'Cliente no registrado'}</p>
                   <div className="mt-2 flex items-center gap-2">
                     <Badge variant="outline">{contractor?.name ?? 'Sin contratista'}</Badge>
                     {canEditActual ? <Badge className="bg-emerald-100 text-emerald-700">Editable</Badge> : null}
+                    {isContractor && scheduleViewMode === 'global' ? <Badge variant="outline">Solo lectura</Badge> : null}
                   </div>
                 </button>
                 <div
@@ -762,21 +894,69 @@ export function GanttSchedule() {
               {editing.phases.map((phase, index) => {
                 const phaseConfig = PHASES.find((item) => item.key === phase.phase);
                 return (
-                  <div key={phase.phase} className="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-[140px_1fr_1fr] md:items-center">
+                  <div key={phase.phase} className="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-[140px_1fr] md:items-center">
                     <div className="flex items-center gap-2">
                       <span className="h-3 w-3 rounded-full" style={{ backgroundColor: editing.type === 'tentative' ? '#a1a1aa' : phaseConfig?.color }} />
                       <p className="text-sm font-semibold">{phaseConfig?.label}</p>
                     </div>
-                    <Input
-                      type="date"
-                      value={phase.startDate}
-                      onChange={(event) => updatePhase(index, 'startDate', event.target.value)}
-                    />
-                    <Input
-                      type="date"
-                      value={phase.endDate}
-                      onChange={(event) => updatePhase(index, 'endDate', event.target.value)}
-                    />
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px]">
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-auto min-h-10 w-full justify-between gap-3 px-3 py-2 text-left"
+                          >
+                            <div className="grid flex-1 grid-cols-2 gap-3">
+                              <span className="min-w-0">
+                                <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Fecha inicio</span>
+                                <span className="block truncate text-xs font-medium">{formatDisplayDate(phase.startDate)}</span>
+                              </span>
+                              <span className="min-w-0 border-l border-border pl-3">
+                                <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Fecha fin</span>
+                                <span className="block truncate text-xs font-medium">{formatDisplayDate(phase.endDate)}</span>
+                              </span>
+                            </div>
+                            <CalendarRange className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="start" className="w-auto p-0">
+                          <DateRangeCalendar
+                            mode="range"
+                            numberOfMonths={1}
+                            selected={{
+                              from: parseDate(phase.startDate) ?? undefined,
+                              to: parseDate(phase.endDate) ?? undefined,
+                            }}
+                            onSelect={(range) => {
+                              updatePhaseRange(
+                                index,
+                                range?.from ? toLocalDateString(range.from) : '',
+                                range?.to ? toLocalDateString(range.to) : '',
+                              );
+                            }}
+                            classNames={{
+                              range_start: 'rounded-l-md bg-[#0f3d73] text-white',
+                              range_middle: 'rounded-none bg-[#eab676]/35 text-foreground',
+                              range_end: 'rounded-r-md bg-[#0f3d73] text-white',
+                            }}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      {phase.phase === 'cortado' ? (
+                        <select
+                          value={phase.cuttingMachine ?? 'cortadora-1'}
+                          onChange={(event) => updateCuttingMachine(event.target.value as CuttingMachine)}
+                          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          {CUTTING_MACHINES.map((machine) => (
+                            <option key={machine.value} value={machine.value}>
+                              {machine.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                    </div>
                   </div>
                 );
               })}

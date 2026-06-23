@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
+import { Calendar as DateRangeCalendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Search,
   Filter,
@@ -33,6 +35,7 @@ import {
   RefreshCw,
   FolderPlus,
   Layers3,
+  CalendarRange,
 } from 'lucide-react';
 
 type QuotationStatus = Quotation['status'];
@@ -111,6 +114,35 @@ function formatCurrency(n: number) {
   return `Bs. ${n.toLocaleString('es-BO')}`;
 }
 
+function parseLocalDate(value?: string | null) {
+  if (!value) return undefined;
+  const [yearRaw, monthRaw, dayRaw] = value.split('-');
+  const year = Number.parseInt(yearRaw ?? '', 10);
+  const month = Number.parseInt(monthRaw ?? '', 10);
+  const day = Number.parseInt(dayRaw ?? '', 10);
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return undefined;
+  return new Date(year, month - 1, day);
+}
+
+function toLocalDateString(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isUuid(value: string | null | undefined) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value ?? '');
+}
+
+function formatDisplayDate(value?: string | null) {
+  const date = parseLocalDate(value);
+  if (!date) return 'dd/mm/yyyy';
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}/${date.getFullYear()}`;
+}
+
 function getInitials(name: string) {
   return name
     .split(' ')
@@ -172,8 +204,11 @@ export function QuotationsModule() {
       if (!response.ok) throw new Error('No se pudieron cargar las cotizaciones');
       const json = await response.json();
       const nextData = json.map(normalizeQuotationRecord);
+      const quotationId =
+        typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('quotationId') : null;
       setData(nextData);
       setSelected((current) => {
+        if (quotationId) return nextData.find((quotation: ApiQuotation) => quotation.id === quotationId) ?? current;
         if (!current) return null;
         return nextData.find((quotation: ApiQuotation) => quotation.id === current.id) ?? null;
       });
@@ -642,6 +677,9 @@ function QuotationDetail({
   );
   const [editableTotal, setEditableTotal] = useState<number>(currentQuotation.totalAmount || subtotal);
   const [editableAdvance, setEditableAdvance] = useState<number>(currentQuotation.advanceAmount || 0);
+  const displayTotal = currentQuotation.totalAmount || editableTotal || subtotal;
+  const displayAdvance = currentQuotation.advanceAmount || editableAdvance || 0;
+  const pendingBalance = Math.max(displayTotal - displayAdvance, 0);
   const [showEnvironmentBuilder, setShowEnvironmentBuilder] = useState(false);
   const [environmentSaving, setEnvironmentSaving] = useState(false);
   const [environmentError, setEnvironmentError] = useState<string | null>(null);
@@ -705,7 +743,7 @@ function QuotationDetail({
       price: Number(row.price),
       estimatedStartDate: row.estimatedStartDate,
       estimatedEndDate: row.estimatedEndDate,
-      assignedContractorId: row.assignedContractorId || null,
+      assignedContractorId: isUuid(row.assignedContractorId) ? row.assignedContractorId : null,
     }));
 
     const hasInvalidRow = preparedRows.some((row) => {
@@ -1022,7 +1060,7 @@ function QuotationDetail({
                 <SummaryRow
                   icon={<DollarSign className="w-3.5 h-3.5" />}
                   label="Total"
-                  value={formatCurrency(currentQuotation.totalAmount || editableTotal)}
+                  value={formatCurrency(displayTotal)}
                   mono
                 />
               )}
@@ -1042,12 +1080,26 @@ function QuotationDetail({
                   </div>
                 </div>
               ) : (
-                <SummaryRow
-                  icon={<Layers3 className="w-3.5 h-3.5" />}
-                  label="Anticipo"
-                  value={formatCurrency(currentQuotation.advanceAmount || editableAdvance)}
-                  mono
-                />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/25">
+                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
+                      <Layers3 className="h-3.5 w-3.5" />
+                      <p className="text-xs font-medium">Anticipo pagado</p>
+                    </div>
+                    <p className="mt-1 font-mono text-sm font-bold text-emerald-800 dark:text-emerald-200">
+                      {formatCurrency(displayAdvance)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/25">
+                    <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+                      <DollarSign className="h-3.5 w-3.5" />
+                      <p className="text-xs font-medium">Saldo pendiente</p>
+                    </div>
+                    <p className="mt-1 font-mono text-sm font-bold text-amber-800 dark:text-amber-200">
+                      {formatCurrency(pendingBalance)}
+                    </p>
+                  </div>
+                </div>
               )}
               {prequotationTitle && (
                 <SummaryRow
@@ -1164,7 +1216,7 @@ function QuotationDetail({
 
             <div className="space-y-3">
               {environmentRows.map((row) => (
-                <div key={row.key} className="grid gap-3 rounded-2xl border border-border bg-muted/15 p-4 lg:grid-cols-[1.1fr_1.5fr_0.8fr_0.9fr_0.9fr_1fr_auto]">
+                <div key={row.key} className="grid gap-3 rounded-2xl border border-border bg-muted/15 p-4 lg:grid-cols-[1.05fr_1.35fr_0.75fr_1.6fr_1fr_auto]">
                   <Input
                     placeholder="Ambiente"
                     value={row.ambience}
@@ -1183,23 +1235,64 @@ function QuotationDetail({
                     value={row.price}
                     onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, price: e.target.value } : item))}
                   />
-                  <Input
-                    type="date"
-                    value={row.estimatedStartDate}
-                    onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, estimatedStartDate: e.target.value } : item))}
-                  />
-                  <Input
-                    type="date"
-                    value={row.estimatedEndDate}
-                    onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, estimatedEndDate: e.target.value } : item))}
-                  />
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-auto min-h-10 w-full justify-between gap-3 px-3 py-2 text-left"
+                      >
+                        <div className="grid flex-1 grid-cols-2 gap-3">
+                          <span className="min-w-0">
+                            <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Fecha inicio</span>
+                            <span className="block truncate text-xs font-medium">{formatDisplayDate(row.estimatedStartDate)}</span>
+                          </span>
+                          <span className="min-w-0 border-l border-border pl-3">
+                            <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Fecha fin</span>
+                            <span className="block truncate text-xs font-medium">{formatDisplayDate(row.estimatedEndDate)}</span>
+                          </span>
+                        </div>
+                        <CalendarRange className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-auto p-0">
+                      <DateRangeCalendar
+                        mode="range"
+                        numberOfMonths={1}
+                        selected={{
+                          from: parseLocalDate(row.estimatedStartDate),
+                          to: parseLocalDate(row.estimatedEndDate),
+                        }}
+                        onSelect={(range) => {
+                          setEnvironmentRows((current) =>
+                            current.map((item) =>
+                              item.key === row.key
+                                ? {
+                                    ...item,
+                                    estimatedStartDate: range?.from ? toLocalDateString(range.from) : '',
+                                    estimatedEndDate: range?.to ? toLocalDateString(range.to) : '',
+                                  }
+                                : item,
+                            ),
+                          );
+                        }}
+                        classNames={{
+                          range_start: 'rounded-l-md bg-zinc-700 text-white hover:bg-zinc-700 focus:bg-zinc-700',
+                          range_middle: 'rounded-none bg-zinc-200 text-zinc-900 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100',
+                          range_end: 'rounded-r-md bg-zinc-700 text-white hover:bg-zinc-700 focus:bg-zinc-700',
+                          day_button:
+                            'data-[selected-single=true]:bg-zinc-700 data-[selected-single=true]:text-white data-[range-start=true]:bg-zinc-700 data-[range-start=true]:text-white data-[range-end=true]:bg-zinc-700 data-[range-end=true]:text-white data-[range-middle=true]:bg-zinc-200 data-[range-middle=true]:text-zinc-900 dark:data-[range-middle=true]:bg-zinc-800 dark:data-[range-middle=true]:text-zinc-100',
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
                   <select
                     value={row.assignedContractorId}
                     onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, assignedContractorId: e.target.value } : item))}
                     className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                   >
                     <option value="">Asignar contratista</option>
-                    {contractorOptions.map((contractor) => (
+                    {contractorOptions.filter((contractor) => isUuid(contractor.id)).map((contractor) => (
                       <option key={contractor.id} value={contractor.id}>
                         {contractor.name}
                       </option>

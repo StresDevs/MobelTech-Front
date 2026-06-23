@@ -27,6 +27,20 @@ async function apiLogin(identifier: string, password: string) {
   return data as { user: User; token: string }
 }
 
+async function apiChangePassword(newPassword: string) {
+  const response = await fetch(`${API_URL}/api/auth/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ newPassword }),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(data?.error || data?.detail || 'No se pudo cambiar la contraseña')
+  }
+  return data as { user: User }
+}
+
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false)
   const [user, setUser] = useState<User | null>(null)
@@ -35,6 +49,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isRedirecting, setIsRedirecting] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordChangeError, setPasswordChangeError] = useState('')
+  const [isChangingPassword, setIsChangingPassword] = useState(false)
   const { resolvedTheme } = useTheme()
   const router = useRouter()
   const pathname = usePathname()
@@ -78,6 +96,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     try {
       const { user: authenticatedUser, token } = await apiLogin(email.trim().toLowerCase(), password)
       persistSession(authenticatedUser, token)
+      setNewPassword('')
+      setConfirmPassword('')
+      setPasswordChangeError('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Credenciales incorrectas')
       setIsRedirecting(false)
@@ -99,6 +120,40 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     persistSession(u, localStorage.getItem('mobeltech_token') ?? '')
   }
 
+  async function handlePasswordChange(e: React.FormEvent) {
+    e.preventDefault()
+    setPasswordChangeError('')
+
+    if (!newPassword.trim() || !confirmPassword.trim()) {
+      setPasswordChangeError('Completa ambos campos.')
+      return
+    }
+
+    if (newPassword.trim().length < 8) {
+      setPasswordChangeError('La contraseña debe tener al menos 8 caracteres.')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordChangeError('Las contraseñas no coinciden.')
+      return
+    }
+
+    setIsChangingPassword(true)
+    try {
+      const { user: updatedUser } = await apiChangePassword(newPassword.trim())
+      persistSession(updatedUser, localStorage.getItem('mobeltech_token') ?? '')
+      setNewPassword('')
+      setConfirmPassword('')
+      setPasswordChangeError('')
+      setError('')
+    } catch (err) {
+      setPasswordChangeError(err instanceof Error ? err.message : 'No se pudo cambiar la contraseña')
+    } finally {
+      setIsChangingPassword(false)
+    }
+  }
+
   function renderLoadingState(message: string) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -118,9 +173,84 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     )
   }
 
+  function renderPasswordChangeState() {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-6">
+        <div className="w-full max-w-[440px] rounded-3xl border border-border/70 bg-card/95 p-6 shadow-2xl shadow-black/10">
+          <div className="mb-5 space-y-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+              Cambio obligatorio
+            </div>
+            <h2 className="text-2xl font-semibold text-foreground">Actualiza tu contraseña</h2>
+            <p className="text-sm text-muted-foreground">
+              Tu contraseña es temporal. Debes crear una nueva antes de continuar.
+            </p>
+          </div>
+
+          <div className="mb-5 rounded-2xl border border-border/70 bg-muted/30 p-4">
+            <p className="text-sm font-medium text-foreground">{user?.name}</p>
+            <p className="text-xs text-muted-foreground">{user?.username ?? user?.email}</p>
+          </div>
+
+          <form onSubmit={handlePasswordChange} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground" htmlFor="new-password">
+                Nueva contraseña
+              </label>
+              <input
+                id="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Crea una contraseña nueva"
+                type="password"
+                autoComplete="new-password"
+                className="w-full rounded-lg border border-input bg-card px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/60 transition-colors focus:border-[#eab676] focus:outline-none focus:ring-2 focus:ring-[#eab676]/40"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground" htmlFor="confirm-password">
+                Confirmar contraseña
+              </label>
+              <input
+                id="confirm-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Repite la nueva contraseña"
+                type="password"
+                autoComplete="new-password"
+                className="w-full rounded-lg border border-input bg-card px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/60 transition-colors focus:border-[#eab676] focus:outline-none focus:ring-2 focus:ring-[#eab676]/40"
+              />
+            </div>
+
+            {passwordChangeError ? (
+              <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-500">
+                {passwordChangeError}
+              </div>
+            ) : null}
+
+            <button
+              type="submit"
+              disabled={isChangingPassword}
+              className="w-full rounded-lg py-2.5 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60"
+              style={{
+                background: isChangingPassword ? (isDark ? '#44474e' : '#d4d4d8') : 'linear-gradient(135deg, #eab676 0%, #d4a263 100%)',
+                color: isChangingPassword ? (isDark ? '#9a9da3' : '#71717a') : '#1f1f1f',
+              }}
+            >
+              {isChangingPassword ? 'Guardando...' : 'Cambiar contraseña'}
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
+
   const authContent = !mounted
     ? renderLoadingState('Cargando sesión...')
-    : user && isRedirecting
+    : user?.mustChangePassword
+      ? renderPasswordChangeState()
+      : user && isRedirecting
       ? renderLoadingState('Entrando a MöbelTech...')
       : user
         ? children
@@ -172,12 +302,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground" htmlFor="login-email">Usuario o correo</label>
+              <label className="text-sm font-medium text-foreground" htmlFor="login-email">Username o correo</label>
               <input
                 id="login-email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@mobeltech.com o contratista.demo"
+                placeholder="admin@mobeltech.com o @contratista.demo"
                 type="text"
                 required
                 autoComplete="username"

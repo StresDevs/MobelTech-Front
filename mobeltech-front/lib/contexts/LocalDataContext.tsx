@@ -69,6 +69,7 @@ function parsePrequotations(raw: any[]): Prequotation[] {
     ...p,
     createdAt: p.createdAt ? new Date(p.createdAt) : new Date(),
     updatedAt: p.updatedAt ? new Date(p.updatedAt) : new Date(),
+    uidAssignedAt: p.uidAssignedAt ? new Date(p.uidAssignedAt) : null,
     versions: p.versions ? p.versions.map((v: any) => ({ ...v, uploadedAt: v.uploadedAt ? new Date(v.uploadedAt) : undefined })) : [],
     logs: p.logs ? p.logs.map((l: any) => ({ ...l, performedAt: l.performedAt ? new Date(l.performedAt) : undefined })) : [],
   }));

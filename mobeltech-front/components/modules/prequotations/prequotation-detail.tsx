@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { Prequotation, PrequotationStatus, PrequotationVersion, PrequotationLog } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,7 @@ import {
   Sparkles,
   Eye,
   RotateCcw,
+  Loader2,
 } from 'lucide-react';
 
 const STATUS_CONFIG: Record<
@@ -29,7 +31,7 @@ const STATUS_CONFIG: Record<
   { label: string; color: string; dotColor: string; icon: React.ReactNode }
 > = {
   draft: {
-    label: 'Borrador',
+    label: 'Elaboración',
     color: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
     dotColor: '#a1a1aa',
     icon: <Clock className="w-3.5 h-3.5" />,
@@ -80,11 +82,13 @@ const STATUS_TRANSITIONS: Record<PrequotationStatus, PrequotationStatus[]> = {
 
 const NEXT_STATUS_LABEL: Partial<Record<PrequotationStatus, string>> = {
   'in-review': 'Enviado a cliente',
-  adjustment: 'Solicitar ajuste',
-  confirmed: 'Confirmar',
+  adjustment: 'Cliente solicitó ajuste',
+  confirmed: 'Confirmar y llevar a adelanto',
   rejected: 'Rechazar',
-  draft: 'Volver a borrador',
+  draft: 'Volver a elaboración',
 };
+
+const CLIENT_CONFIRMED_DESCRIPTION = 'Cliente confirmó la precotización para avanzar a cotización.';
 
 function formatDateTime(d: Date) {
   const value = d instanceof Date ? d : new Date(d as any);
@@ -115,6 +119,7 @@ function normalizePrequotationState(raw: any): Prequotation {
     ...raw,
     createdAt: toSafeDate(raw.createdAt) ?? new Date(),
     updatedAt: toSafeDate(raw.updatedAt) ?? new Date(),
+    uidAssignedAt: toSafeDate(raw.uidAssignedAt),
     totalAmount: raw.totalAmount != null ? Number(raw.totalAmount) : undefined,
     advanceAmount: raw.advanceAmount != null ? Number(raw.advanceAmount) : undefined,
     versions: (raw.versions ?? []).map((version: any) => ({
@@ -136,11 +141,13 @@ interface Props {
 }
 
 export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate }: Props) {
+  const router = useRouter();
   const [p, setP] = useState<Prequotation>(prequotation);
   const [comment, setComment] = useState('');
   const [activeTab, setActiveTab] = useState<'versions' | 'history'>('versions');
   const [showConvertConfirm, setShowConvertConfirm] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [statusAction, setStatusAction] = useState<PrequotationStatus | 'client-confirmed' | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const cfg = STATUS_CONFIG[p.status];
@@ -160,6 +167,16 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
     setP((current) => normalizePrequotationState(current));
   }, [prequotation]);
 
+  const hasClientConfirmation = p.status === 'confirmed' || p.logs.some((log) => log.description === CLIENT_CONFIRMED_DESCRIPTION);
+
+  function getStatusDescription(status: PrequotationStatus) {
+    if (status === 'in-review') return 'En revisión por el cliente';
+    if (status === 'adjustment') return 'Cliente solicitó ajuste';
+    if (status === 'confirmed') return p.convertedToQuotationId ? 'Convertida a cotización' : 'Confirmada por cliente';
+    if (status === 'rejected') return 'Rechazada o cancelada';
+    return 'Pendiente de enviar al cliente';
+  }
+
   async function persist(next: Prequotation) {
     if (!apiBase) return next;
     const response = await fetch(`${apiBase}/api/prequotations/${next.id}`, {
@@ -177,17 +194,57 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
     onUpdate(updated);
   }
 
+  function getStatusChangeDescription(newStatus: PrequotationStatus) {
+    if (newStatus === 'in-review') return 'Precotización mandada a cliente para revisión.';
+    if (newStatus === 'adjustment') return 'Cliente solicitó ajuste en la precotización.';
+    if (newStatus === 'rejected') return 'Precotización rechazada.';
+    if (newStatus === 'draft') return 'Precotización devuelta a elaboración.';
+    return `Estado cambiado de ${STATUS_CONFIG[p.status].label} → ${STATUS_CONFIG[newStatus].label}.`;
+  }
+
   function changeStatus(newStatus: PrequotationStatus) {
     const log: PrequotationLog = {
       id: `log-${Date.now()}`,
       action: 'status_changed',
       performedBy: 'Juan Pérez',
       performedAt: new Date(),
-      description: `Estado cambiado de ${STATUS_CONFIG[p.status].label} → ${STATUS_CONFIG[newStatus].label}.`,
+      description: getStatusChangeDescription(newStatus),
     };
     void (async () => {
-      const next = await persist({ ...p, status: newStatus, updatedAt: new Date(), logs: [...p.logs, log] });
-      applyUpdate(next);
+      setStatusAction(newStatus);
+      try {
+        const next = await persist({ ...p, status: newStatus, updatedAt: new Date(), logs: [...p.logs, log] });
+        applyUpdate(next);
+        if (newStatus === 'in-review' || newStatus === 'adjustment') setActiveTab('history');
+      } finally {
+        setStatusAction(null);
+      }
+    })();
+  }
+
+  function markClientConfirmed() {
+    if (hasClientConfirmation) {
+      setShowConvertConfirm(true);
+      return;
+    }
+
+    const log: PrequotationLog = {
+      id: `log-${Date.now()}`,
+      action: 'status_changed',
+      performedBy: 'Juan Pérez',
+      performedAt: new Date(),
+      description: CLIENT_CONFIRMED_DESCRIPTION,
+    };
+
+    void (async () => {
+      setStatusAction('client-confirmed');
+      try {
+        const next = await persist({ ...p, updatedAt: new Date(), logs: [...p.logs, log] });
+        applyUpdate(next);
+        setActiveTab('history');
+      } finally {
+        setStatusAction(null);
+      }
     })();
   }
 
@@ -301,8 +358,12 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
         }
         const body = await apiResp.json();
         const saved = (body.prequotation ?? body) as Prequotation;
-        applyUpdate(saved);
+        const normalized = normalizePrequotationState(saved);
+        applyUpdate(normalized);
         setShowConvertConfirm(false);
+        if (normalized.convertedToQuotationId) {
+          router.push(`/quotations?quotationId=${normalized.convertedToQuotationId}`);
+        }
       } catch (error) {
         setActionError(error instanceof Error ? error.message : 'No se pudo confirmar la precotización');
       } finally {
@@ -343,6 +404,9 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             {clientName} · Creado por {p.createdBy} el {formatDate(p.createdAt)} · v{p.currentVersion} activa
+          </p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            UID {p.uid ?? 'pendiente'}{p.uidAssignedAt ? ` · Asignado el ${formatDate(p.uidAssignedAt)}` : ''}
           </p>
           {typeof p.totalAmount === 'number' && (
             <p className="text-sm font-medium mt-1">Monto total: Bs {p.totalAmount.toLocaleString('es-BO', { minimumFractionDigits: 2 })}</p>
@@ -395,22 +459,49 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
             {transitions.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-border">
                 <p className="text-xs text-muted-foreground w-full">Acciones disponibles:</p>
-                {transitions.map((s) => (
+                {transitions
+                  .filter((s) => s !== 'confirmed')
+                  .map((s) => {
+                    const isLoading = statusAction === s;
+                    return (
+                      <Button
+                        key={s}
+                        size="sm"
+                        variant="outline"
+                        disabled={!!statusAction || confirming}
+                        onClick={() => changeStatus(s)}
+                        className={`gap-1.5 text-xs ${s === 'rejected' ? 'text-red-500 border-red-200 hover:bg-red-50' : ''}`}
+                      >
+                        {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : STATUS_CONFIG[s].icon}
+                        {isLoading ? 'Actualizando...' : NEXT_STATUS_LABEL[s]}
+                      </Button>
+                    );
+                  })}
+                {(p.status === 'in-review' || p.status === 'adjustment') && !p.convertedToQuotationId && (
                   <Button
-                    key={s}
                     size="sm"
-                    variant={s === 'confirmed' ? 'default' : 'outline'}
-                    onClick={() => (s === 'confirmed' ? setShowConvertConfirm(true) : changeStatus(s))}
-                    className={`gap-1.5 text-xs ${s === 'confirmed' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''} ${s === 'rejected' ? 'text-red-500 border-red-200 hover:bg-red-50' : ''}`}
+                    variant={hasClientConfirmation ? 'default' : 'outline'}
+                    disabled={!!statusAction || confirming}
+                    onClick={markClientConfirmed}
+                    className={`gap-1.5 text-xs ${hasClientConfirmation ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}
                   >
-                    {STATUS_CONFIG[s].icon}
-                    {NEXT_STATUS_LABEL[s]}
+                    {statusAction === 'client-confirmed' ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    )}
+                    {statusAction === 'client-confirmed'
+                      ? 'Registrando...'
+                      : hasClientConfirmation
+                      ? 'Confirmar y llevar a adelanto'
+                      : 'Confirmado por cliente'}
                   </Button>
-                ))}
+                )}
                 {p.status === 'confirmed' && !p.convertedToQuotationId && (
                   <Button
                     size="sm"
                     onClick={() => setShowConvertConfirm(true)}
+                    disabled={!hasClientConfirmation || confirming}
                     className="gap-1.5 text-xs"
                     style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
                   >
@@ -619,6 +710,14 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
                 <p className="text-sm font-medium mt-0.5">v{p.currentVersion}</p>
               </div>
               <div>
+                <p className="text-xs text-muted-foreground">UID</p>
+                <p className="text-sm font-medium mt-0.5">{p.uid ?? 'Pendiente de asignación'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Estado del cliente</p>
+                <p className="text-sm font-medium mt-0.5">{getStatusDescription(p.status)}</p>
+              </div>
+              <div>
                 <p className="text-xs text-muted-foreground">Monto de la precotización</p>
                 <p className="text-sm font-medium mt-0.5">
                   Bs {Number(p.totalAmount ?? 0).toLocaleString('es-BO', { minimumFractionDigits: 2 })}
@@ -699,11 +798,16 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
 
             <div className="grid gap-5 md:grid-cols-[minmax(0,1.2fr)_minmax(240px,0.8fr)]">
               <div className="space-y-4">
-              {actionError && (
-                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {actionError}
-                </div>
-              )}
+                {actionError && (
+                  <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {actionError}
+                  </div>
+                )}
+                {!hasClientConfirmation && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    Primero registra que el cliente confirmó la precotización.
+                  </div>
+                )}
                 <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-4">
                   <label className="text-sm font-medium">Anticipo requerido para confirmar</label>
                   <input
@@ -745,7 +849,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
               <Button
                 size="sm"
                 onClick={handleConvertAndAssign}
-                disabled={confirming}
+                disabled={confirming || !hasClientConfirmation}
                 style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
               >
                 {confirming ? 'Confirmando...' : 'Confirmar precotización'}

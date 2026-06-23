@@ -1387,6 +1387,8 @@ export function getInstallmentAlerts(referenceDate: Date = new Date()) {
 export const PREQUOTATIONS: Prequotation[] = [
   {
     id: 'preq-1',
+    uid: '10042026A',
+    uidAssignedAt: new Date('2026-04-11T10:00:00'),
     clientId: 'client-1',
     measurementId: 'meas-1',
     title: 'Muebles oficina – Empresa García S.A.',
@@ -1430,6 +1432,8 @@ export const PREQUOTATIONS: Prequotation[] = [
   },
   {
     id: 'preq-2',
+    uid: '05042026A',
+    uidAssignedAt: new Date('2026-04-05T16:00:00'),
     clientId: 'client-2',
     title: 'Recepción y sala de espera – Oficinas López',
     status: 'confirmed',
