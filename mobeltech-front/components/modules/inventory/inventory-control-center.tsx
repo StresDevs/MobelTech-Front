@@ -1,7 +1,8 @@
 'use client';
 
 import Image from 'next/image';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { jsPDF } from 'jspdf';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { CURRENCY_FORMAT } from '@/lib/constants';
 import { Badge } from '@/components/ui/badge';
@@ -19,9 +20,13 @@ import {
   AlertTriangle,
   ArrowLeftRight,
   Boxes,
+  Camera,
   ClipboardList,
-  ChevronDown,
+  Download,
   FileText,
+  ImageIcon,
+  Link as LinkIcon,
+  Minus,
   Package,
   Pencil,
   Plus,
@@ -102,6 +107,7 @@ type DefectAlertRecord = {
 type ReturnClaimRecord = {
   id: string;
   purchaseOrderRef: string;
+  supplierId?: string | null;
   materialId: string;
   reason: string;
   status: ClaimStatus;
@@ -140,10 +146,17 @@ type WarehouseRecord = {
   status: string;
 };
 
+type ContractorRecord = {
+  id: string;
+  name: string;
+  userId?: string | null;
+};
+
 type InventoryOverview = {
   suppliers: SupplierRecord[];
   materials: MaterialRecord[];
   warehouses: WarehouseRecord[];
+  contractors: ContractorRecord[];
   requests: MaterialRequestRecord[];
   defects: DefectAlertRecord[];
   claims: ReturnClaimRecord[];
@@ -157,6 +170,7 @@ const EMPTY_OVERVIEW: InventoryOverview = {
   suppliers: [],
   materials: [],
   warehouses: [],
+  contractors: [],
   requests: [],
   defects: [],
   claims: [],
@@ -187,6 +201,10 @@ function getValidationMessage(body: { error?: string; details?: Record<string, s
   return firstDetail || body?.error || fallback;
 }
 
+function getSuggestionKey(reason: 'request' | 'stock', materialId: string) {
+  return `${reason}:${materialId}`;
+}
+
 function readImageAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -206,6 +224,7 @@ function getSupplierScore(supplier: SupplierRecord) {
 export function InventoryControlCenter() {
   const { user } = useAuth();
   const isReadOnly = user?.role === 'partner';
+  const isWarehouseRole = ['warehouse', 'almacenero'].includes(user?.role ?? '');
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -216,7 +235,9 @@ export function InventoryControlCenter() {
   const [supplierSearch, setSupplierSearch] = useState('');
   const [materialSearch, setMaterialSearch] = useState('');
   const [globalOrderSearch, setGlobalOrderSearch] = useState('');
-  const [stockOrderSearch, setStockOrderSearch] = useState('');
+  const [defectMaterialSearch, setDefectMaterialSearch] = useState('');
+  const [claimMaterialSearch, setClaimMaterialSearch] = useState('');
+  const [claimSupplierSearch, setClaimSupplierSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterWarehouse, setFilterWarehouse] = useState('all');
 
@@ -225,9 +246,32 @@ export function InventoryControlCenter() {
   const [addItemOpen, setAddItemOpen] = useState(false);
   const [editItemOpen, setEditItemOpen] = useState(false);
   const [editDraft, setEditDraft] = useState<MaterialRecord | null>(null);
-  const [expandedLocationId, setExpandedLocationId] = useState<string | null>(null);
+  const [showInlineSupplierForm, setShowInlineSupplierForm] = useState(false);
+  const [materialImageLink, setMaterialImageLink] = useState('');
+  const [editImageLink, setEditImageLink] = useState('');
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<string[]>([]);
+  const [newPurchaseOrderOpen, setNewPurchaseOrderOpen] = useState(false);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
+  const [acceptedGlobalOrders, setAcceptedGlobalOrders] = useState<PurchaseOrderRecord[]>([]);
+  const [manualOrderDraft, setManualOrderDraft] = useState({
+    supplierId: '',
+    materialId: '',
+    quantity: '1',
+    unitPriceBs: '0',
+    totalPriceBs: '',
+    notes: '',
+  });
 
   const [supplierDraft, setSupplierDraft] = useState({
+    name: '',
+    nit: '',
+    phone: '',
+    email: '',
+    address: '',
+    supplierType: 'Madera',
+  });
+
+  const [inlineSupplierDraft, setInlineSupplierDraft] = useState({
     name: '',
     nit: '',
     phone: '',
@@ -257,6 +301,7 @@ export function InventoryControlCenter() {
   });
 
   const [claimDraft, setClaimDraft] = useState({
+    supplierId: '',
     purchaseOrderRef: '',
     materialId: '',
     reason: '',
@@ -315,11 +360,16 @@ export function InventoryControlCenter() {
   const suppliers = overview.suppliers;
   const materials = overview.materials;
   const warehouses = overview.warehouses;
+  const contractors = overview.contractors;
   const requests = overview.requests;
   const defectAlerts = overview.defects;
   const returnClaims = overview.claims;
   const surplus = overview.surplus;
   const purchaseOrders = overview.purchaseOrders;
+  const visiblePurchaseOrders = useMemo(
+    () => [...acceptedGlobalOrders, ...purchaseOrders],
+    [acceptedGlobalOrders, purchaseOrders],
+  );
 
   const supplierRanking = useMemo(
     () => [...suppliers].sort((a, b) => getSupplierScore(b) - getSupplierScore(a)),
@@ -358,22 +408,68 @@ export function InventoryControlCenter() {
   );
 
   const globalOrderSuggestions = useMemo(() => {
-    const approvedRequests = requests.filter((request) => request.status === 'approved');
-    const grouped = new Map<string, { supplierId: string; materialId: string; quantity: number }>();
+    const grouped = new Map<string, {
+      supplierId: string;
+      materialId: string;
+      quantity: number;
+      requestedQuantity: number;
+      availableQuantity: number;
+      contractorIds: string[];
+      requestIds: string[];
+      reason: 'request';
+    }>();
 
-    for (const request of approvedRequests) {
+    for (const request of requests) {
       for (const item of request.items) {
         const material = materials.find((entry) => entry.id === item.materialId);
         if (!material) continue;
+        const available = Math.max(0, getAvailableStock(material));
+        const missingQuantity = Math.max(0, item.quantity - available);
+        if (missingQuantity <= 0) continue;
+
         const key = `${material.supplierId}-${material.id}`;
         const current = grouped.get(key);
-        if (current) current.quantity += item.quantity;
-        else grouped.set(key, { supplierId: material.supplierId, materialId: material.id, quantity: item.quantity });
+        if (current) {
+          current.quantity += missingQuantity;
+          current.requestedQuantity += item.quantity;
+          current.availableQuantity = Math.min(current.availableQuantity, available);
+          if (!current.contractorIds.includes(request.contractorId)) current.contractorIds.push(request.contractorId);
+          current.requestIds.push(request.id);
+        } else {
+          grouped.set(key, {
+            supplierId: material.supplierId,
+            materialId: material.id,
+            quantity: missingQuantity,
+            requestedQuantity: item.quantity,
+            availableQuantity: available,
+            contractorIds: [request.contractorId],
+            requestIds: [request.id],
+            reason: 'request',
+          });
+        }
       }
     }
 
-    return Array.from(grouped.values());
-  }, [materials, requests]);
+    return Array.from(grouped.values()).filter((entry) => !dismissedSuggestions.includes(getSuggestionKey(entry.reason, entry.materialId)));
+  }, [dismissedSuggestions, materials, requests]);
+
+  const stockOrderSuggestions = useMemo(
+    () =>
+      stockAlerts
+        .map((alert) => {
+          const material = materials.find((entry) => entry.id === alert.materialId);
+          if (!material) return null;
+          return {
+            supplierId: material.supplierId,
+            materialId: alert.materialId,
+            quantity: alert.suggestedQty,
+            reason: 'stock' as const,
+          };
+        })
+        .filter((entry): entry is { supplierId: string; materialId: string; quantity: number; reason: 'stock' } => Boolean(entry))
+        .filter((entry) => !dismissedSuggestions.includes(getSuggestionKey(entry.reason, entry.materialId))),
+    [dismissedSuggestions, materials, stockAlerts],
+  );
 
   const selectedMaterial = useMemo(
     () => materials.find((entry) => entry.id === selectedMaterialId) ?? null,
@@ -386,6 +482,16 @@ export function InventoryControlCenter() {
 
   function getSupplierName(supplierId: string) {
     return suppliers.find((entry) => entry.id === supplierId)?.name ?? 'Proveedor no encontrado';
+  }
+
+  function getContractorName(contractorId: string) {
+    return contractors.find((entry) => entry.id === contractorId || entry.userId === contractorId)?.name ?? `Contratista ${contractorId.slice(0, 8)}`;
+  }
+
+  function getDefectiveQuantity(materialId: string) {
+    return defectAlerts
+      .filter((alert) => alert.materialId === materialId && alert.status !== 'resuelto')
+      .reduce((sum, alert) => sum + alert.affectedQuantity, 0);
   }
 
   function getCurrentPriceBs(material: MaterialRecord) {
@@ -418,16 +524,21 @@ export function InventoryControlCenter() {
     }
   }
 
-  async function handleSupplierCreate() {
+  async function createSupplier(draft: typeof supplierDraft) {
     const created = await performMutation(
       fetch(`${apiBase}/api/inventory/suppliers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(supplierDraft),
+        body: JSON.stringify(draft),
       }),
       'No se pudo registrar el proveedor.',
     );
 
+    return created as SupplierRecord | null;
+  }
+
+  async function handleSupplierCreate() {
+    const created = await createSupplier(supplierDraft);
     if (!created) return;
 
     setSupplierDraft({
@@ -438,6 +549,23 @@ export function InventoryControlCenter() {
       address: '',
       supplierType: 'Madera',
     });
+    await loadOverview();
+  }
+
+  async function handleInlineSupplierCreate() {
+    const created = await createSupplier(inlineSupplierDraft);
+    if (!created) return;
+
+    setInlineSupplierDraft({
+      name: '',
+      nit: '',
+      phone: '',
+      email: '',
+      address: '',
+      supplierType: 'Madera',
+    });
+    setShowInlineSupplierForm(false);
+    setMaterialDraft((current) => ({ ...current, supplierId: created.id }));
     await loadOverview();
   }
 
@@ -458,16 +586,14 @@ export function InventoryControlCenter() {
       setError('La ubicación es obligatoria.');
       return;
     }
-    if (!materialDraft.purchaseDate) {
-      setError('La fecha de compra es obligatoria.');
-      return;
-    }
-
     const created = await performMutation(
       fetch(`${apiBase}/api/inventory/materials`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(materialDraft),
+        body: JSON.stringify({
+          ...materialDraft,
+          purchaseDate: undefined,
+        }),
       }),
       'No se pudo crear el material.',
     );
@@ -485,6 +611,7 @@ export function InventoryControlCenter() {
       imageUrl: '',
       purchaseDate: toIsoDate(),
     }));
+    setMaterialImageLink('');
     await loadOverview();
   }
 
@@ -502,6 +629,7 @@ export function InventoryControlCenter() {
     try {
       const imageUrl = await readImageAsDataUrl(file);
       setMaterialDraft((current) => ({ ...current, imageUrl }));
+      setMaterialImageLink('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar la imagen.');
     }
@@ -521,6 +649,7 @@ export function InventoryControlCenter() {
     try {
       const imageUrl = await readImageAsDataUrl(file);
       setEditDraft((current) => current ? { ...current, imageUrl } : current);
+      setEditImageLink('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar la imagen.');
     }
@@ -528,6 +657,7 @@ export function InventoryControlCenter() {
 
   function handleEditOpen(material: MaterialRecord) {
     setEditDraft({ ...material });
+    setEditImageLink(material.imageUrl?.startsWith('data:') ? '' : material.imageUrl || '');
     setEditItemOpen(true);
   }
 
@@ -627,7 +757,7 @@ export function InventoryControlCenter() {
     );
 
     if (!created) return;
-    setClaimDraft((current) => ({ ...current, purchaseOrderRef: '', reason: '' }));
+    setClaimDraft((current) => ({ ...current, purchaseOrderRef: '', supplierId: '', reason: '' }));
     await loadOverview();
   }
 
@@ -682,42 +812,135 @@ export function InventoryControlCenter() {
     await loadOverview();
   }
 
-  function handleGenerateGlobalOrder() {
-    if (globalOrderSuggestions.length === 0) return;
-
-    const groupedBySupplier = new Map<string, Array<{ materialName: string; quantity: number; estimatedCost: number }>>();
-
-    for (const suggestion of globalOrderSuggestions) {
-      const material = materials.find((entry) => entry.id === suggestion.materialId);
-      if (!material) continue;
-      const current = groupedBySupplier.get(suggestion.supplierId) ?? [];
-      current.push({
-        materialName: material.name,
-        quantity: suggestion.quantity,
-        estimatedCost: suggestion.quantity * getCurrentPriceBs(material),
-      });
-      groupedBySupplier.set(suggestion.supplierId, current);
-    }
-
-    const lines = Array.from(groupedBySupplier.entries()).map(([supplierId, entries]) => {
-      const total = entries.reduce((sum, entry) => sum + entry.estimatedCost, 0);
-      return `${getSupplierName(supplierId)}: ${entries.length} item(s) - ${formatBs(total)}`;
-    });
-
-    window.alert(`Orden global sugerida:\n\n${lines.join('\n')}`);
+  function getManualOrderTotal() {
+    const explicitTotal = Number(manualOrderDraft.totalPriceBs);
+    if (Number.isFinite(explicitTotal) && explicitTotal > 0) return explicitTotal;
+    return Math.max(0, Number(manualOrderDraft.quantity) || 0) * Math.max(0, Number(manualOrderDraft.unitPriceBs) || 0);
   }
 
-  function handleGenerateStockOrder() {
-    if (stockAlerts.length === 0) return;
-    const lines = stockAlerts
-      .map((alert) => {
-        const material = materials.find((entry) => entry.id === alert.materialId);
-        if (!material) return null;
-        return `${material.name}: sugerido ${alert.suggestedQty} ${material.unit} - proveedor ${getSupplierName(material.supplierId)}`;
-      })
-      .filter(Boolean);
+  function handleAcceptGlobalOrder() {
+    const rows = [...globalOrderSuggestions, ...stockOrderSuggestions];
+    if (rows.length === 0) return;
 
-    window.alert(`Reabastecimiento sugerido:\n\n${lines.join('\n')}`);
+    const primarySupplierId = rows[0]?.supplierId || suppliers[0]?.id || '';
+    const acceptedOrder: PurchaseOrderRecord = {
+      id: `local-global-${Date.now()}`,
+      supplierId: primarySupplierId,
+      referenceCode: `GLOBAL-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(visiblePurchaseOrders.length + 1).padStart(2, '0')}`,
+      status: 'accepted',
+      requestedBy: user?.name ?? 'Administración',
+      notes: 'Orden global aceptada desde faltantes de contratistas y bajo stock.',
+      orderedAt: new Date().toISOString(),
+      items: rows.map((item) => {
+        const material = materials.find((entry) => entry.id === item.materialId);
+        const unitPriceBs = material ? getCurrentPriceBs(material) : 0;
+        return {
+          materialId: item.materialId,
+          quantity: item.quantity,
+          unitPriceBs,
+          receivedQuantity: 0,
+        };
+      }),
+    };
+
+    setAcceptedGlobalOrders((current) => [acceptedOrder, ...current]);
+    setDismissedSuggestions((current) => [
+      ...current,
+      ...rows.map((item) => getSuggestionKey(item.reason, item.materialId)),
+    ]);
+  }
+
+  function downloadGlobalOrderPdf(order: PurchaseOrderRecord) {
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text(`Orden global ${order.referenceCode}`, 14, 18);
+    doc.setFontSize(10);
+    doc.text(`Estado: ${order.status}`, 14, 28);
+    doc.text(`Generada: ${new Date(order.orderedAt).toLocaleString('es-BO')}`, 14, 35);
+    let y = 48;
+
+    order.items.forEach((item, index) => {
+      const material = materials.find((entry) => entry.id === item.materialId);
+      if (!material) return;
+      doc.setFontSize(11);
+      doc.text(`${index + 1}. ${material.name}`, 14, y);
+      y += 6;
+      doc.setFontSize(9);
+      doc.text(`Cantidad: ${item.quantity} ${material.unit} | Precio ref.: ${formatBs(item.unitPriceBs)}`, 18, y);
+      y += 8;
+      if (y > 270) {
+        doc.addPage();
+        y = 18;
+      }
+    });
+
+    const total = order.items.reduce((sum, item) => sum + item.quantity * item.unitPriceBs, 0);
+    doc.setFontSize(12);
+    doc.text(`Total referencial: ${formatBs(total)}`, 14, y + 4);
+    doc.save(`orden-global-${order.referenceCode}.pdf`);
+  }
+
+  function handleDownloadReceiptPdf() {
+    if (receiptFiles.length === 0) return;
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text('Constancia de orden global', 14, 18);
+    doc.setFontSize(10);
+    doc.text(`Archivos cargados: ${receiptFiles.length}`, 14, 28);
+    receiptFiles.forEach((file, index) => {
+      const y = 42 + index * 10;
+      if (y > 270) {
+        doc.addPage();
+        doc.text(`${index + 1}. ${file.name}`, 14, 20);
+      } else {
+        doc.text(`${index + 1}. ${file.name} (${Math.round(file.size / 1024)} KB)`, 14, y);
+      }
+    });
+    doc.save(`constancia-orden-global-${new Date().toISOString().slice(0, 10)}.pdf`);
+  }
+
+  function handleRegisterManualOrder() {
+    const material = materials.find((entry) => entry.id === manualOrderDraft.materialId);
+    if (!manualOrderDraft.supplierId || !material) {
+      setError('Selecciona proveedor e ítem para registrar la orden.');
+      return;
+    }
+
+    window.alert(
+      `Orden de compra preparada:\n\nProveedor: ${getSupplierName(manualOrderDraft.supplierId)}\nÍtem: ${material.name}\nCantidad: ${manualOrderDraft.quantity}\nTotal: ${formatBs(getManualOrderTotal())}`,
+    );
+    setNewPurchaseOrderOpen(false);
+    setManualOrderDraft({
+      supplierId: '',
+      materialId: '',
+      quantity: '1',
+      unitPriceBs: '0',
+      totalPriceBs: '',
+      notes: '',
+    });
+  }
+
+  function downloadPurchaseOrderPdf(order: PurchaseOrderRecord, supplierName: string, total: number) {
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text(`Orden de compra ${order.referenceCode}`, 14, 18);
+    doc.setFontSize(10);
+    doc.text(`Proveedor: ${supplierName}`, 14, 28);
+    doc.text(`Estado: ${order.status}`, 14, 35);
+    doc.text(`Fecha: ${new Date(order.orderedAt).toLocaleDateString('es-BO')}`, 14, 42);
+    let y = 56;
+    order.items.forEach((item, index) => {
+      const material = materials.find((entry) => entry.id === item.materialId);
+      doc.text(`${index + 1}. ${material?.name ?? 'Material'} - ${item.quantity} x ${formatBs(item.unitPriceBs)}`, 14, y);
+      y += 7;
+      if (y > 270) {
+        doc.addPage();
+        y = 18;
+      }
+    });
+    doc.setFontSize(12);
+    doc.text(`Total: ${formatBs(total)}`, 14, y + 6);
+    doc.save(`orden-compra-${order.referenceCode}.pdf`);
   }
 
   if (loading) {
@@ -726,6 +949,15 @@ export function InventoryControlCenter() {
         title="Cargando inventario"
         description="Sincronizando materiales, proveedores, stock y trazabilidad..."
       />
+    );
+  }
+
+  if (isWarehouseRole) {
+    return (
+      <Card className="border-amber-200 bg-amber-50 p-6 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+        <h2 className="text-lg font-semibold">Inventario no disponible</h2>
+        <p className="mt-2 text-sm">El rol almacenero no tiene permisos para ver esta sección.</p>
+      </Card>
     );
   }
 
@@ -759,6 +991,23 @@ export function InventoryControlCenter() {
         </Card>
       ) : null}
 
+      <datalist id="inventory-category-options">
+        {allCategories.map((category) => (
+          <option key={category} value={category} />
+        ))}
+        {['Materia prima', 'Herrajes', 'Telas', 'Insumos', 'Muebles', 'Equipos y Herramientas'].map((category) => (
+          <option key={`default-${category}`} value={category} />
+        ))}
+      </datalist>
+      <datalist id="supplier-type-options">
+        {Array.from(new Set(suppliers.map((supplier) => supplier.supplierType).filter(Boolean))).map((type) => (
+          <option key={type} value={type} />
+        ))}
+        {['Madera', 'Telas', 'Herrajes', 'Insumos'].map((type) => (
+          <option key={`default-${type}`} value={type} />
+        ))}
+      </datalist>
+
       <Tabs defaultValue="proveedores" className="w-full">
         <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-2xl bg-muted/60 p-2 md:grid-cols-4 xl:grid-cols-7">
           <TabsTrigger value="proveedores" className="gap-1 text-xs"><Store className="h-4 w-4" />Proveedores</TabsTrigger>
@@ -783,15 +1032,12 @@ export function InventoryControlCenter() {
                 <Input placeholder="Teléfono" value={supplierDraft.phone} onChange={(event) => setSupplierDraft((current) => ({ ...current, phone: event.target.value }))} />
                 <Input placeholder="Email" value={supplierDraft.email} onChange={(event) => setSupplierDraft((current) => ({ ...current, email: event.target.value }))} />
                 <Input placeholder="Dirección" value={supplierDraft.address} onChange={(event) => setSupplierDraft((current) => ({ ...current, address: event.target.value }))} />
-                <Select value={supplierDraft.supplierType} onValueChange={(value) => setSupplierDraft((current) => ({ ...current, supplierType: value }))}>
-                  <SelectTrigger><SelectValue placeholder="Tipo" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Madera">Madera</SelectItem>
-                    <SelectItem value="Telas">Telas</SelectItem>
-                    <SelectItem value="Herrajes">Herrajes</SelectItem>
-                    <SelectItem value="Insumos">Insumos</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Input
+                  placeholder="Categoría del proveedor"
+                  value={supplierDraft.supplierType}
+                  onChange={(event) => setSupplierDraft((current) => ({ ...current, supplierType: event.target.value }))}
+                  list="supplier-type-options"
+                />
                 <div className="flex justify-end xl:col-span-3">
                   <Button onClick={() => void handleSupplierCreate()} disabled={saving} style={{ backgroundColor: '#d6a85a', color: '#1f1f1f' }}>
                     {saving ? 'Guardando...' : 'Registrar proveedor'}
@@ -860,30 +1106,46 @@ export function InventoryControlCenter() {
                 </DialogHeader>
                 <div className="grid gap-4 pt-2 md:grid-cols-2">
                   <Field label="Nombre"><Input value={materialDraft.name} onChange={(event) => setMaterialDraft((current) => ({ ...current, name: event.target.value }))} /></Field>
-                  <Field label="Código"><Input value={materialDraft.sku} onChange={(event) => setMaterialDraft((current) => ({ ...current, sku: event.target.value }))} placeholder="Auto si lo dejas vacío" /></Field>
+                  <Field label="Código manual"><Input value={materialDraft.sku} onChange={(event) => setMaterialDraft((current) => ({ ...current, sku: event.target.value }))} placeholder="Ej. MEL-BLANCO-18" /></Field>
                   <Field label="Categoría">
-                    <Select value={materialDraft.category} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, category: value }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Materia prima">Materia prima</SelectItem>
-                        <SelectItem value="Herrajes">Herrajes</SelectItem>
-                        <SelectItem value="Telas">Telas</SelectItem>
-                        <SelectItem value="Insumos">Insumos</SelectItem>
-                        <SelectItem value="Muebles">Muebles</SelectItem>
-                        <SelectItem value="Equipos y Herramientas">Equipos y Herramientas</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      value={materialDraft.category}
+                      onChange={(event) => setMaterialDraft((current) => ({ ...current, category: event.target.value }))}
+                      placeholder="Materia prima, Herrajes..."
+                      list="inventory-category-options"
+                    />
                   </Field>
                   <Field label="Proveedor">
-                    <Select value={materialDraft.supplierId} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, supplierId: value }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {suppliers.map((supplier) => (
-                          <SelectItem key={supplier.id} value={supplier.id}>{supplier.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex gap-2">
+                      <Select value={materialDraft.supplierId} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, supplierId: value }))}>
+                        <SelectTrigger><SelectValue placeholder="Selecciona proveedor" /></SelectTrigger>
+                        <SelectContent>
+                          {suppliers.map((supplier) => (
+                            <SelectItem key={supplier.id} value={supplier.id}>{supplier.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button type="button" variant="outline" size="icon" onClick={() => setShowInlineSupplierForm((current) => !current)}>
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </Field>
+                  {showInlineSupplierForm ? (
+                    <div className="grid gap-3 rounded-xl border border-[#d6a85a]/40 bg-[#d6a85a]/10 p-3 md:col-span-2 md:grid-cols-3">
+                      <Input placeholder="Nombre proveedor" value={inlineSupplierDraft.name} onChange={(event) => setInlineSupplierDraft((current) => ({ ...current, name: event.target.value }))} />
+                      <Input placeholder="NIT" value={inlineSupplierDraft.nit} onChange={(event) => setInlineSupplierDraft((current) => ({ ...current, nit: event.target.value }))} />
+                      <Input placeholder="Teléfono" value={inlineSupplierDraft.phone} onChange={(event) => setInlineSupplierDraft((current) => ({ ...current, phone: event.target.value }))} />
+                      <Input placeholder="Email" value={inlineSupplierDraft.email} onChange={(event) => setInlineSupplierDraft((current) => ({ ...current, email: event.target.value }))} />
+                      <Input placeholder="Dirección" value={inlineSupplierDraft.address} onChange={(event) => setInlineSupplierDraft((current) => ({ ...current, address: event.target.value }))} />
+                      <Input placeholder="Categoría" value={inlineSupplierDraft.supplierType} onChange={(event) => setInlineSupplierDraft((current) => ({ ...current, supplierType: event.target.value }))} list="supplier-type-options" />
+                      <div className="flex justify-end gap-2 md:col-span-3">
+                        <Button type="button" variant="ghost" onClick={() => setShowInlineSupplierForm(false)}>Cancelar</Button>
+                        <Button type="button" onClick={() => void handleInlineSupplierCreate()} disabled={saving} style={{ backgroundColor: '#d6a85a', color: '#1f1f1f' }}>
+                          Crear y seleccionar
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
                   <Field label="Unidad"><Input value={materialDraft.unit} onChange={(event) => setMaterialDraft((current) => ({ ...current, unit: event.target.value }))} /></Field>
                   <Field label="Ubicación">
                     <Select value={materialDraft.warehouse} onValueChange={(value) => setMaterialDraft((current) => ({ ...current, warehouse: value }))}>
@@ -896,21 +1158,40 @@ export function InventoryControlCenter() {
                     </Select>
                   </Field>
                   <Field label="Precio de compra (Bs.)"><Input type="number" min={0} value={materialDraft.purchasePriceBs} onChange={(event) => setMaterialDraft((current) => ({ ...current, purchasePriceBs: event.target.value }))} /></Field>
-                  <Field label="Fecha de compra"><Input type="date" value={materialDraft.purchaseDate} onChange={(event) => setMaterialDraft((current) => ({ ...current, purchaseDate: event.target.value }))} /></Field>
                   <Field label="Stock inicial"><Input type="number" min={0} value={materialDraft.initialStock} onChange={(event) => setMaterialDraft((current) => ({ ...current, initialStock: event.target.value }))} /></Field>
                   <Field label="Stock mínimo"><Input type="number" min={0} value={materialDraft.minStock} onChange={(event) => setMaterialDraft((current) => ({ ...current, minStock: event.target.value }))} /></Field>
-                  <div className="grid gap-3 rounded-xl border border-border/70 bg-muted/20 p-3 md:col-span-2 md:grid-cols-[160px_1fr]">
-                    <div className="relative h-28 overflow-hidden rounded-lg border bg-background">
+                  <div className="grid gap-4 rounded-2xl border border-border/70 bg-muted/20 p-3 md:col-span-2 md:grid-cols-[170px_1fr]">
+                    <div className="relative h-32 overflow-hidden rounded-xl border bg-background">
                       <Image src={materialDraft.imageUrl || makeMockImage(materialDraft.name || 'Material')} alt="Vista previa del material" fill className="object-cover" unoptimized />
                     </div>
                     <div className="space-y-3">
-                      <Field label="Subir imagen">
-                        <Input type="file" accept="image/*" onChange={(event) => void handleMaterialImageUpload(event.target.files?.[0])} />
-                      </Field>
-                      <Field label="O pegar URL de imagen">
-                        <Input value={materialDraft.imageUrl} onChange={(event) => setMaterialDraft((current) => ({ ...current, imageUrl: event.target.value }))} placeholder="https://... o imagen cargada" />
-                      </Field>
-                      <p className="text-xs text-muted-foreground">Formatos de imagen comunes. Máximo recomendado: 3MB.</p>
+                      <div>
+                        <p className="text-sm font-medium">Imagen del ítem</p>
+                        <p className="text-xs text-muted-foreground">Carga desde galería, cámara móvil o pega un enlace. Máximo recomendado: 3MB.</p>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <ImagePicker label="Galería" icon={<ImageIcon className="h-4 w-4" />} onChange={(file) => void handleMaterialImageUpload(file)} />
+                        <ImagePicker label="Cámara" icon={<Camera className="h-4 w-4" />} capture onChange={(file) => void handleMaterialImageUpload(file)} />
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <LinkIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            value={materialImageLink}
+                            onChange={(event) => setMaterialImageLink(event.target.value)}
+                            placeholder="Pegar enlace de imagen"
+                            className="pl-9"
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setMaterialDraft((current) => ({ ...current, imageUrl: materialImageLink.trim() }))}
+                          disabled={!materialImageLink.trim()}
+                        >
+                          Usar
+                        </Button>
+                      </div>
                     </div>
                   </div>
                   <div className="md:col-span-2 flex justify-end gap-2">
@@ -959,7 +1240,7 @@ export function InventoryControlCenter() {
                     <TableHead>Categoría</TableHead>
                     <TableHead>Und</TableHead>
                     <TableHead>Stock disp.</TableHead>
-                  <TableHead>Valor USD</TableHead>
+                  <TableHead>Valor / ubicación</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
@@ -972,9 +1253,9 @@ export function InventoryControlCenter() {
                   filteredMaterials.map((material) => {
                     const available = getAvailableStock(material);
                     const lowStock = available < material.minStock;
+                    const defectiveQuantity = getDefectiveQuantity(material.id);
                     return (
-                      <Fragment key={material.id}>
-                        <TableRow>
+                        <TableRow key={material.id}>
                           <TableCell>
                             <div className="flex items-center gap-3">
                               <div className="group relative h-11 w-11 overflow-visible rounded-xl border bg-muted">
@@ -999,32 +1280,33 @@ export function InventoryControlCenter() {
                                 </div>
                               </div>
                               <div>
-                                <p className="font-mono text-xs text-muted-foreground">{material.sku}</p>
-                                <p className="font-medium">{material.name}</p>
+                                <p className="font-mono text-xs text-muted-foreground">{material.sku || 'Sin código'}</p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-medium">{material.name}</p>
+                                  {defectiveQuantity > 0 ? (
+                                    <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100">
+                                      {defectiveQuantity} dañados
+                                    </Badge>
+                                  ) : null}
+                                </div>
                               </div>
                             </div>
                           </TableCell>
                           <TableCell><Badge variant="outline">{material.category}</Badge></TableCell>
                           <TableCell>{material.unit}</TableCell>
                           <TableCell className={lowStock ? 'font-semibold text-rose-600' : 'font-semibold text-emerald-700'}>{available}</TableCell>
-                          <TableCell>${getCurrentPriceUsd(material).toFixed(2)}</TableCell>
+                          <TableCell>
+                            <p className="font-semibold">${getCurrentPriceUsd(material).toFixed(2)}</p>
+                            <p className="text-xs text-muted-foreground">{material.warehouse || 'Sin ubicación'}</p>
+                          </TableCell>
                           <TableCell>
                             <div className="flex justify-end gap-1">
-                              <Button variant="ghost" size="icon" onClick={() => setExpandedLocationId((current) => current === material.id ? null : material.id)}><ChevronDown className={`h-4 w-4 transition-transform ${expandedLocationId === material.id ? 'rotate-180' : ''}`} /></Button>
                               {!isReadOnly ? <Button variant="ghost" size="icon" onClick={() => handleEditOpen(material)}><Pencil className="h-4 w-4" /></Button> : null}
                               <Button variant="ghost" size="icon" onClick={() => { setSelectedMaterialId(material.id); setDetailOpen(true); }}><FileText className="h-4 w-4" /></Button>
                               {!isReadOnly ? <Button variant="ghost" size="icon" className="text-rose-500 hover:text-rose-600" onClick={() => void handleDeleteMaterial(material.id)}><Trash2 className="h-4 w-4" /></Button> : null}
                             </div>
                           </TableCell>
                         </TableRow>
-                        {expandedLocationId === material.id ? (
-                          <TableRow className="bg-muted/25">
-                            <TableCell colSpan={6} className="py-3 text-sm">
-                              <span className="font-medium">Ubicación:</span> <span className="text-muted-foreground">{material.warehouse || 'Sin ubicación asignada'}</span>
-                            </TableCell>
-                          </TableRow>
-                        ) : null}
-                      </Fragment>
                     );
                   })
                 )}
@@ -1058,11 +1340,19 @@ export function InventoryControlCenter() {
                     const available = getAvailableStock(material);
                     const risk = available <= material.minStock;
                     const performance = Math.min(100, Math.round((available / Math.max(material.minStock * 2, 1)) * 100));
+                    const defectiveQuantity = getDefectiveQuantity(material.id);
                     return (
                       <TableRow key={material.id} className={risk ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}>
                         <TableCell>
                           <p className="font-medium">{material.name}</p>
-                          <p className="text-xs text-muted-foreground">{material.sku}</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-xs text-muted-foreground">{material.sku || 'Sin código'}</p>
+                            {defectiveQuantity > 0 ? (
+                              <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100">
+                                {defectiveQuantity} dañados
+                              </Badge>
+                            ) : null}
+                          </div>
                         </TableCell>
                         <TableCell>{material.warehouse}</TableCell>
                         <TableCell>{material.stockPhysical}</TableCell>
@@ -1101,70 +1391,124 @@ export function InventoryControlCenter() {
         </TabsContent>
 
         <TabsContent value="compras" className="mt-6 space-y-4">
-          <div className="grid gap-4 xl:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Orden global sugerida</CardTitle>
-                <CardDescription>Consolida solicitudes aprobadas por proveedor.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Input placeholder="Buscar ítem..." value={globalOrderSearch} onChange={(event) => setGlobalOrderSearch(event.target.value)} />
+          <Card className="overflow-hidden border-border/70">
+            <CardHeader className="border-b border-border/70 bg-muted/20">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <CardTitle>Orden global</CardTitle>
+                  <CardDescription>Faltantes reales por solicitudes de contratistas y alertas de bajo stock.</CardDescription>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {!isReadOnly ? (
+                    <Button variant="outline" onClick={() => setNewPurchaseOrderOpen(true)}>
+                      <Plus className="mr-1 h-4 w-4" />
+                      Orden normal
+                    </Button>
+                  ) : null}
+                  <Button variant="outline" onClick={handleDownloadReceiptPdf} disabled={receiptFiles.length === 0}>
+                    <Download className="mr-1 h-4 w-4" />
+                    Descargar constancia
+                  </Button>
+                  <Button onClick={handleAcceptGlobalOrder} disabled={globalOrderSuggestions.length + stockOrderSuggestions.length === 0}>
+                    <FileText className="mr-1 h-4 w-4" />
+                    Aceptar orden global
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 p-4">
+              <div className="grid gap-3 lg:grid-cols-[1fr_240px]">
+                <Input placeholder="Buscar ítem, código o proveedor..." value={globalOrderSearch} onChange={(event) => setGlobalOrderSearch(event.target.value)} />
+                <Input
+                  type="number"
+                  min={0}
+                  placeholder="Precio total final Bs."
+                  value={manualOrderDraft.totalPriceBs}
+                  onChange={(event) => setManualOrderDraft((current) => ({ ...current, totalPriceBs: event.target.value }))}
+                />
+              </div>
+
+              {!isReadOnly ? (
+                <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-4">
+                  <p className="text-sm font-semibold">Constancia de compra</p>
+                  <p className="text-xs text-muted-foreground">Sube fotos o archivos. Al descargar, se genera un solo PDF resumen con todo lo cargado.</p>
+                  <Input
+                    type="file"
+                    multiple
+                    accept="image/*,.pdf"
+                    className="mt-3"
+                    onChange={(event) => setReceiptFiles(Array.from(event.target.files ?? []))}
+                  />
+                  {receiptFiles.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {receiptFiles.map((file) => (
+                        <Badge key={`${file.name}-${file.size}`} variant="outline">{file.name}</Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 xl:grid-cols-2">
                 {globalOrderSuggestions
                   .filter((item) => {
                     const material = materials.find((entry) => entry.id === item.materialId);
-                    return !globalOrderSearch || normalizeText(material?.name ?? '').includes(normalizeText(globalOrderSearch)) || normalizeText(material?.sku ?? '').includes(normalizeText(globalOrderSearch));
+                    const supplierName = getSupplierName(item.supplierId);
+                    const query = normalizeText(globalOrderSearch);
+                    return !query || [material?.name ?? '', material?.sku ?? '', supplierName].some((value) => normalizeText(value).includes(query));
                   })
                   .map((item) => {
                     const material = materials.find((entry) => entry.id === item.materialId);
                     if (!material) return null;
                     return (
-                      <div key={`${item.supplierId}-${item.materialId}`} className="rounded-xl border border-border p-3">
-                        <p className="font-medium">{material.name}</p>
-                        <p className="text-sm text-muted-foreground">Proveedor sugerido: {getSupplierName(item.supplierId)}</p>
-                        <p className="text-sm">Cantidad consolidada: {item.quantity}</p>
-                      </div>
+                      <OrderSuggestionCard
+                        key={`request-${item.materialId}`}
+                        title={material.name}
+                        subtitle={`Solicitado por ${item.contractorIds.map(getContractorName).join(', ')} · pedido ${item.requestedQuantity}, disponible ${item.availableQuantity}`}
+                        quantity={`Faltan ${item.quantity} ${material.unit}`}
+                        supplierId={item.supplierId}
+                        suppliers={suppliers}
+                        onSupplierChange={(supplierId) => {
+                          item.supplierId = supplierId;
+                        }}
+                        onDismiss={() => setDismissedSuggestions((current) => [...current, getSuggestionKey('request', item.materialId)])}
+                      />
                     );
                   })}
-                {globalOrderSuggestions.length === 0 ? <p className="text-sm text-muted-foreground">No hay solicitudes aprobadas para consolidar.</p> : null}
-                {!isReadOnly ? (
-                  <Button onClick={handleGenerateGlobalOrder} disabled={globalOrderSuggestions.length === 0}>
-                    <FileText className="mr-1 h-4 w-4" />
-                    Generar orden global
-                  </Button>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Reabastecimiento sugerido</CardTitle>
-                <CardDescription>Materiales por debajo del mínimo configurado.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Input placeholder="Buscar ítem..." value={stockOrderSearch} onChange={(event) => setStockOrderSearch(event.target.value)} />
-                {stockAlerts
-                  .filter((alert) => {
-                    const material = materials.find((entry) => entry.id === alert.materialId);
-                    return !stockOrderSearch || normalizeText(material?.name ?? '').includes(normalizeText(stockOrderSearch)) || normalizeText(material?.sku ?? '').includes(normalizeText(stockOrderSearch));
+                {stockOrderSuggestions
+                  .filter((item) => {
+                    const material = materials.find((entry) => entry.id === item.materialId);
+                    const supplierName = getSupplierName(item.supplierId);
+                    const query = normalizeText(globalOrderSearch);
+                    return !query || [material?.name ?? '', material?.sku ?? '', supplierName].some((value) => normalizeText(value).includes(query));
                   })
-                  .map((alert) => {
-                    const material = materials.find((entry) => entry.id === alert.materialId);
+                  .map((item) => {
+                    const material = materials.find((entry) => entry.id === item.materialId);
                     if (!material) return null;
                     return (
-                      <div key={alert.materialId} className="rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/20">
-                        <p className="font-medium">{material.name}</p>
-                        <p className="text-sm text-muted-foreground">Disponible: {getAvailableStock(material)} | Mínimo: {material.minStock}</p>
-                        <p className="text-sm">Sugerido comprar: {alert.suggestedQty} {material.unit}</p>
-                      </div>
+                      <OrderSuggestionCard
+                        key={`stock-${item.materialId}`}
+                        title={material.name}
+                        subtitle={`Bajo stock: disponible ${getAvailableStock(material)} / mínimo ${material.minStock}`}
+                        quantity={`Reponer ${item.quantity} ${material.unit}`}
+                        supplierId={item.supplierId}
+                        suppliers={suppliers}
+                        tone="amber"
+                        onSupplierChange={(supplierId) => {
+                          item.supplierId = supplierId;
+                        }}
+                        onDismiss={() => setDismissedSuggestions((current) => [...current, getSuggestionKey('stock', item.materialId)])}
+                      />
                     );
                   })}
-                {stockAlerts.length === 0 ? <p className="text-sm text-muted-foreground">No hay materiales debajo del stock mínimo.</p> : null}
-                {!isReadOnly ? (
-                  <Button variant="secondary" onClick={handleGenerateStockOrder} disabled={stockAlerts.length === 0}>Generar sugerencia</Button>
-                ) : null}
-              </CardContent>
-            </Card>
-          </div>
+              </div>
+              {globalOrderSuggestions.length + stockOrderSuggestions.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                  No hay solicitudes que excedan inventario ni alertas de bajo stock pendientes.
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>
@@ -1180,23 +1524,38 @@ export function InventoryControlCenter() {
                     <TableHead>Estado</TableHead>
                     <TableHead>Fecha</TableHead>
                     <TableHead>Ítems</TableHead>
+                    <TableHead>Total</TableHead>
+                    <TableHead className="text-right">PDF</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {purchaseOrders.length === 0 ? (
+                  {visiblePurchaseOrders.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">No hay órdenes registradas.</TableCell>
+                      <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No hay órdenes registradas.</TableCell>
                     </TableRow>
                   ) : (
-                    purchaseOrders.map((order) => (
-                      <TableRow key={order.id}>
-                        <TableCell className="font-medium">{order.referenceCode}</TableCell>
-                        <TableCell>{getSupplierName(order.supplierId)}</TableCell>
-                        <TableCell><Badge variant="outline">{order.status}</Badge></TableCell>
-                        <TableCell>{new Date(order.orderedAt).toLocaleDateString('es-BO')}</TableCell>
-                        <TableCell>{order.items.length}</TableCell>
-                      </TableRow>
-                    ))
+                    visiblePurchaseOrders.map((order) => {
+                      const total = order.items.reduce((sum, item) => sum + item.quantity * item.unitPriceBs, 0);
+                      return (
+                        <TableRow key={order.id}>
+                          <TableCell className="font-medium">{order.referenceCode}</TableCell>
+                          <TableCell>{getSupplierName(order.supplierId)}</TableCell>
+                          <TableCell><Badge variant="outline">{order.status}</Badge></TableCell>
+                          <TableCell>{new Date(order.orderedAt).toLocaleDateString('es-BO')}</TableCell>
+                          <TableCell>{order.items.length}</TableCell>
+                          <TableCell className="font-semibold">{formatBs(total)}</TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => order.id.startsWith('local-global-') ? downloadGlobalOrderPdf(order) : downloadPurchaseOrderPdf(order, getSupplierName(order.supplierId), total)}
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
@@ -1212,14 +1571,14 @@ export function InventoryControlCenter() {
                 <CardDescription>Bloquea inventario y lleva el flujo del incidente.</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <Select value={defectDraft.materialId} onValueChange={(value) => setDefectDraft((current) => ({ ...current, materialId: value }))}>
-                  <SelectTrigger><SelectValue placeholder="Material" /></SelectTrigger>
-                  <SelectContent>
-                    {materials.map((material) => (
-                      <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchPicker
+                  placeholder="Buscar material"
+                  search={defectMaterialSearch}
+                  onSearch={setDefectMaterialSearch}
+                  selectedLabel={getMaterialName(defectDraft.materialId)}
+                  options={materials.map((material) => ({ id: material.id, label: material.name, helper: material.sku || material.category }))}
+                  onSelect={(id) => setDefectDraft((current) => ({ ...current, materialId: id }))}
+                />
                 <Input placeholder="Tipo de defecto" value={defectDraft.defectType} onChange={(event) => setDefectDraft((current) => ({ ...current, defectType: event.target.value }))} />
                 <Input type="number" min={1} value={defectDraft.affectedQuantity} onChange={(event) => setDefectDraft((current) => ({ ...current, affectedQuantity: event.target.value }))} />
                 <Button onClick={() => void handleDefectCreate()} disabled={saving}>Registrar alarma</Button>
@@ -1265,18 +1624,25 @@ export function InventoryControlCenter() {
             <Card>
               <CardHeader>
                 <CardTitle>Gestión de cambio / restitución</CardTitle>
-                <CardDescription>Registro de devoluciones y reclamos con orden de compra asociada.</CardDescription>
+                <CardDescription>Registro de devoluciones y reclamos asociados al proveedor.</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <Input placeholder="Orden de compra asociada" value={claimDraft.purchaseOrderRef} onChange={(event) => setClaimDraft((current) => ({ ...current, purchaseOrderRef: event.target.value }))} />
-                <Select value={claimDraft.materialId} onValueChange={(value) => setClaimDraft((current) => ({ ...current, materialId: value }))}>
-                  <SelectTrigger><SelectValue placeholder="Material" /></SelectTrigger>
-                  <SelectContent>
-                    {materials.map((material) => (
-                      <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchPicker
+                  placeholder="Buscar proveedor"
+                  search={claimSupplierSearch}
+                  onSearch={setClaimSupplierSearch}
+                  selectedLabel={claimDraft.supplierId ? getSupplierName(claimDraft.supplierId) : 'Proveedor'}
+                  options={suppliers.map((supplier) => ({ id: supplier.id, label: supplier.name, helper: supplier.supplierType }))}
+                  onSelect={(id) => setClaimDraft((current) => ({ ...current, supplierId: id }))}
+                />
+                <SearchPicker
+                  placeholder="Buscar material"
+                  search={claimMaterialSearch}
+                  onSearch={setClaimMaterialSearch}
+                  selectedLabel={getMaterialName(claimDraft.materialId)}
+                  options={materials.map((material) => ({ id: material.id, label: material.name, helper: material.sku || material.category }))}
+                  onSelect={(id) => setClaimDraft((current) => ({ ...current, materialId: id }))}
+                />
                 <Textarea className="md:col-span-2" placeholder="Motivo del reclamo" value={claimDraft.reason} onChange={(event) => setClaimDraft((current) => ({ ...current, reason: event.target.value }))} />
                 <Button className="md:col-span-2 xl:col-span-4" onClick={() => void handleClaimCreate()} disabled={saving}>Crear reclamo</Button>
               </CardContent>
@@ -1289,7 +1655,7 @@ export function InventoryControlCenter() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>OC asociada</TableHead>
+                    <TableHead>Proveedor</TableHead>
                     <TableHead>Producto</TableHead>
                     <TableHead>Motivo</TableHead>
                     <TableHead>Estado</TableHead>
@@ -1299,7 +1665,7 @@ export function InventoryControlCenter() {
                 <TableBody>
                   {returnClaims.map((claim) => (
                     <TableRow key={claim.id}>
-                      <TableCell>{claim.purchaseOrderRef}</TableCell>
+                      <TableCell>{claim.supplierId ? getSupplierName(claim.supplierId) : 'Sin proveedor'}</TableCell>
                       <TableCell>{getMaterialName(claim.materialId)}</TableCell>
                       <TableCell className="max-w-sm truncate" title={claim.reason}>{claim.reason}</TableCell>
                       <TableCell><Badge variant="outline">{claim.status}</Badge></TableCell>
@@ -1385,6 +1751,59 @@ export function InventoryControlCenter() {
         </TabsContent>
       </Tabs>
 
+      <Dialog open={newPurchaseOrderOpen} onOpenChange={setNewPurchaseOrderOpen}>
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Nueva orden de compra</DialogTitle>
+            <DialogDescription>Orden normal para comprar un material sin crear una ubicación ni tocar stock mínimo.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 pt-2 md:grid-cols-2">
+            <Field label="Proveedor">
+              <Select value={manualOrderDraft.supplierId} onValueChange={(value) => setManualOrderDraft((current) => ({ ...current, supplierId: value }))}>
+                <SelectTrigger><SelectValue placeholder="Selecciona proveedor" /></SelectTrigger>
+                <SelectContent>
+                  {suppliers.map((supplier) => (
+                    <SelectItem key={supplier.id} value={supplier.id}>{supplier.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Ítem">
+              <Select value={manualOrderDraft.materialId} onValueChange={(value) => setManualOrderDraft((current) => ({ ...current, materialId: value }))}>
+                <SelectTrigger><SelectValue placeholder="Selecciona ítem" /></SelectTrigger>
+                <SelectContent>
+                  {materials.map((material) => (
+                    <SelectItem key={material.id} value={material.id}>{material.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Cantidad">
+              <Input type="number" min={1} value={manualOrderDraft.quantity} onChange={(event) => setManualOrderDraft((current) => ({ ...current, quantity: event.target.value }))} />
+            </Field>
+            <Field label="Precio unitario (Bs.)">
+              <Input type="number" min={0} value={manualOrderDraft.unitPriceBs} onChange={(event) => setManualOrderDraft((current) => ({ ...current, unitPriceBs: event.target.value }))} />
+            </Field>
+            <Field label="Precio total final (Bs.)">
+              <Input type="number" min={0} value={manualOrderDraft.totalPriceBs} onChange={(event) => setManualOrderDraft((current) => ({ ...current, totalPriceBs: event.target.value }))} placeholder={String(getManualOrderTotal())} />
+            </Field>
+            <div className="rounded-xl border border-border bg-muted/20 p-3">
+              <p className="text-xs text-muted-foreground">Total estimado</p>
+              <p className="mt-1 text-2xl font-bold">{formatBs(getManualOrderTotal())}</p>
+            </div>
+            <Field label="Notas">
+              <Textarea value={manualOrderDraft.notes} onChange={(event) => setManualOrderDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Detalle de compra, condiciones o entrega..." />
+            </Field>
+            <div className="flex justify-end gap-2 md:col-span-2">
+              <Button variant="outline" onClick={() => setNewPurchaseOrderOpen(false)}>Cancelar</Button>
+              <Button onClick={handleRegisterManualOrder} style={{ backgroundColor: '#d6a85a', color: '#1f1f1f' }}>
+                Preparar orden
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
@@ -1399,10 +1818,9 @@ export function InventoryControlCenter() {
                 </div>
                 <div className="space-y-2 text-sm">
                   <p className="text-lg font-semibold">{selectedMaterial.name}</p>
-                  <p><span className="text-muted-foreground">Código:</span> {selectedMaterial.sku}</p>
+                  <p><span className="text-muted-foreground">Código:</span> {selectedMaterial.sku || 'Sin código'}</p>
                   <p><span className="text-muted-foreground">Proveedor:</span> {getSupplierName(selectedMaterial.supplierId)}</p>
                   <p><span className="text-muted-foreground">Ubicación:</span> {selectedMaterial.warehouse}</p>
-                  <p><span className="text-muted-foreground">Stock físico/reservado/bloqueado:</span> {selectedMaterial.stockPhysical} / {selectedMaterial.stockReserved} / {selectedMaterial.blockedByDefect}</p>
                 </div>
               </div>
 
@@ -1475,8 +1893,8 @@ export function InventoryControlCenter() {
           {editDraft ? (
             <div className="grid gap-4 pt-2 md:grid-cols-2">
               <Field label="Nombre"><Input value={editDraft.name} onChange={(event) => setEditDraft((current) => current ? { ...current, name: event.target.value } : current)} /></Field>
-              <Field label="Código"><Input value={editDraft.sku} onChange={(event) => setEditDraft((current) => current ? { ...current, sku: event.target.value } : current)} placeholder="Auto si lo dejas vacío" /></Field>
-              <Field label="Categoría"><Input value={editDraft.category} onChange={(event) => setEditDraft((current) => current ? { ...current, category: event.target.value } : current)} /></Field>
+              <Field label="Código manual"><Input value={editDraft.sku} onChange={(event) => setEditDraft((current) => current ? { ...current, sku: event.target.value } : current)} placeholder="Ej. MEL-BLANCO-18" /></Field>
+              <Field label="Categoría"><Input value={editDraft.category} onChange={(event) => setEditDraft((current) => current ? { ...current, category: event.target.value } : current)} list="inventory-category-options" /></Field>
               <Field label="Proveedor">
                 <Select value={editDraft.supplierId} onValueChange={(value) => setEditDraft((current) => current ? { ...current, supplierId: value } : current)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1500,18 +1918,38 @@ export function InventoryControlCenter() {
               </Field>
               <Field label="Precio actual (Bs.)"><Input type="number" min={0} value={String(getCurrentPriceBs(editDraft))} onChange={(event) => setEditDraft((current) => current ? { ...current, priceHistory: [{ date: current.purchaseDate ?? toIsoDate(), priceBs: Number(event.target.value || 0), exchangeRate }] } : current)} /></Field>
               <Field label="Stock mínimo"><Input type="number" min={0} value={String(editDraft.minStock)} onChange={(event) => setEditDraft((current) => current ? { ...current, minStock: Number(event.target.value || 0) } : current)} /></Field>
-              <div className="grid gap-3 rounded-xl border border-border/70 bg-muted/20 p-3 md:col-span-2 md:grid-cols-[160px_1fr]">
-                <div className="relative h-28 overflow-hidden rounded-lg border bg-background">
+              <div className="grid gap-4 rounded-2xl border border-border/70 bg-muted/20 p-3 md:col-span-2 md:grid-cols-[170px_1fr]">
+                <div className="relative h-32 overflow-hidden rounded-xl border bg-background">
                   <Image src={editDraft.imageUrl || makeMockImage(editDraft.name || 'Material')} alt="Vista previa del material" fill className="object-cover" unoptimized />
                 </div>
                 <div className="space-y-3">
-                  <Field label="Subir imagen">
-                    <Input type="file" accept="image/*" onChange={(event) => void handleEditImageUpload(event.target.files?.[0])} />
-                  </Field>
-                  <Field label="O pegar URL de imagen">
-                    <Input value={editDraft.imageUrl} onChange={(event) => setEditDraft((current) => current ? { ...current, imageUrl: event.target.value } : current)} placeholder="https://... o imagen cargada" />
-                  </Field>
-                  <p className="text-xs text-muted-foreground">La imagen se guarda en la ficha del ítem.</p>
+                  <div>
+                    <p className="text-sm font-medium">Imagen del ítem</p>
+                    <p className="text-xs text-muted-foreground">Actualiza desde galería, cámara móvil o un enlace externo.</p>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <ImagePicker label="Galería" icon={<ImageIcon className="h-4 w-4" />} onChange={(file) => void handleEditImageUpload(file)} />
+                    <ImagePicker label="Cámara" icon={<Camera className="h-4 w-4" />} capture onChange={(file) => void handleEditImageUpload(file)} />
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <LinkIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={editImageLink}
+                        onChange={(event) => setEditImageLink(event.target.value)}
+                        placeholder="Pegar enlace de imagen"
+                        className="pl-9"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setEditDraft((current) => current ? { ...current, imageUrl: editImageLink.trim() } : current)}
+                      disabled={!editImageLink.trim()}
+                    >
+                      Usar
+                    </Button>
+                  </div>
                 </div>
               </div>
               <div className="md:col-span-2 flex justify-end gap-2">
@@ -1533,6 +1971,124 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-1.5">
       <label className="text-sm font-medium">{label}</label>
       {children}
+    </div>
+  );
+}
+
+function ImagePicker({
+  label,
+  icon,
+  capture,
+  onChange,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  capture?: boolean;
+  onChange: (file: File | undefined) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium transition hover:border-[#d6a85a] hover:bg-[#d6a85a]/10">
+      {icon}
+      {label}
+      <input
+        type="file"
+        accept="image/*"
+        capture={capture ? 'environment' : undefined}
+        className="sr-only"
+        onChange={(event) => onChange(event.target.files?.[0])}
+      />
+    </label>
+  );
+}
+
+function OrderSuggestionCard({
+  title,
+  subtitle,
+  quantity,
+  supplierId,
+  suppliers,
+  tone = 'default',
+  onSupplierChange,
+  onDismiss,
+}: {
+  title: string;
+  subtitle: string;
+  quantity: string;
+  supplierId: string;
+  suppliers: SupplierRecord[];
+  tone?: 'default' | 'amber';
+  onSupplierChange: (supplierId: string) => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <Card className={`border-border/70 p-4 shadow-sm ${tone === 'amber' ? 'bg-amber-50/70 dark:bg-amber-950/20' : 'bg-background'}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold">{title}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+          <Badge variant="outline" className="mt-2 rounded-full bg-background/70">{quantity}</Badge>
+        </div>
+        <Button variant="ghost" size="icon" onClick={onDismiss}>
+          <Minus className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="mt-3">
+        <Select value={supplierId} onValueChange={onSupplierChange}>
+          <SelectTrigger><SelectValue placeholder="Proveedor" /></SelectTrigger>
+          <SelectContent>
+            {suppliers.map((supplier) => (
+              <SelectItem key={supplier.id} value={supplier.id}>{supplier.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </Card>
+  );
+}
+
+function SearchPicker({
+  placeholder,
+  search,
+  selectedLabel,
+  options,
+  onSearch,
+  onSelect,
+}: {
+  placeholder: string;
+  search: string;
+  selectedLabel: string;
+  options: Array<{ id: string; label: string; helper?: string }>;
+  onSearch: (value: string) => void;
+  onSelect: (id: string) => void;
+}) {
+  const normalized = normalizeText(search);
+  const visibleOptions = options
+    .filter((option) => !normalized || normalizeText(`${option.label} ${option.helper ?? ''}`).includes(normalized))
+    .slice(0, 6);
+
+  return (
+    <div className="space-y-2">
+      <Input placeholder={placeholder} value={search} onChange={(event) => onSearch(event.target.value)} />
+      <div className="rounded-xl border border-border bg-background p-2">
+        <p className="mb-2 text-xs text-muted-foreground">Seleccionado: {selectedLabel}</p>
+        <div className="max-h-40 space-y-1 overflow-y-auto">
+          {visibleOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted"
+              onClick={() => {
+                onSelect(option.id);
+                onSearch(option.label);
+              }}
+            >
+              <span className="truncate font-medium">{option.label}</span>
+              {option.helper ? <span className="ml-2 truncate text-xs text-muted-foreground">{option.helper}</span> : null}
+            </button>
+          ))}
+          {visibleOptions.length === 0 ? <p className="px-2 py-3 text-center text-xs text-muted-foreground">Sin resultados.</p> : null}
+        </div>
+      </div>
     </div>
   );
 }

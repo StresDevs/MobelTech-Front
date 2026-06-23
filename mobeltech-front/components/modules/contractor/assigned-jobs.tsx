@@ -52,8 +52,22 @@ type ProductionOrderRecord = {
     description: string;
     quantity: number;
     progress?: number;
+    phases?: Array<{
+      phase: ProductionPhase;
+      completed: string;
+    }>;
   }>;
 };
+
+type ProductionPhase = 'cortado' | 'canteado' | 'ensamblado' | 'instalacion' | 'entregado';
+
+const PRODUCTION_PHASE_OPTIONS: Array<{ value: ProductionPhase; label: string; progress: number }> = [
+  { value: 'cortado', label: 'Corte', progress: 20 },
+  { value: 'canteado', label: 'Canteado', progress: 40 },
+  { value: 'ensamblado', label: 'Ensamblado', progress: 60 },
+  { value: 'instalacion', label: 'Instalación', progress: 80 },
+  { value: 'entregado', label: 'Entrega', progress: 100 },
+];
 
 type NotificationRecord = {
   id: string;
@@ -276,6 +290,33 @@ export default function AssignedJobs() {
     return furnitureFiles.find((file) => file.quotationId === job.quotationId && (!job.projectId || file.assignedContractorId === job.assignedContractorId));
   }
 
+  function getJobProgress(job: ProductionOrderRecord) {
+    return Math.round(job.items.reduce((sum, item) => sum + (item.progress || 0), 0) / (job.items.length || 1));
+  }
+
+  function getCurrentPhase(job: ProductionOrderRecord): ProductionPhase {
+    const progress = getJobProgress(job);
+    const matching = [...PRODUCTION_PHASE_OPTIONS].reverse().find((phase) => progress >= phase.progress);
+    return matching?.value ?? 'cortado';
+  }
+
+  async function updateJobPhase(jobId: string, phase: ProductionPhase) {
+    if (!apiBase) return;
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/production-orders/${jobId}/progress`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phase }),
+      });
+      if (!response.ok) throw new Error('No se pudo actualizar la etapa.');
+      const updated = await response.json() as ProductionOrderRecord;
+      setJobs((current) => current.map((job) => (job.id === jobId ? updated : job)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error actualizando etapa.');
+    }
+  }
+
   async function downloadSketchupFile(file: FurnitureFileRecord) {
     if (!apiBase || !user) return;
     const response = await fetch(`${apiBase}/api/furniture-files/${file.id}/download?performedBy=${encodeURIComponent(user.name)}`);
@@ -468,18 +509,20 @@ export default function AssignedJobs() {
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Inicio</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Fin estimado</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Estado</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Etapa</th>
                 <th className="px-4 py-3 text-right font-medium text-muted-foreground">SketchUp</th>
               </tr>
             </thead>
             <tbody>
               {jobs.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">No tienes trabajos asignados por el momento.</td>
+                  <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">No tienes trabajos asignados por el momento.</td>
                 </tr>
               ) : jobs.map((job) => {
                 const client = getClient(job);
                 const description = getLeadDescription(job);
                 const sketchupFile = getSketchupFile(job);
+                const progress = getJobProgress(job);
                 return (
                   <tr key={job.id} className="border-b border-border/70 last:border-b-0">
                     <td className="px-4 py-3">
@@ -488,7 +531,7 @@ export default function AssignedJobs() {
                     </td>
                     <td className="px-4 py-3">
                       <p className="max-w-[260px] truncate font-medium">{description}</p>
-                      <p className="text-xs text-muted-foreground">{job.items.length} tareas · avance promedio {Math.round(job.items.reduce((sum, item) => sum + (item.progress || 0), 0) / (job.items.length || 1))}%</p>
+                      <p className="text-xs text-muted-foreground">{job.items.length} tareas · avance {progress}%</p>
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-medium">{client?.name ?? 'N/A'}</p>
@@ -498,6 +541,17 @@ export default function AssignedJobs() {
                     <td className="px-4 py-3">{formatDate(job.startDate)}</td>
                     <td className="px-4 py-3">{formatDate(job.estimatedDeliveryDate)}</td>
                     <td className="px-4 py-3"><Badge className={statusClass(job.status)}>{statusLabel(job.status)}</Badge></td>
+                    <td className="px-4 py-3">
+                      <select
+                        value={getCurrentPhase(job)}
+                        onChange={(event) => void updateJobPhase(job.id, event.target.value as ProductionPhase)}
+                        className="h-9 rounded-md border border-input bg-background px-2 text-sm outline-none"
+                      >
+                        {PRODUCTION_PHASE_OPTIONS.map((phase) => (
+                          <option key={phase.value} value={phase.value}>{phase.label} · {phase.progress}%</option>
+                        ))}
+                      </select>
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <Button size="sm" variant="outline" onClick={() => sketchupFile ? void downloadSketchupFile(sketchupFile) : void generateWorkOrderPdf(job)} className="gap-2" disabled={!sketchupFile}>
                         <Download className="h-4 w-4" />
