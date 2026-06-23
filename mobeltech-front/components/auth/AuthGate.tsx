@@ -28,9 +28,13 @@ async function apiLogin(identifier: string, password: string) {
 }
 
 async function apiChangePassword(newPassword: string) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('mobeltech_token') : null
   const response = await fetch(`${API_URL}/api/auth/change-password`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     credentials: 'include',
     body: JSON.stringify({ newPassword }),
   })
