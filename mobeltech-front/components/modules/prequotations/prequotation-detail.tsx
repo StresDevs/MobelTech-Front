@@ -37,7 +37,7 @@ const STATUS_CONFIG: Record<
     icon: <Clock className="w-3.5 h-3.5" />,
   },
   'in-review': {
-    label: 'En revisión',
+    label: 'Enviado a Cliente',
     color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
     dotColor: '#60a5fa',
     icon: <Eye className="w-3.5 h-3.5" />,
@@ -83,7 +83,7 @@ const STATUS_TRANSITIONS: Record<PrequotationStatus, PrequotationStatus[]> = {
 const NEXT_STATUS_LABEL: Partial<Record<PrequotationStatus, string>> = {
   'in-review': 'Enviado a cliente',
   adjustment: 'Cliente solicitó ajuste',
-  confirmed: 'Confirmar y llevar a adelanto',
+  confirmed: 'Confirmar con Anticipo',
   rejected: 'Rechazar',
   draft: 'Volver a elaboración',
 };
@@ -170,7 +170,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
   const hasClientConfirmation = p.status === 'confirmed' || p.logs.some((log) => log.description === CLIENT_CONFIRMED_DESCRIPTION);
 
   function getStatusDescription(status: PrequotationStatus) {
-    if (status === 'in-review') return 'En revisión por el cliente';
+    if (status === 'in-review') return 'Enviado a cliente';
     if (status === 'adjustment') return 'Cliente solicitó ajuste';
     if (status === 'confirmed') return p.convertedToQuotationId ? 'Convertida a cotización' : 'Confirmada por cliente';
     if (status === 'rejected') return 'Rechazada o cancelada';
@@ -493,7 +493,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
                     {statusAction === 'client-confirmed'
                       ? 'Registrando...'
                       : hasClientConfirmation
-                      ? 'Confirmar y llevar a adelanto'
+                      ? 'Confirmar con Anticipo'
                       : 'Confirmado por cliente'}
                   </Button>
                 )}

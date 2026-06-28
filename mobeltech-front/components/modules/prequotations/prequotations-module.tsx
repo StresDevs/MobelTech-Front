@@ -32,7 +32,7 @@ const STATUS_CONFIG: Record<
     dot: 'bg-zinc-400',
   },
   'in-review': {
-    label: 'En revisión',
+    label: 'Enviado a Cliente',
     color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
     icon: <FileText className="w-3 h-3" />,
     dot: 'bg-blue-400',

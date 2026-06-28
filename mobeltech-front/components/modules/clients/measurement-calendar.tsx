@@ -383,8 +383,9 @@ export function MeasurementCalendar() {
 
     try {
       let clientId = formData.clientId;
+      let createdClient: ApiClient | null = null;
       if (!clientId) {
-        const createdClient = await handleCreateClient();
+        createdClient = await handleCreateClient();
         clientId = createdClient.id;
       }
 
@@ -417,8 +418,18 @@ export function MeasurementCalendar() {
         throw new Error(details || body?.error || 'No se pudo agendar la medición');
       }
 
-      await loadData();
+      const createdMeasurement = (await response.json()) as ApiMeasurement;
+      if (createdClient) {
+        setClients((current) => (
+          current.some((client) => client.id === createdClient.id) ? current : [...current, createdClient]
+        ));
+      }
+      setMeasurements((current) => {
+        const withoutDuplicate = current.filter((measurement) => measurement.id !== createdMeasurement.id);
+        return [...withoutDuplicate, { ...createdMeasurement, linkedPrequotation: createdMeasurement.linkedPrequotation ?? null }];
+      });
       closeNewMeasurement();
+      void loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error guardando la medición');
     } finally {

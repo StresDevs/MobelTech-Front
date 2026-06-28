@@ -5,9 +5,13 @@ import { jsPDF } from 'jspdf';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
+import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { AlertCircle, BellRing, Download, Loader2, RefreshCw } from 'lucide-react';
+import { BellRing, CalendarRange, Download, Loader2, RefreshCw, Upload, WalletCards } from 'lucide-react';
 
 type ContractorRecord = {
   id: string;
@@ -29,6 +33,14 @@ type QuotationRecord = {
     description: string;
     quantity: number;
   }>;
+  environmentProjects?: Array<{
+    id: string;
+    projectId?: string | null;
+    assignedContractorId?: string | null;
+    ambience: string;
+    description?: string | null;
+    sketchupFileName?: string | null;
+  }>;
 };
 
 type ClientRecord = {
@@ -36,6 +48,7 @@ type ClientRecord = {
   name: string;
   phone: string;
   email?: string | null;
+  address?: string | null;
 };
 
 type ProductionOrderRecord = {
@@ -83,8 +96,16 @@ type ContractorPaymentPlan = {
   contractorId: string;
   productionOrderId: string;
   totalAmount: number;
+  reviewStatus?: 'submitted' | 'approved' | 'rejected' | string;
+  reviewNotes?: string | null;
   paidAmount: number;
   remainingAmount: number;
+  lines?: Array<{
+    id: string;
+    phaseKey: string;
+    phaseLabel: string;
+    plannedAmount: number;
+  }>;
 };
 
 type FurnitureFileRecord = {
@@ -94,8 +115,30 @@ type FurnitureFileRecord = {
   assignedContractorId?: string | null;
   fileName: string;
   fileSize?: string | null;
+  fileKind?: 'initial' | 'contractor_final' | string;
   version: number;
   ambience?: string | null;
+};
+
+type AdvanceRequestRecord = {
+  id: string;
+  planId: string;
+  contractorId: string;
+  productionOrderId: string;
+  amount: number;
+  status: 'submitted' | 'approved' | 'rejected' | 'paid' | string;
+  notes?: string | null;
+  reviewNotes?: string | null;
+  requestedAt?: string | Date;
+};
+
+type LaborCatalogItem = {
+  id: string;
+  itemKey: string;
+  label: string;
+  defaultAmount: number;
+  active: boolean;
+  sortOrder: number;
 };
 
 function normalizeDate(value?: string | Date | null) {
@@ -167,7 +210,17 @@ export default function AssignedJobs() {
   const [quotations, setQuotations] = useState<QuotationRecord[]>([]);
   const [furnitureFiles, setFurnitureFiles] = useState<FurnitureFileRecord[]>([]);
   const [paymentPlans, setPaymentPlans] = useState<ContractorPaymentPlan[]>([]);
+  const [advanceRequests, setAdvanceRequests] = useState<AdvanceRequestRecord[]>([]);
+  const [laborItems, setLaborItems] = useState<LaborCatalogItem[]>([]);
   const [contractor, setContractor] = useState<ContractorRecord | null>(null);
+  const [editingLaborJobId, setEditingLaborJobId] = useState<string | null>(null);
+  const [selectedLaborItems, setSelectedLaborItems] = useState<string[]>([]);
+  const [savingLabor, setSavingLabor] = useState(false);
+  const [uploadingFinalJobId, setUploadingFinalJobId] = useState<string | null>(null);
+  const [advanceJobId, setAdvanceJobId] = useState<string | null>(null);
+  const [advanceAmount, setAdvanceAmount] = useState('');
+  const [advanceNotes, setAdvanceNotes] = useState('');
+  const [savingAdvance, setSavingAdvance] = useState(false);
 
   async function loadAssignedData(options?: { silent?: boolean }) {
     if (!apiBase || !user) {
@@ -198,18 +251,21 @@ export default function AssignedJobs() {
         setClients([]);
         setQuotations([]);
         setPaymentPlans([]);
+        setAdvanceRequests([]);
         setFurnitureFiles([]);
         setLoading(false);
         return;
       }
 
-      const [jobsResponse, notificationsResponse, clientsResponse, quotationsResponse, plansResponse, furnitureFilesResponse] = await Promise.all([
+      const [jobsResponse, notificationsResponse, clientsResponse, quotationsResponse, plansResponse, furnitureFilesResponse, laborItemsResponse, advanceRequestsResponse] = await Promise.all([
         fetch(`${apiBase}/api/production-orders?contractorId=${encodeURIComponent(activeContractor.id)}`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/notifications?recipientUserId=${encodeURIComponent(user.id)}&unreadOnly=true`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/clients`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/quotations`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/contractor-finance/plans?contractorId=${encodeURIComponent(activeContractor.id)}`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/furniture-files?contractorId=${encodeURIComponent(activeContractor.id)}`, { cache: 'no-store' }),
+        fetch(`${apiBase}/api/contractor-finance/labor-items`, { cache: 'no-store' }),
+        fetch(`${apiBase}/api/contractor-finance/advance-requests?contractorId=${encodeURIComponent(activeContractor.id)}`, { cache: 'no-store' }),
       ]);
 
       if (!jobsResponse.ok) throw new Error('No se pudieron cargar los trabajos asignados');
@@ -223,6 +279,8 @@ export default function AssignedJobs() {
       setQuotations(await quotationsResponse.json());
       setPaymentPlans(plansResponse.ok ? await plansResponse.json() : []);
       setFurnitureFiles(furnitureFilesResponse.ok ? await furnitureFilesResponse.json() : []);
+      setLaborItems(laborItemsResponse.ok ? await laborItemsResponse.json() : []);
+      setAdvanceRequests(advanceRequestsResponse.ok ? await advanceRequestsResponse.json() : []);
     } catch (err) {
       if (!silent) setError(err instanceof Error ? err.message : 'Error cargando trabajos del contratista');
     } finally {
@@ -275,7 +333,17 @@ export default function AssignedJobs() {
     return clients.find((client) => client.id === quotation?.clientId);
   }
 
+  function getEnvironment(job: ProductionOrderRecord) {
+    const quotation = getQuotation(job);
+    return quotation?.environmentProjects?.find((environment) => (
+      environment.projectId === job.projectId ||
+      (environment.assignedContractorId === job.assignedContractorId && environment.id)
+    )) ?? null;
+  }
+
   function getLeadDescription(job: ProductionOrderRecord) {
+    const environment = getEnvironment(job);
+    if (environment?.ambience) return environment.ambience;
     const quotation = getQuotation(job);
     return quotation?.items?.[0]?.description || job.items[0]?.description || 'Trabajo sin descripción';
   }
@@ -286,8 +354,194 @@ export default function AssignedJobs() {
     return getQuotation(job)?.totalAmount ?? 0;
   }
 
-  function getSketchupFile(job: ProductionOrderRecord) {
-    return furnitureFiles.find((file) => file.quotationId === job.quotationId && (!job.projectId || file.assignedContractorId === job.assignedContractorId));
+  function getInitialSketchupFile(job: ProductionOrderRecord) {
+    const environment = getEnvironment(job);
+    return furnitureFiles.find((file) => (
+      file.fileKind !== 'contractor_final' &&
+      ((environment?.id && file.projectEnvironmentId === environment.id) ||
+      (file.quotationId === job.quotationId && file.assignedContractorId === job.assignedContractorId))
+    ));
+  }
+
+  function getFinalSketchupFile(job: ProductionOrderRecord) {
+    const environment = getEnvironment(job);
+    return furnitureFiles.find((file) => (
+      file.fileKind === 'contractor_final' &&
+      ((environment?.id && file.projectEnvironmentId === environment.id) ||
+      (file.quotationId === job.quotationId && file.assignedContractorId === job.assignedContractorId))
+    ));
+  }
+
+  function getPaymentPlan(job: ProductionOrderRecord) {
+    return paymentPlans.find((entry) => entry.productionOrderId === job.id);
+  }
+
+  function getAdvanceRequest(job: ProductionOrderRecord) {
+    const plan = getPaymentPlan(job);
+    if (!plan) return undefined;
+    return advanceRequests.find((request) => request.planId === plan.id);
+  }
+
+  function laborStatusLabel(plan?: ContractorPaymentPlan) {
+    if (!plan) return 'Pendiente presupuesto';
+    if (plan.reviewStatus === 'approved') return 'Aprobado';
+    if (plan.reviewStatus === 'rejected') return 'Rechazado';
+    return 'En revision por admin';
+  }
+
+  function laborStatusClass(plan?: ContractorPaymentPlan) {
+    if (!plan) return 'bg-zinc-100 text-zinc-700';
+    if (plan.reviewStatus === 'approved') return 'bg-emerald-100 text-emerald-700';
+    if (plan.reviewStatus === 'rejected') return 'bg-red-100 text-red-700';
+    return 'bg-amber-100 text-amber-700';
+  }
+
+  function openLaborForm(job: ProductionOrderRecord) {
+    const plan = getPaymentPlan(job);
+    const availableItems = laborItems;
+    setEditingLaborJobId(job.id);
+    setSelectedLaborItems(
+      plan?.lines?.map((line) => line.phaseKey).filter((key) => availableItems.some((option) => option.itemKey === key)) ?? [],
+    );
+  }
+
+  async function saveLaborPlan(job: ProductionOrderRecord) {
+    if (!apiBase || !contractor || selectedLaborItems.length === 0) return;
+    setSavingLabor(true);
+    setError(null);
+    try {
+      const availableItems = laborItems;
+      const lines = availableItems
+        .filter((item) => selectedLaborItems.includes(item.itemKey))
+        .map((item, index) => ({
+          phaseKey: item.itemKey,
+          phaseLabel: item.label,
+          plannedAmount: item.defaultAmount,
+          sortOrder: index,
+        }));
+      const totalAmount = lines.reduce((sum, line) => sum + line.plannedAmount, 0);
+      const response = await fetch(`${apiBase}/api/contractor-finance/plans`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contractorId: contractor.id,
+          productionOrderId: job.id,
+          totalAmount,
+          lines,
+        }),
+      });
+      if (!response.ok) throw new Error('No se pudo enviar el presupuesto de mano de obra.');
+      const saved = await response.json() as ContractorPaymentPlan;
+      setPaymentPlans((current) => {
+        const withoutCurrent = current.filter((plan) => plan.productionOrderId !== job.id);
+        return saved ? [...withoutCurrent, saved] : current;
+      });
+      setEditingLaborJobId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error guardando mano de obra.');
+    } finally {
+      setSavingLabor(false);
+    }
+  }
+
+  function readApiError(data: unknown, fallback: string) {
+    if (data && typeof data === 'object') {
+      const payload = data as { error?: string; detail?: string; message?: string };
+      return payload.detail || payload.error || payload.message || fallback;
+    }
+    return fallback;
+  }
+
+  function fileToBase64(file: File) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result ?? '');
+        resolve(result.includes(',') ? result.split(',')[1] : result);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function uploadFinalSketchup(job: ProductionOrderRecord, file?: File | null) {
+    if (!apiBase || !contractor || !user || !file) return;
+    const environment = getEnvironment(job);
+    const quotation = getQuotation(job);
+    const client = getClient(job);
+    if (!environment?.id || !quotation?.id) {
+      setError('No se encontró el ambiente para subir el SketchUp final.');
+      return;
+    }
+
+    setUploadingFinalJobId(job.id);
+    setError(null);
+    try {
+      const fileData = await fileToBase64(file);
+      const response = await fetch(`${apiBase}/api/furniture-files/contractor-final`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          quotationId: quotation.id,
+          projectEnvironmentId: environment.id,
+          clientId: client?.id ?? quotation.clientId,
+          assignedContractorId: contractor.id,
+          fileName: file.name,
+          fileSize: String(file.size),
+          mimeType: file.type || 'application/octet-stream',
+          fileData,
+          uploadedBy: user.name || contractor.name,
+          notes: 'SketchUp final subido por contratista',
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(readApiError(data, 'No se pudo subir el SketchUp final.'));
+      setFurnitureFiles((current) => [
+        ...current.filter((entry) => !(entry.fileKind === 'contractor_final' && entry.projectEnvironmentId === environment.id && entry.assignedContractorId === contractor.id)),
+        data as FurnitureFileRecord,
+      ]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error subiendo SketchUp final.');
+    } finally {
+      setUploadingFinalJobId(null);
+    }
+  }
+
+  function openAdvanceModal(job: ProductionOrderRecord) {
+    const plan = getPaymentPlan(job);
+    const request = getAdvanceRequest(job);
+    setAdvanceJobId(job.id);
+    setAdvanceAmount(String(request?.amount ?? Math.round((plan?.totalAmount ?? 0) * 0.3)));
+    setAdvanceNotes(request?.notes ?? '');
+  }
+
+  async function saveAdvanceRequest(job: ProductionOrderRecord) {
+    if (!apiBase || !contractor) return;
+    const plan = getPaymentPlan(job);
+    if (!plan) return;
+    setSavingAdvance(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/contractor-finance/advance-requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planId: plan.id,
+          contractorId: contractor.id,
+          productionOrderId: job.id,
+          amount: Number(advanceAmount),
+          notes: advanceNotes || null,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(readApiError(data, 'No se pudo enviar la solicitud de anticipo.'));
+      setAdvanceRequests((current) => [data as AdvanceRequestRecord, ...current.filter((entry) => entry.planId !== plan.id)]);
+      setAdvanceJobId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error enviando solicitud de anticipo.');
+    } finally {
+      setSavingAdvance(false);
+    }
   }
 
   function getJobProgress(job: ProductionOrderRecord) {
@@ -449,6 +703,15 @@ export default function AssignedJobs() {
     );
   }
 
+  const laborJob = jobs.find((job) => job.id === editingLaborJobId) ?? null;
+  const advanceJob = jobs.find((job) => job.id === advanceJobId) ?? null;
+  const advancePlan = advanceJob ? getPaymentPlan(advanceJob) : undefined;
+  const activeAdvanceRequest = advanceJob ? getAdvanceRequest(advanceJob) : undefined;
+  const availableLaborItems = laborItems;
+  const laborTotal = availableLaborItems
+    .filter((item) => selectedLaborItems.includes(item.itemKey))
+    .reduce((sum, item) => sum + item.defaultAmount, 0);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -499,18 +762,18 @@ export default function AssignedJobs() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1040px] text-sm">
+          <table className="w-full min-w-[1180px] text-sm">
             <thead className="bg-muted/40">
               <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Trabajo</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Trabajo Asignado</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Resumen</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Cliente</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Pago</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Inicio</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Fin estimado</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Pago</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Inicio y fin estimado</th>
+                <th className="px-4 py-3 text-right font-medium text-muted-foreground">SketchUp</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Estado</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Etapa</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">SketchUp</th>
+                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Solicitud de anticipo</th>
               </tr>
             </thead>
             <tbody>
@@ -521,41 +784,101 @@ export default function AssignedJobs() {
               ) : jobs.map((job) => {
                 const client = getClient(job);
                 const description = getLeadDescription(job);
-                const sketchupFile = getSketchupFile(job);
+                const initialSketchupFile = getInitialSketchupFile(job);
+                const finalSketchupFile = getFinalSketchupFile(job);
+                const environment = getEnvironment(job);
+                const plan = getPaymentPlan(job);
+                const advanceRequest = getAdvanceRequest(job);
                 const progress = getJobProgress(job);
                 return (
                   <tr key={job.id} className="border-b border-border/70 last:border-b-0">
                     <td className="px-4 py-3">
                       <p className="font-mono text-xs text-muted-foreground">{job.id.slice(0, 8)}</p>
-                      <p className="font-medium">Orden de trabajo</p>
+                      <p className="font-medium">Sketch UP inicial</p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!initialSketchupFile}
+                        onClick={() => initialSketchupFile ? void downloadSketchupFile(initialSketchupFile) : undefined}
+                        className="mt-1 max-w-[190px] gap-2"
+                      >
+                        <Download className="h-4 w-4 shrink-0" />
+                        <span className="truncate">{initialSketchupFile?.fileName ?? environment?.sketchupFileName ?? 'Sin archivo .skp'}</span>
+                      </Button>
                     </td>
                     <td className="px-4 py-3">
                       <p className="max-w-[260px] truncate font-medium">{description}</p>
-                      <p className="text-xs text-muted-foreground">{job.items.length} tareas · avance {progress}%</p>
+                      <p className="text-xs text-muted-foreground">{environment?.description || `${job.items.length} tareas · avance ${progress}%`}</p>
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-medium">{client?.name ?? 'N/A'}</p>
-                      <p className="text-xs text-muted-foreground">{client?.phone ?? 'Sin contacto'}</p>
+                      <p className="max-w-[180px] truncate text-xs text-muted-foreground">{client?.address || client?.phone || 'Sin direccion'}</p>
                     </td>
-                    <td className="px-4 py-3 text-right font-mono font-semibold">{formatCurrency(getPayAmount(job))}</td>
-                    <td className="px-4 py-3">{formatDate(job.startDate)}</td>
-                    <td className="px-4 py-3">{formatDate(job.estimatedDeliveryDate)}</td>
-                    <td className="px-4 py-3"><Badge className={statusClass(job.status)}>{statusLabel(job.status)}</Badge></td>
                     <td className="px-4 py-3">
-                      <select
-                        value={getCurrentPhase(job)}
-                        onChange={(event) => void updateJobPhase(job.id, event.target.value as ProductionPhase)}
-                        className="h-9 rounded-md border border-input bg-background px-2 text-sm outline-none"
-                      >
-                        {PRODUCTION_PHASE_OPTIONS.map((phase) => (
-                          <option key={phase.value} value={phase.value}>{phase.label} · {phase.progress}%</option>
-                        ))}
-                      </select>
+                      <Button size="sm" variant="outline" className="gap-2" onClick={() => openLaborForm(job)}>
+                        <WalletCards className="h-4 w-4" />
+                        {plan ? formatCurrency(plan.totalAmount) : 'Calcular mano de obra'}
+                      </Button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p>{formatDate(job.startDate)}</p>
+                      <p className="text-xs text-muted-foreground">{formatDate(job.estimatedDeliveryDate)}</p>
+                      <Button size="sm" variant="ghost" className="mt-1 h-7 gap-1 px-2 text-xs" onClick={() => window.location.assign('/schedule')}>
+                        <CalendarRange className="h-3.5 w-3.5" />
+                        Definir cronograma
+                      </Button>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Button size="sm" variant="outline" onClick={() => sketchupFile ? void downloadSketchupFile(sketchupFile) : void generateWorkOrderPdf(job)} className="gap-2" disabled={!sketchupFile}>
-                        <Download className="h-4 w-4" />
-                        {sketchupFile ? 'Descargar' : 'Sin archivo'}
+                      <div className="flex flex-col items-end gap-2">
+                        {finalSketchupFile ? (
+                          <Button size="sm" variant="outline" onClick={() => void downloadSketchupFile(finalSketchupFile)} className="max-w-[190px] gap-2">
+                            <Download className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{finalSketchupFile.fileName}</span>
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Sin final</span>
+                        )}
+                        <Label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs hover:bg-accent hover:text-accent-foreground">
+                          {uploadingFinalJobId === job.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                          {finalSketchupFile ? 'Reemplazar final' : 'Subir final'}
+                          <Input
+                            type="file"
+                            accept=".skp,.skb,application/octet-stream"
+                            disabled={uploadingFinalJobId === job.id}
+                            className="hidden"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              void uploadFinalSketchup(job, file);
+                              event.target.value = '';
+                            }}
+                          />
+                        </Label>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge className={laborStatusClass(plan)}>{laborStatusLabel(plan)}</Badge>
+                      {plan?.reviewStatus === 'rejected' && plan.reviewNotes ? (
+                        <p className="mt-1 max-w-[180px] text-xs text-red-700">{plan.reviewNotes}</p>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3">
+                      {plan?.reviewStatus === 'approved' ? (
+                        <select
+                          value={getCurrentPhase(job)}
+                          onChange={(event) => void updateJobPhase(job.id, event.target.value as ProductionPhase)}
+                          className="h-9 rounded-md border border-input bg-background px-2 text-sm outline-none"
+                        >
+                          {PRODUCTION_PHASE_OPTIONS.map((phase) => (
+                            <option key={phase.value} value={phase.value}>{phase.label} · {phase.progress}%</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Disponible al aprobar</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button size="sm" variant="outline" disabled={!plan || plan.reviewStatus !== 'approved'} onClick={() => openAdvanceModal(job)}>
+                        {advanceRequest ? 'Ver solicitud' : 'Solicitar'}
                       </Button>
                     </td>
                   </tr>
@@ -565,6 +888,110 @@ export default function AssignedJobs() {
           </table>
         </div>
       </Card>
+
+      <Dialog open={!!laborJob} onOpenChange={(open) => { if (!open) setEditingLaborJobId(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Formulario de mano de obra</DialogTitle>
+            <DialogDescription>
+              Selecciona los ítems que aplican para este ambiente. El total quedará en revisión por administración.
+            </DialogDescription>
+          </DialogHeader>
+          {laborJob ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="font-medium">{getLeadDescription(laborJob)}</p>
+                <p className="text-xs text-muted-foreground">Trabajo {laborJob.id.slice(0, 8)}</p>
+              </div>
+              <div className="space-y-2">
+                {availableLaborItems.length === 0 ? (
+                  <Card className="border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    No hay actividades de mano de obra configuradas. Pide al admin, gerente o arquitecta que las cree en Solicitud de Pago Contratistas.
+                  </Card>
+                ) : null}
+                {availableLaborItems.map((item) => (
+                  <label key={item.itemKey} className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedLaborItems.includes(item.itemKey)}
+                        onChange={(event) => {
+                          setSelectedLaborItems((current) => event.target.checked
+                            ? [...current, item.itemKey]
+                            : current.filter((key) => key !== item.itemKey));
+                        }}
+                      />
+                      {item.label}
+                    </span>
+                    <span className="font-mono text-xs font-semibold">{formatCurrency(item.defaultAmount)}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-sky-50 px-3 py-2 text-sm">
+                <span className="font-medium text-sky-800">Total mano de obra</span>
+                <span className="font-mono font-semibold text-sky-800">{formatCurrency(laborTotal)}</span>
+              </div>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button variant="outline" onClick={() => setEditingLaborJobId(null)}>Cerrar</Button>
+                <Button disabled={savingLabor || selectedLaborItems.length === 0} onClick={() => void saveLaborPlan(laborJob)}>
+                  {savingLabor ? 'Enviando...' : 'Enviar a revisión'}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!advanceJob} onOpenChange={(open) => { if (!open) setAdvanceJobId(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Solicitud de anticipo</DialogTitle>
+            <DialogDescription>
+              Revisa el estado de tu solicitud o envía una nueva para este trabajo aprobado.
+            </DialogDescription>
+          </DialogHeader>
+          {advanceJob && advancePlan ? (
+            <div className="space-y-4">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-lg border border-border/70 p-3">
+                  <p className="text-xs text-muted-foreground">Total aprobado</p>
+                  <p className="font-mono font-semibold">{formatCurrency(advancePlan.totalAmount)}</p>
+                </div>
+                <div className="rounded-lg border border-border/70 p-3">
+                  <p className="text-xs text-muted-foreground">Estado solicitud</p>
+                  <p className="font-medium">
+                    {activeAdvanceRequest?.status === 'approved' ? 'Aprobado' :
+                      activeAdvanceRequest?.status === 'rejected' ? 'Rechazado' :
+                      activeAdvanceRequest?.status === 'paid' ? 'Pagado' :
+                      activeAdvanceRequest ? 'En revisión' : 'Sin solicitud'}
+                  </p>
+                </div>
+              </div>
+
+              {activeAdvanceRequest?.reviewNotes ? (
+                <Card className="border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  {activeAdvanceRequest.reviewNotes}
+                </Card>
+              ) : null}
+
+              <div className="space-y-1.5">
+                <Label>Monto solicitado</Label>
+                <Input type="number" value={advanceAmount} onChange={(event) => setAdvanceAmount(event.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Nota para administración</Label>
+                <Textarea value={advanceNotes} onChange={(event) => setAdvanceNotes(event.target.value)} placeholder="Detalle opcional de la solicitud..." />
+              </div>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button variant="outline" onClick={() => setAdvanceJobId(null)}>Cerrar</Button>
+                <Button disabled={savingAdvance || Number(advanceAmount) <= 0} onClick={() => void saveAdvanceRequest(advanceJob)}>
+                  {savingAdvance ? 'Enviando...' : activeAdvanceRequest ? 'Reenviar solicitud' : 'Enviar solicitud'}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

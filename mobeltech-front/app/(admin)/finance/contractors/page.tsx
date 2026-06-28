@@ -11,9 +11,10 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useRole } from '@/hooks/use-role-context';
-import { CalendarDays, Check, CheckCircle2, ChevronsUpDown, Eye, Loader2, Plus, Search, Trash2, WalletCards } from 'lucide-react';
+import { CalendarDays, Check, CheckCircle2, ChevronsUpDown, Eye, Loader2, Plus, Search, Trash2, WalletCards, XCircle } from 'lucide-react';
 
 type ContractorOption = {
   id: string;
@@ -58,8 +59,30 @@ type PaymentPlan = {
   totalAmount: number;
   paidAmount: number;
   remainingAmount: number;
+  reviewStatus?: 'submitted' | 'approved' | 'rejected' | string;
+  reviewNotes?: string | null;
   lines: PlanLine[];
   payments: Payment[];
+};
+
+type AdvanceRequest = {
+  id: string;
+  planId: string;
+  contractorId: string;
+  productionOrderId: string;
+  amount: number;
+  status: 'submitted' | 'approved' | 'rejected' | 'paid' | string;
+  notes?: string | null;
+  reviewNotes?: string | null;
+};
+
+type LaborCatalogItem = {
+  id: string;
+  itemKey: string;
+  label: string;
+  defaultAmount: number;
+  active: boolean;
+  sortOrder: number;
 };
 
 const PHASE_TEMPLATE: PlanLine[] = [
@@ -87,6 +110,35 @@ function readError(data: unknown, fallback: string) {
   return fallback;
 }
 
+function reviewLabel(status?: string) {
+  if (status === 'approved') return 'Aprobado';
+  if (status === 'rejected') return 'Rechazado';
+  return 'En revisión';
+}
+
+function reviewBadgeClass(status?: string) {
+  if (status === 'approved') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (status === 'rejected') return 'border-red-200 bg-red-50 text-red-700';
+  return 'border-amber-200 bg-amber-50 text-amber-700';
+}
+
+function advanceLabel(status?: string) {
+  if (status === 'approved') return 'Anticipo aprobado';
+  if (status === 'rejected') return 'Anticipo rechazado';
+  if (status === 'paid') return 'Anticipo pagado';
+  return 'Anticipo en revisión';
+}
+
+function slugifyLaborKey(value: string) {
+  const normalized = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || `actividad-${Date.now()}`;
+}
+
 export default function ContractorsFinancePage() {
   const { toast } = useToast();
   const { currentRole } = useRole();
@@ -99,6 +151,8 @@ export default function ContractorsFinancePage() {
   const [contractors, setContractors] = useState<ContractorOption[]>([]);
   const [jobs, setJobs] = useState<JobOption[]>([]);
   const [plans, setPlans] = useState<PaymentPlan[]>([]);
+  const [advanceRequests, setAdvanceRequests] = useState<AdvanceRequest[]>([]);
+  const [laborItems, setLaborItems] = useState<LaborCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingPlan, setSavingPlan] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
@@ -121,6 +175,18 @@ export default function ContractorsFinancePage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [movementPlan, setMovementPlan] = useState<PaymentPlan | null>(null);
+  const [rejectPlan, setRejectPlan] = useState<PaymentPlan | null>(null);
+  const [rejectAdvance, setRejectAdvance] = useState<AdvanceRequest | null>(null);
+  const [activitiesOpen, setActivitiesOpen] = useState(false);
+  const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
+  const [activityLabel, setActivityLabel] = useState('');
+  const [activityAmount, setActivityAmount] = useState('');
+  const [activityActive, setActivityActive] = useState(true);
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [advanceReviewNotes, setAdvanceReviewNotes] = useState('');
+  const [reviewingPlanId, setReviewingPlanId] = useState<string | null>(null);
+  const [reviewingAdvanceId, setReviewingAdvanceId] = useState<string | null>(null);
+  const [savingActivity, setSavingActivity] = useState(false);
   const [activeTab, setActiveTab] = useState(isReadOnly ? 'table' : 'plan');
   const [switchingTab, setSwitchingTab] = useState(false);
   const tabTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -135,20 +201,28 @@ export default function ContractorsFinancePage() {
     setLoading(true);
     setError(null);
     try {
-      const [optionsResponse, plansResponse] = await Promise.all([
+      const [optionsResponse, plansResponse, advanceResponse, laborItemsResponse] = await Promise.all([
         fetch(`${apiBase}/api/contractor-finance/options`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/contractor-finance/plans`, { cache: 'no-store' }),
+        fetch(`${apiBase}/api/contractor-finance/advance-requests`, { cache: 'no-store' }),
+        fetch(`${apiBase}/api/contractor-finance/labor-items?activeOnly=false`, { cache: 'no-store' }),
       ]);
 
       const optionsData = await optionsResponse.json().catch(() => null);
       const plansData = await plansResponse.json().catch(() => null);
+      const advanceData = await advanceResponse.json().catch(() => null);
+      const laborItemsData = await laborItemsResponse.json().catch(() => null);
 
       if (!optionsResponse.ok) throw new Error(readError(optionsData, 'No se pudieron cargar contratistas y trabajos.'));
       if (!plansResponse.ok) throw new Error(readError(plansData, 'No se pudieron cargar los planes de pago.'));
+      if (!advanceResponse.ok) throw new Error(readError(advanceData, 'No se pudieron cargar las solicitudes de anticipo.'));
+      if (!laborItemsResponse.ok) throw new Error(readError(laborItemsData, 'No se pudieron cargar las actividades de mano de obra.'));
 
       setContractors(optionsData.contractors ?? []);
       setJobs(optionsData.jobs ?? []);
       setPlans(plansData ?? []);
+      setAdvanceRequests(advanceData ?? []);
+      setLaborItems(laborItemsData ?? []);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error cargando pagos de contratistas.';
       setError(message);
@@ -220,6 +294,10 @@ export default function ContractorsFinancePage() {
       return matchesSearch && matchesContractor && (noDateFilter || matchesDates);
     });
   }, [dateFrom, dateTo, plans, tableContractor, tableSearch]);
+
+  function getAdvanceRequest(plan: PaymentPlan) {
+    return advanceRequests.find((request) => request.planId === plan.id);
+  }
 
   function updatePhase(index: number, field: 'phaseLabel' | 'plannedAmount', value: string) {
     setPhaseLines((current) =>
@@ -373,6 +451,146 @@ export default function ContractorsFinancePage() {
     }
   }
 
+  async function handleReviewPlan(plan: PaymentPlan, reviewStatus: 'approved' | 'rejected', notes?: string) {
+    if (reviewStatus === 'rejected' && !notes?.trim()) {
+      toast({ title: 'Motivo requerido', description: 'Escribe por qué se rechaza la mano de obra.', variant: 'destructive' });
+      return;
+    }
+
+    setReviewingPlanId(plan.id);
+    try {
+      const response = await fetch(`${apiBase}/api/contractor-finance/plans/${plan.id}/review`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reviewStatus,
+          reviewNotes: reviewStatus === 'rejected' ? notes?.trim() : null,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(readError(data, 'No se pudo actualizar la revisión.'));
+
+      await loadAll();
+      setRejectPlan(null);
+      setReviewNotes('');
+      toast({
+        title: reviewStatus === 'approved' ? 'Mano de obra aprobada' : 'Mano de obra rechazada',
+        description: reviewStatus === 'approved'
+          ? 'El contratista ya puede avanzar a etapas y solicitud de anticipo.'
+          : 'El motivo quedó visible para que el contratista corrija el formulario.',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudo actualizar la revisión.';
+      toast({ title: 'Error de revisión', description: message, variant: 'destructive' });
+    } finally {
+      setReviewingPlanId(null);
+    }
+  }
+
+  async function handleReviewAdvance(request: AdvanceRequest, status: 'approved' | 'rejected' | 'paid', notes?: string) {
+    if (status === 'rejected' && !notes?.trim()) {
+      toast({ title: 'Motivo requerido', description: 'Escribe por qué se rechaza el anticipo.', variant: 'destructive' });
+      return;
+    }
+
+    setReviewingAdvanceId(request.id);
+    try {
+      const response = await fetch(`${apiBase}/api/contractor-finance/advance-requests/${request.id}/review`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status,
+          reviewNotes: status === 'rejected' ? notes?.trim() : null,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(readError(data, 'No se pudo revisar el anticipo.'));
+
+      await loadAll();
+      setRejectAdvance(null);
+      setAdvanceReviewNotes('');
+      toast({ title: 'Solicitud actualizada', description: 'El contratista verá el nuevo estado del anticipo.' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudo revisar el anticipo.';
+      toast({ title: 'Error de revisión', description: message, variant: 'destructive' });
+    } finally {
+      setReviewingAdvanceId(null);
+    }
+  }
+
+  function resetActivityForm() {
+    setEditingActivityId(null);
+    setActivityLabel('');
+    setActivityAmount('');
+    setActivityActive(true);
+  }
+
+  function editActivity(item: LaborCatalogItem) {
+    setEditingActivityId(item.id);
+    setActivityLabel(item.label);
+    setActivityAmount(String(item.defaultAmount));
+    setActivityActive(item.active);
+  }
+
+  async function handleSaveActivity() {
+    if (!activityLabel.trim()) {
+      toast({ title: 'Nombre requerido', description: 'Escribe el nombre de la actividad de mano de obra.', variant: 'destructive' });
+      return;
+    }
+    if (numberValue(activityAmount) <= 0) {
+      toast({ title: 'Precio inválido', description: 'El precio debe ser mayor a 0.', variant: 'destructive' });
+      return;
+    }
+
+    setSavingActivity(true);
+    try {
+      const payload = {
+        itemKey: editingActivityId ? undefined : `${slugifyLaborKey(activityLabel)}-${Date.now().toString(36)}`,
+        label: activityLabel.trim(),
+        defaultAmount: numberValue(activityAmount),
+        active: activityActive ? 'true' : 'false',
+        sortOrder: editingActivityId
+          ? laborItems.find((item) => item.id === editingActivityId)?.sortOrder ?? 0
+          : laborItems.length + 1,
+      };
+      const response = await fetch(`${apiBase}/api/contractor-finance/labor-items${editingActivityId ? `/${editingActivityId}` : ''}`, {
+        method: editingActivityId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(readError(data, 'No se pudo guardar la actividad.'));
+
+      await loadAll();
+      resetActivityForm();
+      toast({ title: 'Actividad guardada', description: 'Los contratistas ya verán esta actividad activa en su formulario.' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudo guardar la actividad.';
+      toast({ title: 'Error al guardar actividad', description: message, variant: 'destructive' });
+    } finally {
+      setSavingActivity(false);
+    }
+  }
+
+  async function toggleActivity(item: LaborCatalogItem) {
+    setSavingActivity(true);
+    try {
+      const response = await fetch(`${apiBase}/api/contractor-finance/labor-items/${item.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: item.active ? 'false' : 'true' }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(readError(data, 'No se pudo cambiar el estado de la actividad.'));
+      await loadAll();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudo cambiar el estado de la actividad.';
+      toast({ title: 'Error de actividad', description: message, variant: 'destructive' });
+    } finally {
+      setSavingActivity(false);
+    }
+  }
+
   function renderContextControls(readOnlyAmount = false) {
     return (
       <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_minmax(260px,1fr)_180px]">
@@ -475,9 +693,25 @@ export default function ContractorsFinancePage() {
   return (
     <AppLayout>
       <main className="space-y-5 p-4 md:p-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Pagos a contratistas</h1>
-          <p className="text-sm text-muted-foreground">Planes por trabajo, fases y pagos registrados.</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Pagos a contratistas</h1>
+            <p className="text-sm text-muted-foreground">Revisión de mano de obra, anticipos y pagos registrados.</p>
+          </div>
+          {!isReadOnly ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                resetActivityForm();
+                setActivitiesOpen(true);
+              }}
+              className="gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              Actividades
+            </Button>
+          ) : null}
         </div>
 
         {error ? <Card className="border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</Card> : null}
@@ -639,25 +873,40 @@ export default function ContractorsFinancePage() {
               </div>
 
               <div className="overflow-x-auto rounded-md border border-border/70">
-                <table className="w-full min-w-[1080px] text-sm">
+                <table className="w-full min-w-[1240px] text-sm">
                   <thead className="bg-muted/40">
                     <tr className="border-b border-border/70">
                       <th className="px-3 py-2 text-left font-medium text-muted-foreground">Contratista</th>
                       <th className="px-3 py-2 text-left font-medium text-muted-foreground">Trabajo</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Estado admin</th>
                       <th className="px-3 py-2 text-right font-medium text-muted-foreground">Total</th>
                       <th className="px-3 py-2 text-right font-medium text-muted-foreground">Saldo</th>
                       <th className="px-3 py-2 text-left font-medium text-muted-foreground">Movimientos</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Anticipo</th>
+                      {!isReadOnly ? <th className="px-3 py-2 text-right font-medium text-muted-foreground">Revisión</th> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
-                      <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">Cargando...</td></tr>
+                      <tr><td colSpan={isReadOnly ? 7 : 8} className="px-3 py-8 text-center text-muted-foreground">Cargando...</td></tr>
                     ) : filteredPlans.length === 0 ? (
-                      <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">No hay pagos para mostrar.</td></tr>
-                    ) : filteredPlans.map((plan) => (
+                      <tr><td colSpan={isReadOnly ? 7 : 8} className="px-3 py-8 text-center text-muted-foreground">No hay pagos para mostrar.</td></tr>
+                    ) : filteredPlans.map((plan) => {
+                      const advanceRequest = getAdvanceRequest(plan);
+                      return (
                       <tr key={plan.id} className="border-b border-border/60 align-top last:border-b-0">
                         <td className="px-3 py-3 font-medium">{plan.contractorName}</td>
                         <td className="px-3 py-3">{plan.jobName}</td>
+                        <td className="px-3 py-3">
+                          <div className="space-y-1">
+                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${reviewBadgeClass(plan.reviewStatus)}`}>
+                              {reviewLabel(plan.reviewStatus)}
+                            </span>
+                            {plan.reviewStatus === 'rejected' && plan.reviewNotes ? (
+                              <p className="max-w-[220px] text-xs text-red-600">{plan.reviewNotes}</p>
+                            ) : null}
+                          </div>
+                        </td>
                         <td className="px-3 py-3 text-right">
                           <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-mono text-xs font-semibold text-sky-700">
                             {money(plan.totalAmount)}
@@ -674,8 +923,81 @@ export default function ContractorsFinancePage() {
                             Ver detalle
                           </Button>
                         </td>
+                        <td className="px-3 py-3">
+                          {advanceRequest ? (
+                            <div className="space-y-2">
+                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${reviewBadgeClass(advanceRequest.status)}`}>
+                                {advanceLabel(advanceRequest.status)}
+                              </span>
+                              <p className="font-mono text-xs font-semibold">{money(advanceRequest.amount)}</p>
+                              {advanceRequest.notes ? <p className="max-w-[180px] text-xs text-muted-foreground">{advanceRequest.notes}</p> : null}
+                              {advanceRequest.reviewNotes ? <p className="max-w-[180px] text-xs text-red-600">{advanceRequest.reviewNotes}</p> : null}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Sin solicitud</span>
+                          )}
+                        </td>
+                        {!isReadOnly ? (
+                          <td className="px-3 py-3">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={reviewingPlanId === plan.id || plan.reviewStatus === 'approved'}
+                                onClick={() => handleReviewPlan(plan, 'approved')}
+                                className="gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                              >
+                                {reviewingPlanId === plan.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                                Aprobar
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={reviewingPlanId === plan.id}
+                                onClick={() => {
+                                  setRejectPlan(plan);
+                                  setReviewNotes(plan.reviewNotes ?? '');
+                                }}
+                                className="gap-1.5 border-red-200 text-red-700 hover:bg-red-50"
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                                Rechazar
+                              </Button>
+                              {advanceRequest ? (
+                                <>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={reviewingAdvanceId === advanceRequest.id || advanceRequest.status === 'approved' || advanceRequest.status === 'paid'}
+                                    onClick={() => handleReviewAdvance(advanceRequest, 'approved')}
+                                    className="border-sky-200 text-sky-700 hover:bg-sky-50"
+                                  >
+                                    Aprobar anticipo
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={reviewingAdvanceId === advanceRequest.id}
+                                    onClick={() => {
+                                      setRejectAdvance(advanceRequest);
+                                      setAdvanceReviewNotes(advanceRequest.reviewNotes ?? '');
+                                    }}
+                                    className="border-red-200 text-red-700 hover:bg-red-50"
+                                  >
+                                    Rechazar anticipo
+                                  </Button>
+                                </>
+                              ) : null}
+                            </div>
+                          </td>
+                        ) : null}
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -684,6 +1006,70 @@ export default function ContractorsFinancePage() {
             </>
           ) : null}
         </Tabs>
+
+        <Dialog open={activitiesOpen} onOpenChange={(open) => { setActivitiesOpen(open); if (!open) resetActivityForm(); }}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Actividades de mano de obra</DialogTitle>
+              <DialogDescription>Agrega actividades con precio fijo para el formulario del contratista.</DialogDescription>
+            </DialogHeader>
+
+            <Card className="border-border/70 p-4">
+              <div className="grid gap-3 md:grid-cols-[1fr_150px_auto_auto] md:items-end">
+                <div className="space-y-1.5">
+                  <Label>Actividad</Label>
+                  <Input value={activityLabel} onChange={(event) => setActivityLabel(event.target.value)} placeholder="Ej. Armado de cajonería" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Precio Bs.</Label>
+                  <Input type="number" value={activityAmount} onChange={(event) => setActivityAmount(event.target.value)} placeholder="0.00" />
+                </div>
+                <Button type="button" variant="outline" onClick={resetActivityForm}>Limpiar</Button>
+                <Button type="button" disabled={savingActivity} onClick={() => void handleSaveActivity()}>
+                  {savingActivity ? 'Guardando...' : editingActivityId ? 'Actualizar' : 'Agregar'}
+                </Button>
+              </div>
+            </Card>
+
+            <div className="max-h-[380px] overflow-auto rounded-md border border-border/70">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead className="bg-muted/40">
+                  <tr className="border-b border-border/70">
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">Actividad</th>
+                    <th className="px-3 py-2 text-right font-medium text-muted-foreground">Precio</th>
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">Estado</th>
+                    <th className="px-3 py-2 text-right font-medium text-muted-foreground">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {laborItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-8 text-center text-muted-foreground">No hay actividades creadas.</td>
+                    </tr>
+                  ) : laborItems.map((item) => (
+                    <tr key={item.id} className="border-b border-border/60 last:border-b-0">
+                      <td className="px-3 py-3 font-medium">{item.label}</td>
+                      <td className="px-3 py-3 text-right font-mono font-semibold">{money(item.defaultAmount)}</td>
+                      <td className="px-3 py-3">
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${item.active ? 'bg-emerald-100 text-emerald-700' : 'bg-zinc-100 text-zinc-600'}`}>
+                          {item.active ? 'Activa' : 'Inactiva'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex justify-end gap-2">
+                          <Button type="button" variant="outline" size="sm" onClick={() => editActivity(item)}>Editar</Button>
+                          <Button type="button" variant="ghost" size="sm" disabled={savingActivity} onClick={() => void toggleActivity(item)}>
+                            {item.active ? 'Desactivar' : 'Activar'}
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={!!movementPlan} onOpenChange={(open) => { if (!open) setMovementPlan(null); }}>
           <DialogContent className="max-w-xl p-0">
@@ -758,6 +1144,86 @@ export default function ContractorsFinancePage() {
                 </div>
               </div>
             ) : null}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!rejectPlan} onOpenChange={(open) => { if (!open) { setRejectPlan(null); setReviewNotes(''); } }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Rechazar mano de obra</DialogTitle>
+              <DialogDescription>
+                Este mensaje aparecerá al contratista para que pueda corregir su formulario.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-sm">
+                <p className="font-medium">{rejectPlan?.contractorName}</p>
+                <p className="text-muted-foreground">{rejectPlan?.jobName}</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Motivo del rechazo</Label>
+                <Textarea
+                  value={reviewNotes}
+                  onChange={(event) => setReviewNotes(event.target.value)}
+                  placeholder="Ej: ajustar monto de instalación o revisar cantidades de corte..."
+                  className="min-h-28"
+                />
+              </div>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" onClick={() => { setRejectPlan(null); setReviewNotes(''); }}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!rejectPlan || reviewingPlanId === rejectPlan.id}
+                  onClick={() => rejectPlan ? handleReviewPlan(rejectPlan, 'rejected', reviewNotes) : undefined}
+                  className="gap-2 bg-red-600 text-white hover:bg-red-700"
+                >
+                  {rejectPlan && reviewingPlanId === rejectPlan.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                  Rechazar y enviar motivo
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!rejectAdvance} onOpenChange={(open) => { if (!open) { setRejectAdvance(null); setAdvanceReviewNotes(''); } }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Rechazar solicitud de anticipo</DialogTitle>
+              <DialogDescription>
+                El contratista verá este comentario en su modal de solicitud.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-sm">
+                <p className="font-medium">{rejectAdvance ? money(rejectAdvance.amount) : ''}</p>
+                <p className="text-muted-foreground">{rejectAdvance?.notes || 'Sin nota del contratista'}</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Motivo del rechazo</Label>
+                <Textarea
+                  value={advanceReviewNotes}
+                  onChange={(event) => setAdvanceReviewNotes(event.target.value)}
+                  placeholder="Ej: anticipo excede el avance actual o falta respaldar la solicitud..."
+                  className="min-h-28"
+                />
+              </div>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" onClick={() => { setRejectAdvance(null); setAdvanceReviewNotes(''); }}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!rejectAdvance || reviewingAdvanceId === rejectAdvance.id}
+                  onClick={() => rejectAdvance ? handleReviewAdvance(rejectAdvance, 'rejected', advanceReviewNotes) : undefined}
+                  className="gap-2 bg-red-600 text-white hover:bg-red-700"
+                >
+                  {rejectAdvance && reviewingAdvanceId === rejectAdvance.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                  Rechazar anticipo
+                </Button>
+              </div>
+            </div>
           </DialogContent>
         </Dialog>
       </main>

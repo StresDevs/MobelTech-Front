@@ -788,8 +788,8 @@ export function GanttSchedule() {
 
         <div className="max-h-[68vh] overflow-auto">
           <div className="min-w-max">
-          <div className="grid border-b border-border bg-muted/30 text-xs font-semibold text-muted-foreground" style={{ gridTemplateColumns: `280px ${timelineColumnWidth}` }}>
-            <div className="border-r border-border px-4 py-3">Mueble / Cliente / Contratista</div>
+          <div className="sticky top-0 z-20 grid border-b border-border bg-muted/30 text-xs font-semibold text-muted-foreground shadow-sm" style={{ gridTemplateColumns: `280px ${timelineColumnWidth}` }}>
+            <div className="border-r border-border bg-muted/30 px-4 py-3">Mueble / Cliente / Contratista</div>
             <div>
               <div className="grid border-b border-border/50" style={{ gridTemplateColumns: `repeat(${visibleDayColumns.length}, minmax(32px, 1fr))` }}>
               {monthGroups.map((group) => (

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { es } from 'date-fns/locale';
 import { useRole } from '@/hooks/use-role-context';
 import { Quotation, QuotationItem, QuotationAudit, QuotationEnvironmentProject } from '@/lib/types';
 import { Card } from '@/components/ui/card';
@@ -189,6 +190,7 @@ function normalizeQuotationRecord(raw: any): ApiQuotation {
     environmentProjects: (raw.environmentProjects ?? []).map((environment: any) => ({
       ...environment,
       price: Number(environment.price ?? 0),
+      clientPrice: Number(environment.clientPrice ?? environment.price ?? 0),
     })),
     auditLogs: (raw.auditLogs ?? []).map((log: any) => ({
       ...log,
@@ -688,8 +690,11 @@ function QuotationDetail({
   saving,
 }: DetailProps) {
   const { currentRole, userName } = useRole();
+  const normalizedRole = String(currentRole).toLowerCase();
+  const canManageEnvironmentProjects = ['admin', 'architect', 'gerente', 'gerencia', 'manager'].includes(normalizedRole);
 
   const currentQuotation = quotation;
+  const canCreateEnvironmentProjects = canManageEnvironmentProjects;
   const cfg = STATUS_CONFIG[currentQuotation.status];
   const subtotal = currentQuotation.items.reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0);
   const quotationCode = currentQuotation.uid ?? currentQuotation.prequotation?.uid ?? currentQuotation.id;
@@ -743,7 +748,7 @@ function QuotationDetail({
   }, [currentQuotation]);
 
   useEffect(() => {
-    if (!apiBase || currentRole !== 'admin') return;
+    if (!apiBase || !canManageEnvironmentProjects) return;
     void (async () => {
       try {
         const response = await fetch(`${apiBase}/api/contractors`, { cache: 'no-store' });
@@ -751,7 +756,7 @@ function QuotationDetail({
         setContractorOptions(await response.json());
       } catch {}
     })();
-  }, [apiBase, currentRole]);
+  }, [apiBase, canManageEnvironmentProjects]);
 
   function addEnvironmentRow() {
     setEnvironmentRows((current) => [
@@ -777,6 +782,7 @@ function QuotationDetail({
       ambience: row.ambience.trim(),
       description: row.description.trim() || null,
       price: Number(row.price),
+      clientPrice: Number(row.price),
       estimatedStartDate: row.estimatedStartDate,
       estimatedEndDate: row.estimatedEndDate,
       assignedContractorId: isUuid(row.assignedContractorId) ? row.assignedContractorId : null,
@@ -794,7 +800,7 @@ function QuotationDetail({
     });
 
     if (hasInvalidRow) {
-      setEnvironmentError('Completa ambiente, precio y rango de fechas válido en cada fila.');
+      setEnvironmentError('Completa ambiente, precio al cliente y rango de fechas válido en cada fila.');
       return;
     }
 
@@ -1016,7 +1022,7 @@ function QuotationDetail({
                   Divide esta cotización en ambientes independientes con fechas y contratista responsable.
                 </p>
               </div>
-              {currentRole === 'admin' && (
+              {canCreateEnvironmentProjects && (
                 <Button
                   size="sm"
                   className="gap-1.5 self-start"
@@ -1037,8 +1043,8 @@ function QuotationDetail({
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Ambiente</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Descripción</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Contratista</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">SketchUp</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Precio</th>
+                      <th className="w-44 px-4 py-3 text-left text-xs font-semibold text-muted-foreground">SketchUp</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Precio al cliente</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Inicio</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Fin</th>
                     </tr>
@@ -1049,18 +1055,18 @@ function QuotationDetail({
                         <td className="px-4 py-3 font-medium">{environment.ambience}</td>
                         <td className="px-4 py-3 text-muted-foreground">{environment.description || '—'}</td>
                         <td className="px-4 py-3">{environment.contractorName || 'Sin asignar'}</td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                        <td className="max-w-44 px-4 py-3 text-muted-foreground">
                           {environment.sketchupFileName ? (
                             environment.sketchupFileUrl ? (
-                              <a className="font-medium text-[#b87932] hover:underline" href={environment.sketchupFileUrl} target="_blank" rel="noreferrer">
+                              <a className="block truncate font-medium text-[#b87932] hover:underline" href={environment.sketchupFileUrl} target="_blank" rel="noreferrer" title={environment.sketchupFileName}>
                                 {environment.sketchupFileName}
                               </a>
                             ) : (
-                              environment.sketchupFileName
+                              <span className="block truncate" title={environment.sketchupFileName}>{environment.sketchupFileName}</span>
                             )
                           ) : '—'}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono">{formatCurrency(environment.price)}</td>
+                        <td className="px-4 py-3 text-right font-mono">{formatCurrency(environment.clientPrice ?? environment.price)}</td>
                         <td className="px-4 py-3">{environment.estimatedStartDate}</td>
                         <td className="px-4 py-3">{environment.estimatedEndDate}</td>
                       </tr>
@@ -1257,7 +1263,7 @@ function QuotationDetail({
               <div>
                 <p className="text-lg font-semibold">Crear proyectos por ambiente</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Registra ambientes, precio estimado, rango de fechas y contratista para esta cotización.
+                  Registra ambientes, precio al cliente, rango de fechas y contratista para esta cotización.
                 </p>
               </div>
               <Button variant="outline" size="sm" onClick={() => setShowEnvironmentBuilder(false)} disabled={environmentSaving}>
@@ -1273,7 +1279,7 @@ function QuotationDetail({
 
             <div className="space-y-3">
               {environmentRows.map((row) => (
-                <div key={row.key} className="grid gap-3 rounded-2xl border border-border bg-muted/15 p-4 lg:grid-cols-[1fr_1.25fr_1fr_1.2fr_0.75fr_1.5fr_auto]">
+                <div key={row.key} className="grid gap-3 rounded-2xl border border-border bg-muted/15 p-4 lg:grid-cols-[minmax(120px,1fr)_minmax(150px,1.2fr)_minmax(150px,1fr)_minmax(150px,150px)_minmax(130px,0.8fr)_minmax(240px,1.4fr)_auto]">
                   <Input
                     placeholder="Ambiente"
                     value={row.ambience}
@@ -1296,7 +1302,7 @@ function QuotationDetail({
                       </option>
                     ))}
                   </select>
-                  <label className="flex h-10 cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/50">
+                  <label className="flex h-10 min-w-0 cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/50">
                     <Upload className="h-4 w-4 shrink-0" />
                     <span className="min-w-0 flex-1 truncate">
                       {row.sketchupFileName || 'Archivo SketchUp'}
@@ -1328,7 +1334,7 @@ function QuotationDetail({
                     type="number"
                     min="0"
                     step="0.01"
-                    placeholder="Precio"
+                    placeholder="Precio al cliente"
                     value={row.price}
                     onChange={(e) => setEnvironmentRows((current) => current.map((item) => item.key === row.key ? { ...item, price: e.target.value } : item))}
                   />
@@ -1355,6 +1361,7 @@ function QuotationDetail({
                     <PopoverContent align="start" className="w-auto p-0">
                       <DateRangeCalendar
                         mode="range"
+                        locale={es}
                         numberOfMonths={1}
                         selected={{
                           from: parseLocalDate(row.estimatedStartDate),

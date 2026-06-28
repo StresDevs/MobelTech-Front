@@ -451,6 +451,7 @@ export interface QuotationEnvironmentProject {
   sketchupFileUrl?: string | null;
   sketchupFileSize?: string | null;
   price: number;
+  clientPrice?: number;
   estimatedStartDate: string;
   estimatedEndDate: string;
   contractorName?: string | null;

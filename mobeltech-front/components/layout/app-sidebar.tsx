@@ -64,7 +64,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     if (
       pathname?.startsWith('/production') ||
       pathname?.startsWith('/schedule') ||
-      pathname?.startsWith('/contractor-requests')
+      pathname?.startsWith('/contractor-requests') ||
+      pathname?.startsWith('/contractor-payment-requests')
     ) {
       setOpenProduction(true);
     }
@@ -99,7 +100,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const productionSubItems = [
     { label: 'Cronograma', href: '/schedule' },
     { label: 'Solicitud de Material', href: '/contractor-requests' },
-  ].filter((item) => currentRole !== 'partner' || item.href === '/schedule');
+    { label: 'Solicitud de Pago Contratistas', href: '/contractor-payment-requests' },
+  ].filter((item) => {
+    if (currentRole === 'partner') return item.href === '/schedule';
+    if (currentRole === 'contractor') return item.href !== '/contractor-payment-requests';
+    return true;
+  });
 
   const logisticsSubItems = [
     { label: 'Inventario y Compras', href: '/inventory' },
@@ -212,7 +218,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             const productionActive =
               pathname?.startsWith('/production') ||
               pathname?.startsWith('/schedule') ||
-              pathname?.startsWith('/contractor-requests');
+              pathname?.startsWith('/contractor-requests') ||
+              pathname?.startsWith('/contractor-payment-requests');
 
             return (
               <div key={module.id} className="space-y-0.5">
