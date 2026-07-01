@@ -34,6 +34,11 @@ type PlanLine = {
   id?: string;
   phaseKey: string;
   phaseLabel: string;
+  unit?: string;
+  width?: number;
+  heightQuantity?: number;
+  measuredTotal?: number;
+  unitPrice?: number;
   plannedAmount: number;
   paidAmount?: number;
   remainingAmount?: number;
@@ -80,7 +85,9 @@ type LaborCatalogItem = {
   id: string;
   itemKey: string;
   label: string;
+  unit: string;
   defaultAmount: number;
+  referencePrice?: number;
   active: boolean;
   sortOrder: number;
 };
@@ -180,6 +187,7 @@ export default function ContractorsFinancePage() {
   const [activitiesOpen, setActivitiesOpen] = useState(false);
   const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
   const [activityLabel, setActivityLabel] = useState('');
+  const [activityUnit, setActivityUnit] = useState('ML');
   const [activityAmount, setActivityAmount] = useState('');
   const [activityActive, setActivityActive] = useState(true);
   const [reviewNotes, setReviewNotes] = useState('');
@@ -521,6 +529,7 @@ export default function ContractorsFinancePage() {
   function resetActivityForm() {
     setEditingActivityId(null);
     setActivityLabel('');
+    setActivityUnit('ML');
     setActivityAmount('');
     setActivityActive(true);
   }
@@ -528,7 +537,8 @@ export default function ContractorsFinancePage() {
   function editActivity(item: LaborCatalogItem) {
     setEditingActivityId(item.id);
     setActivityLabel(item.label);
-    setActivityAmount(String(item.defaultAmount));
+    setActivityUnit(item.unit || 'ML');
+    setActivityAmount(String(item.referencePrice ?? item.defaultAmount));
     setActivityActive(item.active);
   }
 
@@ -547,6 +557,8 @@ export default function ContractorsFinancePage() {
       const payload = {
         itemKey: editingActivityId ? undefined : `${slugifyLaborKey(activityLabel)}-${Date.now().toString(36)}`,
         label: activityLabel.trim(),
+        unit: activityUnit.trim().toUpperCase() || 'UND',
+        referencePrice: numberValue(activityAmount),
         defaultAmount: numberValue(activityAmount),
         active: activityActive ? 'true' : 'false',
         sortOrder: editingActivityId
@@ -1015,13 +1027,17 @@ export default function ContractorsFinancePage() {
             </DialogHeader>
 
             <Card className="border-border/70 p-4">
-              <div className="grid gap-3 md:grid-cols-[1fr_150px_auto_auto] md:items-end">
+              <div className="grid gap-3 md:grid-cols-[1fr_110px_150px_auto_auto] md:items-end">
                 <div className="space-y-1.5">
-                  <Label>Actividad</Label>
+                  <Label>Item</Label>
                   <Input value={activityLabel} onChange={(event) => setActivityLabel(event.target.value)} placeholder="Ej. Armado de cajonería" />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Precio Bs.</Label>
+                  <Label>Unidad</Label>
+                  <Input value={activityUnit} onChange={(event) => setActivityUnit(event.target.value)} placeholder="ML" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>P. unitario Bs.</Label>
                   <Input type="number" value={activityAmount} onChange={(event) => setActivityAmount(event.target.value)} placeholder="0.00" />
                 </div>
                 <Button type="button" variant="outline" onClick={resetActivityForm}>Limpiar</Button>
@@ -1032,11 +1048,12 @@ export default function ContractorsFinancePage() {
             </Card>
 
             <div className="max-h-[380px] overflow-auto rounded-md border border-border/70">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead className="bg-muted/40">
+              <table className="w-full min-w-[780px] text-sm">
+                <thead>
                   <tr className="border-b border-border/70">
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">Actividad</th>
-                    <th className="px-3 py-2 text-right font-medium text-muted-foreground">Precio</th>
+                    <th className="bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
+                    <th className="bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
+                    <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">Estado</th>
                     <th className="px-3 py-2 text-right font-medium text-muted-foreground">Acciones</th>
                   </tr>
@@ -1044,12 +1061,13 @@ export default function ContractorsFinancePage() {
                 <tbody>
                   {laborItems.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-3 py-8 text-center text-muted-foreground">No hay actividades creadas.</td>
+                      <td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">No hay actividades creadas.</td>
                     </tr>
                   ) : laborItems.map((item) => (
                     <tr key={item.id} className="border-b border-border/60 last:border-b-0">
-                      <td className="px-3 py-3 font-medium">{item.label}</td>
-                      <td className="px-3 py-3 text-right font-mono font-semibold">{money(item.defaultAmount)}</td>
+                      <td className="bg-amber-50/80 px-3 py-3 font-medium">{item.label}</td>
+                      <td className="bg-amber-50/80 px-3 py-3 text-center font-mono text-xs font-semibold">{item.unit || 'UND'}</td>
+                      <td className="bg-sky-50 px-3 py-3 text-right font-mono font-semibold">{money(item.referencePrice ?? item.defaultAmount)}</td>
                       <td className="px-3 py-3">
                         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${item.active ? 'bg-emerald-100 text-emerald-700' : 'bg-zinc-100 text-zinc-600'}`}>
                           {item.active ? 'Activa' : 'Inactiva'}

@@ -17,6 +17,11 @@ type PlanLine = {
   id?: string;
   phaseKey: string;
   phaseLabel: string;
+  unit?: string;
+  width?: number;
+  heightQuantity?: number;
+  measuredTotal?: number;
+  unitPrice?: number;
   plannedAmount: number;
 };
 
@@ -36,7 +41,9 @@ type LaborCatalogItem = {
   id: string;
   itemKey: string;
   label: string;
+  unit: string;
   defaultAmount: number;
+  referencePrice?: number;
   active: boolean;
   sortOrder: number;
 };
@@ -97,6 +104,7 @@ export default function ContractorPaymentRequestsPage() {
   const [activitiesOpen, setActivitiesOpen] = useState(false);
   const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
   const [activityLabel, setActivityLabel] = useState('');
+  const [activityUnit, setActivityUnit] = useState('ML');
   const [activityAmount, setActivityAmount] = useState('');
   const [savingActivity, setSavingActivity] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -143,13 +151,15 @@ export default function ContractorPaymentRequestsPage() {
   function resetActivityForm() {
     setEditingActivityId(null);
     setActivityLabel('');
+    setActivityUnit('ML');
     setActivityAmount('');
   }
 
   function editActivity(item: LaborCatalogItem) {
     setEditingActivityId(item.id);
     setActivityLabel(item.label);
-    setActivityAmount(String(item.defaultAmount));
+    setActivityUnit(item.unit || 'ML');
+    setActivityAmount(String(item.referencePrice ?? item.defaultAmount));
   }
 
   async function reviewPlan(plan: PaymentPlan, reviewStatus: 'approved' | 'rejected', notes?: string) {
@@ -198,6 +208,8 @@ export default function ContractorPaymentRequestsPage() {
         body: JSON.stringify({
           ...(editingActivityId ? {} : { itemKey: `${slugifyLaborKey(activityLabel)}-${Date.now().toString(36)}` }),
           label: activityLabel.trim(),
+          unit: activityUnit.trim().toUpperCase() || 'UND',
+          referencePrice: numberValue(activityAmount),
           defaultAmount: numberValue(activityAmount),
           active: 'true',
           sortOrder: editingActivityId ? laborItems.find((item) => item.id === editingActivityId)?.sortOrder ?? 0 : laborItems.length + 1,
@@ -317,13 +329,17 @@ export default function ContractorPaymentRequestsPage() {
               <DialogDescription>Agrega actividades con precio fijo para el formulario del contratista.</DialogDescription>
             </DialogHeader>
             <Card className="border-border/70 p-4">
-              <div className="grid gap-3 md:grid-cols-[1fr_150px_auto_auto] md:items-end">
+              <div className="grid gap-3 md:grid-cols-[1fr_110px_160px_auto_auto] md:items-end">
                 <div className="space-y-1.5">
-                  <Label>Actividad</Label>
+                  <Label>Item</Label>
                   <Input value={activityLabel} onChange={(event) => setActivityLabel(event.target.value)} placeholder="Ej. Armado de cajonería" />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Precio Bs.</Label>
+                  <Label>Unidad</Label>
+                  <Input value={activityUnit} onChange={(event) => setActivityUnit(event.target.value)} placeholder="ML" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>P. unitario Bs.</Label>
                   <Input type="number" value={activityAmount} onChange={(event) => setActivityAmount(event.target.value)} placeholder="0.00" />
                 </div>
                 <Button type="button" variant="outline" onClick={resetActivityForm}>Limpiar</Button>
@@ -333,22 +349,24 @@ export default function ContractorPaymentRequestsPage() {
               </div>
             </Card>
             <div className="max-h-[360px] overflow-auto rounded-md border border-border/70">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead className="bg-muted/40">
+              <table className="w-full min-w-[780px] text-sm">
+                <thead>
                   <tr className="border-b border-border/70">
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">Actividad</th>
-                    <th className="px-3 py-2 text-right font-medium text-muted-foreground">Precio</th>
+                    <th className="bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
+                    <th className="bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
+                    <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">Estado</th>
                     <th className="px-3 py-2 text-right font-medium text-muted-foreground">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {laborItems.length === 0 ? (
-                    <tr><td colSpan={4} className="px-3 py-8 text-center text-muted-foreground">No hay actividades creadas.</td></tr>
+                    <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">No hay actividades creadas.</td></tr>
                   ) : laborItems.map((item) => (
                     <tr key={item.id} className="border-b border-border/60 last:border-b-0">
-                      <td className="px-3 py-3 font-medium">{item.label}</td>
-                      <td className="px-3 py-3 text-right font-mono font-semibold">{money(item.defaultAmount)}</td>
+                      <td className="bg-amber-50/80 px-3 py-3 font-medium">{item.label}</td>
+                      <td className="bg-amber-50/80 px-3 py-3 text-center font-mono text-xs font-semibold">{item.unit || 'UND'}</td>
+                      <td className="bg-sky-50 px-3 py-3 text-right font-mono font-semibold">{money(item.referencePrice ?? item.defaultAmount)}</td>
                       <td className="px-3 py-3">
                         <Badge className={item.active ? 'bg-emerald-100 text-emerald-800' : 'bg-zinc-100 text-zinc-700'}>
                           {item.active ? 'Activa' : 'Inactiva'}
@@ -371,20 +389,44 @@ export default function ContractorPaymentRequestsPage() {
         </Dialog>
 
         <Dialog open={!!selectedPlan} onOpenChange={(open) => { if (!open) setSelectedPlan(null); }}>
-          <DialogContent className="max-w-xl">
+          <DialogContent className="max-w-6xl">
             <DialogHeader>
               <DialogTitle>Detalle de solicitud</DialogTitle>
               <DialogDescription>{selectedPlan?.contractorName} · {selectedPlan?.jobName}</DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
-              {selectedPlan?.lines.map((line) => (
-                <div key={line.id ?? line.phaseKey} className="flex items-center justify-between rounded-md border border-border/70 px-3 py-2 text-sm">
-                  <span>{line.phaseLabel}</span>
-                  <span className="font-mono font-semibold">{money(line.plannedAmount)}</span>
-                </div>
-              ))}
+              <div className="overflow-x-auto rounded-md border border-border/70">
+                <table className="w-full min-w-[980px] text-sm">
+                  <thead>
+                    <tr className="border-b border-border/70">
+                      <th className="w-12 px-2 py-2 text-center font-semibold text-muted-foreground">No</th>
+                      <th className="bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
+                      <th className="bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
+                      <th className="bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Alto</th>
+                      <th className="bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Ancho/Cantidad</th>
+                      <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">TOTAL</th>
+                      <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
+                      <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.PARCIAL (Bs)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedPlan?.lines.map((line, index) => (
+                      <tr key={line.id ?? line.phaseKey} className="border-b border-border/60 last:border-b-0">
+                        <td className="px-2 py-2 text-center font-mono text-xs text-muted-foreground">{index + 1}</td>
+                        <td className="bg-amber-50/80 px-3 py-2 font-medium">{line.phaseLabel}</td>
+                        <td className="bg-amber-50/80 px-3 py-2 text-center font-mono text-xs font-semibold">{line.unit || 'UND'}</td>
+                        <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{Number(line.width ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
+                        <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{Number(line.heightQuantity ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
+                        <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{Number(line.measuredTotal ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
+                        <td className="bg-sky-50 px-3 py-2 text-right font-mono">{money(line.unitPrice ?? 0)}</td>
+                        <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{money(line.plannedAmount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               <div className="flex items-center justify-between rounded-md bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800">
-                <span>Total</span>
+                <span>Total solicitud</span>
                 <span className="font-mono">{money(selectedPlan?.totalAmount ?? 0)}</span>
               </div>
               <div className="flex justify-end gap-2">
