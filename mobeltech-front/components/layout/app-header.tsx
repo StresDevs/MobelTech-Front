@@ -15,6 +15,8 @@ import {
 import { ROLE_PERMISSIONS } from '@/lib/constants';
 import { useEffect, useState } from 'react';
 import { useTheme } from 'next-themes';
+import { useRouter } from 'next/navigation';
+import { getNotificationTarget } from '@/lib/notification-routing';
 
 type HeaderNotification = {
   id: string;
@@ -29,6 +31,7 @@ export function AppHeader() {
   const { currentRole, userName } = useRole();
   const { logout, user } = useAuth();
   const { toggleMobileOpen } = useSidebar();
+  const router = useRouter();
   const [showNotifications, setShowNotifications] = useState(false);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -67,18 +70,36 @@ export function AppHeader() {
     };
   }, [apiBase, user]);
 
-  // Close notifications when clicking outside
-  useEffect(() => {
-    if (!showNotifications) return;
-    const handler = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('[data-notifications]')) {
-        setShowNotifications(false);
-      }
-    };
-    document.addEventListener('click', handler);
-    return () => document.removeEventListener('click', handler);
-  }, [showNotifications]);
+  async function markNotificationAsRead(notificationId: string) {
+    if (!apiBase) return;
+    try {
+      await fetch(`${apiBase}/api/notifications/${notificationId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ read: true }),
+      });
+      setNotifications((current) => current.map((item) => (
+        item.id === notificationId ? { ...item, read: true } : item
+      )));
+    } catch {
+      // The notification can still navigate even if the read flag fails.
+    }
+  }
+
+  async function handleNotificationClick(notification: HeaderNotification) {
+    if (!notification.read) {
+      await markNotificationAsRead(notification.id);
+    }
+    setShowNotifications(false);
+
+    const target = getNotificationTarget(notification, currentRole);
+    if (target) {
+      router.push(target);
+    }
+  }
+
+  const myNotifications = user ? notifications.filter((notification) => notification.recipientUserId === user.id) : [];
+  const unreadCount = myNotifications.filter((notification) => !notification.read).length;
 
   return (
     <header className="border-b border-border bg-background/80 backdrop-blur-sm px-4 sm:px-6 h-14 flex items-center justify-between">
@@ -113,73 +134,70 @@ export function AppHeader() {
         </Button>
 
         {/* Notifications */}
-        <div className="relative" data-notifications>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 rounded-full relative"
-            onClick={() => setShowNotifications(!showNotifications)}
-            aria-label="Notificaciones"
-          >
-            <Bell className="h-[1.15rem] w-[1.15rem]" />
-            {(() => {
-              const my = user ? notifications.filter((n) => n.recipientUserId === user.id) : [];
-              const unread = my.filter((n) => !n.read).length;
-              if (unread <= 0) return null;
-              return (
+        <DropdownMenu open={showNotifications} onOpenChange={setShowNotifications}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-full relative"
+              aria-label="Notificaciones"
+            >
+              <Bell className="h-[1.15rem] w-[1.15rem]" />
+              {unreadCount > 0 ? (
                 <span
                   className="absolute top-1 right-1 h-4 min-w-[1rem] px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
                   style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
                 >
-                  {unread}
+                  {unreadCount}
                 </span>
-              );
-            })()}
-          </Button>
-          {showNotifications && (
-            <div className="absolute right-0 mt-2 w-[min(90vw,20rem)] bg-background border border-border rounded-lg shadow-lg z-50">
-              <div className="p-4 border-b border-border">
+              ) : null}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            sideOffset={10}
+            className="z-[120] w-[min(92vw,24rem)] rounded-xl border border-border/80 bg-background p-0 shadow-2xl"
+          >
+            <div className="border-b border-border/70 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
                 <h3 className="font-semibold">Notificaciones</h3>
-              </div>
-              <div className="max-h-80 overflow-y-auto divide-y divide-border">
-                {(() => {
-                  const my = user ? notifications.filter((n) => n.recipientUserId === user.id) : [];
-                  if (!my || my.length === 0) {
-                    return (
-                      <div className="p-4 text-sm text-muted-foreground">No tienes notificaciones</div>
-                    );
-                  }
-                  return my
-                    .slice()
-                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                    .map((n) => (
-                      <div
-                        key={n.id}
-                        className={`px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors ${!n.read ? 'bg-muted/10' : ''}`}
-                        onClick={async () => {
-                          try {
-                            if (!apiBase) return;
-                            await fetch(`${apiBase}/api/notifications/${n.id}`, {
-                              method: 'PUT',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ read: true }),
-                            });
-                            setNotifications((current) => current.map((item) => (
-                              item.id === n.id ? { ...item, read: true } : item
-                            )));
-                          } catch {}
-                        }}
-                      >
-                        <p className={`text-sm ${!n.read ? 'font-medium' : 'font-normal'}`}>{n.message}</p>
-                        {n.relatedJobId && <p className="text-xs text-muted-foreground">Relacionado: {n.relatedJobId}</p>}
-                        <p className="text-xs text-muted-foreground/60 mt-1">{new Date(n.createdAt).toLocaleString('es-VE')}</p>
-                      </div>
-                    ));
-                })()}
+                {unreadCount > 0 ? <span className="text-xs text-muted-foreground">{unreadCount} sin leer</span> : null}
               </div>
             </div>
-          )}
-        </div>
+            <div className="max-h-96 overflow-y-auto">
+              {myNotifications.length === 0 ? (
+                <div className="p-4 text-sm text-muted-foreground">No tienes notificaciones</div>
+              ) : (
+                myNotifications
+                  .slice()
+                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                  .map((notification) => {
+                    const target = getNotificationTarget(notification, currentRole);
+                    return (
+                      <button
+                        key={notification.id}
+                        type="button"
+                        className={`w-full border-b border-border/70 px-4 py-3 text-left transition last:border-b-0 hover:bg-muted/60 ${
+                          !notification.read ? 'bg-muted/20' : ''
+                        }`}
+                        onClick={() => void handleNotificationClick(notification)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className={`text-sm ${!notification.read ? 'font-medium' : 'font-normal'}`}>{notification.message}</p>
+                            <p className="mt-1 text-xs text-muted-foreground/80">
+                              {new Date(notification.createdAt).toLocaleString('es-VE')}
+                            </p>
+                          </div>
+                          {target ? <span className="shrink-0 pt-0.5 text-[11px] font-semibold text-primary">Abrir</span> : null}
+                        </div>
+                      </button>
+                    );
+                  })
+              )}
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* Separator */}
         <div className="h-6 w-px bg-border mx-1 hidden sm:block" />

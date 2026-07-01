@@ -50,8 +50,27 @@ type ApiMeasurement = {
   linkedPrequotation?: {
     id: string;
     title: string;
-    status: string;
+    status: 'draft' | 'in-review' | 'adjustment' | 'confirmed' | 'rejected' | string;
   } | null;
+};
+
+const PREQUOTATION_STATUS_META: Record<string, { label: string; tone: string }> = {
+  'in-review': {
+    label: 'Enviado al cliente',
+    tone: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900',
+  },
+  adjustment: {
+    label: 'En ajuste',
+    tone: 'bg-amber-100 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-900',
+  },
+  confirmed: {
+    label: 'Confirmado por cliente',
+    tone: 'bg-teal-100 text-teal-700 ring-1 ring-teal-200 dark:bg-teal-950/40 dark:text-teal-300 dark:ring-teal-900',
+  },
+  rejected: {
+    label: 'Rechazado',
+    tone: 'bg-red-100 text-red-700 ring-1 ring-red-200 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900',
+  },
 };
 
 function getUsablePrequotationLink(link?: string | null) {
@@ -190,6 +209,18 @@ function getQuotationDeliveryMeta(value?: string | null) {
   };
 }
 
+function getMeasurementDeliveryMeta(measurement: ApiMeasurement) {
+  const status = measurement.linkedPrequotation?.status;
+  if (status && status !== 'draft') {
+    return PREQUOTATION_STATUS_META[status] ?? {
+      label: 'Precotización actualizada',
+      tone: 'bg-slate-100 text-slate-700 ring-1 ring-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:ring-slate-800',
+    };
+  }
+
+  return getQuotationDeliveryMeta(measurement.quotationDeliveryDate);
+}
+
 function bumpTimeIfPast(date: Date, time: string) {
   const [hourRaw, minuteRaw] = time.split(':');
   const hour = Number.parseInt(hourRaw ?? '0', 10);
@@ -228,7 +259,7 @@ export function MeasurementCalendar() {
   const [clients, setClients] = useState<ApiClient[]>([]);
   const [measurements, setMeasurements] = useState<ApiMeasurement[]>([]);
   const [newMeasurementSlot, setNewMeasurementSlot] = useState<{ day: number; slotIndex: number } | null>(null);
-  const [clientDetailId, setClientDetailId] = useState<string | null>(null);
+  const [detailMeasurementId, setDetailMeasurementId] = useState<string | null>(null);
   const [missingPrequotationMeasurement, setMissingPrequotationMeasurement] = useState<ApiMeasurement | null>(null);
   const [clientSearchQuery, setClientSearchQuery] = useState('');
   const [formData, setFormData] = useState({
@@ -442,7 +473,8 @@ export function MeasurementCalendar() {
       client.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) || client.phone.includes(clientSearchQuery),
   );
 
-  const detailClient = clientDetailId ? clients.find((client) => client.id === clientDetailId) ?? null : null;
+  const detailMeasurement = detailMeasurementId ? measurements.find((measurement) => measurement.id === detailMeasurementId) ?? null : null;
+  const detailClient = detailMeasurement ? clients.find((client) => client.id === detailMeasurement.clientId) ?? null : null;
 
   const handleDocClick = (measurement: ApiMeasurement) => {
     if (measurement.linkedPrequotation) {
@@ -461,50 +493,54 @@ export function MeasurementCalendar() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h2 className="text-xl sm:text-2xl font-bold capitalize">{monthName}</h2>
-          <Button variant="outline" size="sm" className="text-xs h-7" onClick={goToday}>
-            Hoy
-          </Button>
+      <div className="sticky top-0 z-50 -mx-6 rounded-b-xl border-b border-border bg-background px-6 py-3 shadow-lg">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl sm:text-2xl font-bold capitalize">{monthName}</h2>
+            <Button variant="outline" size="sm" className="text-xs h-7 bg-background" onClick={goToday}>
+              Hoy
+            </Button>
+          </div>
+          <div className="flex gap-1">
+            <Button variant="outline" size="icon" className="h-8 w-8 bg-background" onClick={() => goMonth(-1)}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <Button variant="outline" size="icon" className="h-8 w-8 bg-background" onClick={() => goMonth(1)}>
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-1">
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => goMonth(-1)}>
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => goMonth(1)}>
-            <ChevronRight className="w-4 h-4" />
-          </Button>
+
+        <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500" />
+            Disponible
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-[#eab676]" />
+            Ocupado
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-red-500" />
+            No disponible
+          </span>
+        </div>
+
+        <div className="hidden md:block overflow-x-auto pt-3">
+          <div className="grid grid-cols-7 gap-1.5 min-w-[900px]">
+            {DAY_NAMES.map((dayName) => (
+              <div key={dayName} className="rounded-md bg-muted px-2 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {dayName}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       {error && <Card className="p-3 border-red-200 bg-red-50 text-sm text-red-700">{error}</Card>}
       {loading && <CalendarLoadingState />}
 
-      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500" />
-          Disponible
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block w-3 h-3 rounded-sm bg-[#eab676]" />
-          Ocupado
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block w-3 h-3 rounded-sm bg-red-500" />
-          No disponible
-        </span>
-      </div>
-
       <div className="hidden md:block overflow-x-auto">
-        <div className="grid grid-cols-7 gap-1.5 mb-1.5 min-w-[900px]">
-          {DAY_NAMES.map((dayName) => (
-            <div key={dayName} className="text-center text-[10px] font-semibold uppercase tracking-wider text-muted-foreground py-1">
-              {dayName}
-            </div>
-          ))}
-        </div>
-
         <div className="grid grid-cols-7 gap-1.5 min-w-[900px]">
           {Array.from({ length: firstDay }).map((_, index) => (
             <div key={`e-${index}`} />
@@ -546,7 +582,7 @@ export function MeasurementCalendar() {
                       canUploadDocuments={canUploadDocuments}
                       onClickDoc={handleDocClick}
                       onClickAvailable={() => openNewMeasurement(day, index)}
-                      onClickClient={(id) => setClientDetailId(id)}
+                      onClickClient={(id) => setDetailMeasurementId(id)}
                     />
                   ))}
                 </div>
@@ -596,7 +632,7 @@ export function MeasurementCalendar() {
                     canUploadDocuments={canUploadDocuments}
                     onClickDoc={handleDocClick}
                     onClickAvailable={() => openNewMeasurement(day, index)}
-                    onClickClient={(id) => setClientDetailId(id)}
+                    onClickClient={(id) => setDetailMeasurementId(id)}
                   />
                 ))}
               </div>
@@ -753,11 +789,11 @@ export function MeasurementCalendar() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!detailClient} onOpenChange={(open) => !open && setClientDetailId(null)}>
-        <DialogContent className="max-w-sm p-0 overflow-hidden">
-          <DialogTitle className="sr-only">Detalle del cliente</DialogTitle>
-          <DialogDescription className="sr-only">Información del cliente seleccionado.</DialogDescription>
-          {detailClient && (
+      <Dialog open={!!detailMeasurement && !!detailClient} onOpenChange={(open) => !open && setDetailMeasurementId(null)}>
+        <DialogContent className="max-w-lg p-0 overflow-hidden">
+          <DialogTitle className="sr-only">Detalle de la medición</DialogTitle>
+          <DialogDescription className="sr-only">Información completa de la medición seleccionada.</DialogDescription>
+          {detailClient && detailMeasurement && (
             <>
               <div className="px-6 pt-6 pb-4 flex flex-col items-center gap-3" style={{ background: 'linear-gradient(135deg, #eab676 0%, #d6a85a 100%)' }}>
                 <div className="w-14 h-14 rounded-full bg-white/20 backdrop-blur flex items-center justify-center text-xl font-bold text-white">
@@ -772,14 +808,21 @@ export function MeasurementCalendar() {
               </div>
 
               <div className="px-6 py-5 space-y-4">
-                <InfoRow icon={Phone} label="Teléfono" value={detailClient.phone} />
-                <InfoRow icon={MapPin} label="Dirección" value={detailClient.address} />
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <InfoRow icon={Clock} label="Hora de medición" value={detailMeasurement.time.slice(0, 5)} />
+                  <InfoRow icon={CalendarDays} label="Fecha" value={formatDisplayDate(detailMeasurement.date)} />
+                  <InfoRow icon={Phone} label="Teléfono" value={detailMeasurement.phone || detailClient.phone} />
+                  <InfoRow icon={MapPin} label="Dirección" value={detailMeasurement.address || detailClient.address} />
+                </div>
                 <InfoRow icon={Mail} label="Email" value={detailClient.email ?? '—'} />
-                <InfoRow icon={Clock} label="Registrado" value={formatDisplayDate(detailClient.createdAt)} />
+                <InfoRow icon={Sofa} label="Muebles a realizar" value={getFurnitureSummary(detailMeasurement.furnitureItems) || '—'} />
+                <InfoRow icon={BellRing} label="Entrega / estado" value={getMeasurementDeliveryMeta(detailMeasurement)?.label ?? 'Sin fecha de entrega'} />
+                <InfoRow icon={FileDown} label="Precotización" value={detailMeasurement.linkedPrequotation?.title ?? 'Sin precotización enlazada'} />
+                <InfoRow icon={Clock} label="Notas" value={detailMeasurement.notes || detailMeasurement.referenceNotes || '—'} />
               </div>
 
               <div className="px-6 pb-5">
-                <Button variant="outline" className="w-full h-9" onClick={() => setClientDetailId(null)}>
+                <Button variant="outline" className="w-full h-9" onClick={() => setDetailMeasurementId(null)}>
                   Cerrar
                 </Button>
               </div>
@@ -923,14 +966,14 @@ function DesktopSlot({
   const clientName = client?.name ?? 'Cliente';
   const shortName = clientName.length > 14 ? `${clientName.slice(0, 13)}…` : clientName;
   const furnitureSummary = getFurnitureSummary(measurement.furnitureItems);
-  const deliveryMeta = getQuotationDeliveryMeta(measurement.quotationDeliveryDate);
+  const deliveryMeta = getMeasurementDeliveryMeta(measurement);
 
   return (
     <div
       className="grid grid-cols-[1fr_48px_32px] items-center gap-px rounded min-h-[52px] px-1 py-1"
       style={{ backgroundColor: 'rgba(234,182,118,0.15)', border: '1px solid rgba(234,182,118,0.35)' }}
     >
-      <button onClick={() => onClickClient(measurement.clientId)} className="min-w-0 text-left hover:underline" title={clientName}>
+      <button onClick={() => onClickClient(measurement.id)} className="min-w-0 text-left hover:underline" title={clientName}>
         <p className="truncate text-[10px] font-medium text-foreground">{shortName}</p>
         {furnitureSummary && (
           <div className="mt-0.5 flex items-center gap-1 text-[9px] text-muted-foreground">
@@ -1003,14 +1046,14 @@ function MobileSlot({
 
   const client = clients.find((item) => item.id === measurement.clientId);
   const furnitureSummary = getFurnitureSummary(measurement.furnitureItems);
-  const deliveryMeta = getQuotationDeliveryMeta(measurement.quotationDeliveryDate);
+  const deliveryMeta = getMeasurementDeliveryMeta(measurement);
 
   return (
     <div className="px-4 py-2.5 flex items-center gap-3" style={{ backgroundColor: 'rgba(234,182,118,0.08)' }}>
       <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#eab676' }} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={() => onClickClient(measurement.clientId)} className="text-xs font-medium text-foreground hover:underline truncate max-w-[140px]">
+          <button onClick={() => onClickClient(measurement.id)} className="text-xs font-medium text-foreground hover:underline truncate max-w-[140px]">
             {client?.name ?? 'Cliente'}
           </button>
           <span className="text-[10px] text-muted-foreground whitespace-nowrap">{measurement.time}</span>

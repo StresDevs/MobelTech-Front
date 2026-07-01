@@ -8,10 +8,12 @@ import { Quotation, QuotationItem, QuotationAudit, QuotationEnvironmentProject }
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { Calendar as DateRangeCalendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useToast } from '@/hooks/use-toast';
 import {
   Search,
   Filter,
@@ -38,6 +40,7 @@ import {
   FolderPlus,
   Layers3,
   CalendarRange,
+  Pencil,
 } from 'lucide-react';
 
 type QuotationStatus = Quotation['status'];
@@ -114,7 +117,7 @@ function formatDateTime(d: Date) {
 }
 
 function formatCurrency(n: number) {
-  return `Bs. ${n.toLocaleString('es-BO')}`;
+  return `Bs. ${n.toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function formatFileSize(bytes: number) {
@@ -172,6 +175,10 @@ function getInitials(name: string) {
     .join('')
     .toUpperCase()
     .slice(0, 2);
+}
+
+function getEnvironmentPrice(environment: QuotationEnvironmentProject) {
+  return Number(environment.clientPrice ?? environment.price ?? 0);
 }
 
 function normalizeQuotationRecord(raw: any): ApiQuotation {
@@ -689,6 +696,7 @@ function QuotationDetail({
   onSave,
   saving,
 }: DetailProps) {
+  const { toast } = useToast();
   const { currentRole, userName } = useRole();
   const normalizedRole = String(currentRole).toLowerCase();
   const canManageEnvironmentProjects = ['admin', 'architect', 'gerente', 'gerencia', 'manager'].includes(normalizedRole);
@@ -706,12 +714,28 @@ function QuotationDetail({
   );
   const [editableTotal, setEditableTotal] = useState<number>(currentQuotation.totalAmount || subtotal);
   const [editableAdvance, setEditableAdvance] = useState<number>(currentQuotation.advanceAmount || 0);
+  const editableItemsSubtotal = useMemo(
+    () => editableItems.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0), 0),
+    [editableItems],
+  );
   const displayTotal = currentQuotation.totalAmount || editableTotal || subtotal;
   const displayAdvance = currentQuotation.advanceAmount || editableAdvance || 0;
   const pendingBalance = Math.max(displayTotal - displayAdvance, 0);
+  const environmentTotal = (currentQuotation.environmentProjects ?? []).reduce((sum, environment) => sum + getEnvironmentPrice(environment), 0);
+  const environmentRemaining = Math.max(displayTotal - environmentTotal, 0);
   const [showEnvironmentBuilder, setShowEnvironmentBuilder] = useState(false);
   const [environmentSaving, setEnvironmentSaving] = useState(false);
   const [environmentError, setEnvironmentError] = useState<string | null>(null);
+  const [editingEnvironment, setEditingEnvironment] = useState<QuotationEnvironmentProject | null>(null);
+  const [environmentEditForm, setEnvironmentEditForm] = useState({
+    ambience: '',
+    description: '',
+    price: '',
+    estimatedStartDate: '',
+    estimatedEndDate: '',
+    assignedContractorId: '',
+    modificationNote: '',
+  });
   const [contractorOptions, setContractorOptions] = useState<QuotationContractor[]>([]);
   const [environmentRows, setEnvironmentRows] = useState<Array<{
     key: string;
@@ -740,12 +764,19 @@ function QuotationDetail({
       sketchupFileData: '',
     },
   ]);
+  const environmentDraftTotal = environmentRows.reduce((sum, row) => sum + Number(row.price || 0), 0);
+  const environmentProjectedTotal = environmentTotal + environmentDraftTotal;
+  const environmentDraftExceeds = environmentProjectedTotal > displayTotal;
 
   useEffect(() => {
     setEditableItems(currentQuotation.items.map((it: any) => ({ ...it })));
     setEditableTotal(currentQuotation.totalAmount || subtotal);
     setEditableAdvance(currentQuotation.advanceAmount || 0);
   }, [currentQuotation]);
+
+  useEffect(() => {
+    if (editing) setEditableTotal(editableItemsSubtotal);
+  }, [editableItemsSubtotal, editing]);
 
   useEffect(() => {
     if (!apiBase || !canManageEnvironmentProjects) return;
@@ -777,6 +808,98 @@ function QuotationDetail({
     ]);
   }
 
+  function showEnvironmentBudgetToast(projectedTotal: number) {
+    const exceededBy = projectedTotal - displayTotal;
+    toast({
+      title: 'Monto excedido',
+      description: `Los ambientes suman ${formatCurrency(projectedTotal)} y exceden la cotización por ${formatCurrency(exceededBy)}.`,
+      variant: 'destructive',
+    });
+  }
+
+  function openEnvironmentEditor(environment: QuotationEnvironmentProject) {
+    setEditingEnvironment(environment);
+    setEnvironmentError(null);
+    setEnvironmentEditForm({
+      ambience: environment.ambience,
+      description: environment.description ?? '',
+      price: String(getEnvironmentPrice(environment)),
+      estimatedStartDate: environment.estimatedStartDate,
+      estimatedEndDate: environment.estimatedEndDate,
+      assignedContractorId: environment.assignedContractorId ?? '',
+      modificationNote: '',
+    });
+  }
+
+  async function saveEnvironmentEdit() {
+    if (!editingEnvironment) return;
+
+    const nextPrice = Number(environmentEditForm.price);
+    const projectedTotal = environmentTotal - getEnvironmentPrice(editingEnvironment) + nextPrice;
+
+    if (
+      !environmentEditForm.ambience.trim() ||
+      !Number.isFinite(nextPrice) ||
+      nextPrice < 0 ||
+      !environmentEditForm.estimatedStartDate ||
+      !environmentEditForm.estimatedEndDate ||
+      new Date(environmentEditForm.estimatedEndDate).getTime() < new Date(environmentEditForm.estimatedStartDate).getTime()
+    ) {
+      setEnvironmentError('Completa ambiente, precio al cliente y rango de fechas válido.');
+      return;
+    }
+
+    if (!environmentEditForm.modificationNote.trim()) {
+      setEnvironmentError('Agrega una nota breve explicando qué se modificó.');
+      return;
+    }
+
+    if (projectedTotal > displayTotal) {
+      showEnvironmentBudgetToast(projectedTotal);
+      setEnvironmentError(`La suma de ambientes excede la cotización por ${formatCurrency(projectedTotal - displayTotal)}.`);
+      return;
+    }
+
+    setEnvironmentSaving(true);
+    setEnvironmentError(null);
+
+    try {
+      const response = await fetch(`${apiBase}/api/quotations/${quotation.id}/environment-projects/${editingEnvironment.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ambience: environmentEditForm.ambience.trim(),
+          description: environmentEditForm.description.trim() || null,
+          price: nextPrice,
+          clientPrice: nextPrice,
+          estimatedStartDate: environmentEditForm.estimatedStartDate,
+          estimatedEndDate: environmentEditForm.estimatedEndDate,
+          assignedContractorId: isUuid(environmentEditForm.assignedContractorId) ? environmentEditForm.assignedContractorId : null,
+          modificationNote: environmentEditForm.modificationNote.trim(),
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || 'No se pudo actualizar el ambiente.');
+      }
+
+      const updatedQuotation = normalizeQuotationRecord(await response.json());
+      setEditingEnvironment(null);
+      onReplaceQuotation(updatedQuotation);
+      toast({
+        title: 'Ambiente actualizado',
+        description: 'El proyecto por ambiente y sus montos quedaron sincronizados.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo actualizar el ambiente.';
+      setEnvironmentError(message);
+      toast({ title: 'Error al actualizar', description: message, variant: 'destructive' });
+    } finally {
+      setEnvironmentSaving(false);
+    }
+  }
+
   async function saveEnvironmentProjects() {
     const preparedRows = environmentRows.map((row) => ({
       ambience: row.ambience.trim(),
@@ -801,6 +924,14 @@ function QuotationDetail({
 
     if (hasInvalidRow) {
       setEnvironmentError('Completa ambiente, precio al cliente y rango de fechas válido en cada fila.');
+      return;
+    }
+
+    const newEnvironmentTotal = preparedRows.reduce((sum, row) => sum + row.clientPrice, 0);
+    const projectedTotal = environmentTotal + newEnvironmentTotal;
+    if (projectedTotal > displayTotal) {
+      showEnvironmentBudgetToast(projectedTotal);
+      setEnvironmentError(`La suma de ambientes excede la cotización por ${formatCurrency(projectedTotal - displayTotal)}.`);
       return;
     }
 
@@ -847,8 +978,14 @@ function QuotationDetail({
       ]);
       setShowEnvironmentBuilder(false);
       onReplaceQuotation(updatedQuotation);
+      toast({
+        title: 'Proyectos creados',
+        description: `Se asignaron ${formatCurrency(newEnvironmentTotal)} de la cotización por ambientes.`,
+      });
     } catch (error) {
-      setEnvironmentError(error instanceof Error ? error.message : 'No se pudieron crear los proyectos por ambiente.');
+      const message = error instanceof Error ? error.message : 'No se pudieron crear los proyectos por ambiente.';
+      setEnvironmentError(message);
+      toast({ title: 'Error al crear ambientes', description: message, variant: 'destructive' });
     } finally {
       setEnvironmentSaving(false);
     }
@@ -908,7 +1045,7 @@ function QuotationDetail({
                           onClick={() => {
                             onSave({
                               items: editableItems,
-                              totalAmount: editableTotal,
+                              totalAmount: editableItemsSubtotal,
                               advanceAmount: editableAdvance,
                             });
                             setEditing(false);
@@ -1004,7 +1141,7 @@ function QuotationDetail({
                       Total
                     </td>
                     <td className="py-3 px-4 text-right font-mono font-bold text-base">
-                      {formatCurrency(currentQuotation.totalAmount || editableTotal)}
+                      {formatCurrency(editing ? editableItemsSubtotal : currentQuotation.totalAmount || editableTotal)}
                     </td>
                   </tr>
                 </tfoot>
@@ -1035,9 +1172,24 @@ function QuotationDetail({
               )}
             </div>
 
+            <div className={`grid gap-3 sm:grid-cols-3 ${environmentTotal > displayTotal ? 'text-red-700' : ''}`}>
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Monto cotizado</p>
+                <p className="mt-1 font-mono text-sm font-bold">{formatCurrency(displayTotal)}</p>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Asignado a ambientes</p>
+                <p className="mt-1 font-mono text-sm font-bold">{formatCurrency(environmentTotal)}</p>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Disponible</p>
+                <p className="mt-1 font-mono text-sm font-bold">{formatCurrency(environmentRemaining)}</p>
+              </div>
+            </div>
+
             {currentQuotation.environmentProjects && currentQuotation.environmentProjects.length > 0 ? (
               <div className="overflow-x-auto rounded-xl border border-border">
-                <table className="w-full min-w-[900px] text-sm">
+                <table className="w-full min-w-[980px] text-sm">
                   <thead className="bg-muted/35">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Ambiente</th>
@@ -1047,6 +1199,9 @@ function QuotationDetail({
                       <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Precio al cliente</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Inicio</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Fin</th>
+                      {canManageEnvironmentProjects && (
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Acciones</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -1069,6 +1224,14 @@ function QuotationDetail({
                         <td className="px-4 py-3 text-right font-mono">{formatCurrency(environment.clientPrice ?? environment.price)}</td>
                         <td className="px-4 py-3">{environment.estimatedStartDate}</td>
                         <td className="px-4 py-3">{environment.estimatedEndDate}</td>
+                        {canManageEnvironmentProjects && (
+                          <td className="px-4 py-3 text-right">
+                            <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => openEnvironmentEditor(environment)}>
+                              <Pencil className="h-3.5 w-3.5" />
+                              Editar
+                            </Button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -1110,13 +1273,10 @@ function QuotationDetail({
                     <DollarSign className="w-3.5 h-3.5" />
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-muted-foreground">Total</p>
-                    <Input
-                      type="number"
-                      value={String(editableTotal)}
-                      onChange={(e) => setEditableTotal(Number(e.target.value || 0))}
-                      className="text-sm font-medium mt-0.5 w-full"
-                    />
+                    <p className="text-xs text-muted-foreground">Total calculado</p>
+                    <p className="mt-0.5 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-mono font-semibold">
+                      {formatCurrency(editableItemsSubtotal)}
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -1256,6 +1416,151 @@ function QuotationDetail({
         </div>
       </div>
 
+      {editingEnvironment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-3xl max-h-[88vh] overflow-y-auto p-6 space-y-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-lg font-semibold">Editar ambiente</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Actualiza el contenido del proyecto y deja una nota clara del cambio.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setEditingEnvironment(null)} disabled={environmentSaving}>
+                Cerrar
+              </Button>
+            </div>
+
+            {environmentError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {environmentError}
+              </div>
+            )}
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Ambiente</p>
+                <Input
+                  value={environmentEditForm.ambience}
+                  onChange={(e) => setEnvironmentEditForm((current) => ({ ...current, ambience: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Precio al cliente</p>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={environmentEditForm.price}
+                  onChange={(e) => setEnvironmentEditForm((current) => ({ ...current, price: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <p className="text-xs font-medium text-muted-foreground">Descripción / contenido</p>
+                <Textarea
+                  rows={4}
+                  value={environmentEditForm.description}
+                  onChange={(e) => setEnvironmentEditForm((current) => ({ ...current, description: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Contratista</p>
+                <select
+                  value={environmentEditForm.assignedContractorId}
+                  onChange={(e) => setEnvironmentEditForm((current) => ({ ...current, assignedContractorId: e.target.value }))}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">Sin asignar</option>
+                  {contractorOptions.filter((contractor) => isUuid(contractor.id)).map((contractor) => (
+                    <option key={contractor.id} value={contractor.id}>
+                      {contractor.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-auto min-h-10 w-full justify-between gap-3 px-3 py-2 text-left"
+                  >
+                    <div className="grid flex-1 grid-cols-2 gap-3">
+                      <span className="min-w-0">
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Fecha inicio</span>
+                        <span className="block truncate text-xs font-medium">{formatDisplayDate(environmentEditForm.estimatedStartDate)}</span>
+                      </span>
+                      <span className="min-w-0 border-l border-border pl-3">
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Fecha fin</span>
+                        <span className="block truncate text-xs font-medium">{formatDisplayDate(environmentEditForm.estimatedEndDate)}</span>
+                      </span>
+                    </div>
+                    <CalendarRange className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-auto p-0">
+                  <DateRangeCalendar
+                    mode="range"
+                    locale={es}
+                    numberOfMonths={1}
+                    selected={{
+                      from: parseLocalDate(environmentEditForm.estimatedStartDate),
+                      to: parseLocalDate(environmentEditForm.estimatedEndDate),
+                    }}
+                    onSelect={(range) => {
+                      setEnvironmentEditForm((current) => ({
+                        ...current,
+                        estimatedStartDate: range?.from ? toLocalDateString(range.from) : '',
+                        estimatedEndDate: range?.to ? toLocalDateString(range.to) : '',
+                      }));
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
+              <div className="space-y-1.5 sm:col-span-2">
+                <p className="text-xs font-medium text-muted-foreground">Nota de modificación *</p>
+                <Textarea
+                  rows={3}
+                  placeholder="Ej: Se cambió melamina por MDF y se ajustó el precio por herrajes adicionales."
+                  value={environmentEditForm.modificationNote}
+                  onChange={(e) => setEnvironmentEditForm((current) => ({ ...current, modificationNote: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Cotización</p>
+                  <p className="mt-1 font-mono text-sm font-bold">{formatCurrency(displayTotal)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Nuevo total ambientes</p>
+                  <p className="mt-1 font-mono text-sm font-bold">
+                    {formatCurrency(environmentTotal - getEnvironmentPrice(editingEnvironment) + Number(environmentEditForm.price || 0))}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Disponible</p>
+                  <p className="mt-1 font-mono text-sm font-bold">
+                    {formatCurrency(Math.max(displayTotal - (environmentTotal - getEnvironmentPrice(editingEnvironment) + Number(environmentEditForm.price || 0)), 0))}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditingEnvironment(null)} disabled={environmentSaving}>
+                Cancelar
+              </Button>
+              <Button onClick={saveEnvironmentEdit} disabled={environmentSaving} style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
+                {environmentSaving ? 'Guardando...' : 'Guardar ambiente'}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {showEnvironmentBuilder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
           <Card className="w-full max-w-6xl max-h-[88vh] overflow-y-auto p-6 space-y-5">
@@ -1276,6 +1581,34 @@ function QuotationDetail({
                 {environmentError}
               </div>
             )}
+
+            <div className={`rounded-xl border px-4 py-3 ${environmentDraftExceeds ? 'border-red-200 bg-red-50 text-red-700' : 'border-border bg-muted/20'}`}>
+              <div className="grid gap-3 text-sm sm:grid-cols-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Cotización</p>
+                  <p className="font-mono font-bold">{formatCurrency(displayTotal)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Ya asignado</p>
+                  <p className="font-mono font-bold">{formatCurrency(environmentTotal)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Nuevos ambientes</p>
+                  <p className="font-mono font-bold">{formatCurrency(environmentDraftTotal)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{environmentDraftExceeds ? 'Excedente' : 'Disponible'}</p>
+                  <p className="font-mono font-bold">
+                    {formatCurrency(environmentDraftExceeds ? environmentProjectedTotal - displayTotal : displayTotal - environmentProjectedTotal)}
+                  </p>
+                </div>
+              </div>
+              {environmentDraftExceeds && (
+                <p className="mt-2 text-xs font-medium">
+                  La suma de ambientes no puede superar el monto cotizado.
+                </p>
+              )}
+            </div>
 
             <div className="space-y-3">
               {environmentRows.map((row) => (
@@ -1412,7 +1745,7 @@ function QuotationDetail({
                 <Button variant="outline" onClick={() => setShowEnvironmentBuilder(false)} disabled={environmentSaving}>
                   Cancelar
                 </Button>
-                <Button onClick={saveEnvironmentProjects} disabled={environmentSaving} style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
+                <Button onClick={saveEnvironmentProjects} disabled={environmentSaving || environmentDraftExceeds} style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
                   {environmentSaving ? 'Guardando...' : 'Crear proyectos'}
                 </Button>
               </div>

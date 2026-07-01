@@ -13,11 +13,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const paddingClass = isCollapsed ? 'md:pl-20' : 'md:pl-64';
 
   return (
-    <div className={`flex min-h-screen bg-background ${paddingClass} transition-all duration-300`}>
+    <div className={`flex h-screen overflow-hidden bg-background ${paddingClass} transition-all duration-300`}>
       <AppSidebar />
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
         <AppHeader />
-        <main className="flex-1 min-w-0 overflow-auto">
+        <main className="flex-1 min-w-0 min-h-0 overflow-auto">
           {children}
         </main>
       </div>

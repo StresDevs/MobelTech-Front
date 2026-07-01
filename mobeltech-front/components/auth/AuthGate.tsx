@@ -5,12 +5,13 @@ import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { AuthProvider } from '@/lib/contexts/AuthContext'
+import { canAccessPath, getDefaultRouteForRole } from '@/lib/route-access'
 import type { User } from '@/lib/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? ''
 
 function redirectForRole(role: User['role']) {
-  return role === 'contractor' ? '/assigned-jobs' : '/dashboard'
+  return getDefaultRouteForRole(role)
 }
 
 async function apiLogin(identifier: string, password: string) {
@@ -61,6 +62,14 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
   const isDark = resolvedTheme === 'dark'
+  const userRole = user?.role
+  const userMustChangePassword = user?.mustChangePassword === true
+  const shouldRedirectAuthenticatedUser = Boolean(
+    mounted &&
+    userRole &&
+    !userMustChangePassword &&
+    (pathname === '/login' || !canAccessPath(userRole, pathname)),
+  )
 
   useEffect(() => {
     try {
@@ -71,19 +80,28 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (!mounted || !user) {
+    if (!mounted || !userRole) {
+      setIsRedirecting(false)
       return
     }
 
-    const destination = redirectForRole(user.role)
-    if (pathname === '/' || pathname === '/login') {
+    if (userMustChangePassword) {
+      setIsRedirecting(false)
+      return
+    }
+
+    const destination = redirectForRole(userRole)
+    const shouldRedirect =
+      pathname === '/login' || !canAccessPath(userRole, pathname)
+
+    if (shouldRedirect && pathname !== destination) {
       setIsRedirecting(true)
       router.replace(destination)
       return
     }
 
     setIsRedirecting(false)
-  }, [mounted, pathname, router, user])
+  }, [mounted, pathname, router, userMustChangePassword, userRole])
 
   function persistSession(u: User, token: string) {
     localStorage.setItem('mobeltech_user', JSON.stringify(u))
@@ -91,6 +109,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     try { window.dispatchEvent(new Event('mobeltech_auth_change')) } catch {}
     setIsRedirecting(true)
     setUser(u)
+    if (typeof window !== 'undefined') {
+      window.location.replace(redirectForRole(u.role))
+    }
   }
 
   async function handleLogin(e: React.FormEvent) {
@@ -254,7 +275,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     ? renderLoadingState('Cargando sesión...')
     : user?.mustChangePassword
       ? renderPasswordChangeState()
-      : user && isRedirecting
+      : user && (isRedirecting || shouldRedirectAuthenticatedUser)
       ? renderLoadingState('Entrando a MöbelTech...')
       : user
         ? children

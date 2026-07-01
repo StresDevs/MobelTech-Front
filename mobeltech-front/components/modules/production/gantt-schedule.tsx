@@ -3,33 +3,33 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Calendar as DateRangeCalendar } from '@/components/ui/calendar';
 import { Card } from '@/components/ui/card';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
-import { Calendar as DateRangeCalendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRole } from '@/hooks/use-role-context';
 import {
-  CalendarDays,
   CalendarRange,
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
   ClipboardList,
   Clock3,
+  Eye,
   Loader2,
-  Plus,
+  PencilLine,
   Save,
   X,
 } from 'lucide-react';
 
 type PhaseName = 'cortado' | 'canteado' | 'ensamblado' | 'instalacion' | 'entregado';
-type ScheduleType = 'tentative' | 'actual';
 type ScheduleViewMode = 'mine' | 'global';
 type CuttingMachine = 'cortadora-1' | 'cortadora-2';
 
 type ProductionOrder = {
   id: string;
+  projectId?: string | null;
   quotationId?: string | null;
   assignedContractorId?: string | null;
   startDate: string;
@@ -46,11 +46,18 @@ type ProductionOrder = {
 type SchedulePhase = {
   id?: string;
   productionOrderId?: string;
-  type: ScheduleType;
+  type: 'tentative' | 'actual';
   phase: PhaseName;
   startDate: string;
   endDate: string;
   cuttingMachine?: CuttingMachine | null;
+};
+
+type EditablePhase = {
+  phase: PhaseName;
+  startDate: string;
+  endDate: string;
+  cuttingMachine: CuttingMachine | null;
 };
 
 type Contractor = {
@@ -75,6 +82,22 @@ type Client = {
   name: string;
 };
 
+type Project = {
+  id: string;
+  name: string;
+  clientId: string;
+  startDate: string;
+  estimatedDeliveryDate: string;
+};
+
+type MachineReservation = {
+  orderId: string;
+  furnitureName: string;
+  contractorName: string;
+  startDate: string;
+  endDate: string;
+};
+
 const PHASES: Array<{ key: PhaseName; label: string; color: string }> = [
   { key: 'cortado', label: 'Corte', color: '#3b82f6' },
   { key: 'canteado', label: 'Canteado', color: '#f59e0b' },
@@ -82,6 +105,7 @@ const PHASES: Array<{ key: PhaseName; label: string; color: string }> = [
   { key: 'instalacion', label: 'Instalacion', color: '#8b5cf6' },
   { key: 'entregado', label: 'Entrega', color: '#14b8a6' },
 ];
+
 const CUTTING_MACHINES: Array<{ value: CuttingMachine; label: string }> = [
   { value: 'cortadora-1', label: 'Cortadora 1' },
   { value: 'cortadora-2', label: 'Cortadora 2' },
@@ -127,7 +151,12 @@ function formatDisplayDate(value?: string | Date | null) {
   return `${day}/${month}/${date.getFullYear()}`;
 }
 
-function getDefaultPhasePlan(startDate?: string | null) {
+function formatRangeLabel(startDate?: string | null, endDate?: string | null) {
+  if (!startDate || !endDate) return 'Sin rango';
+  return `${formatShortDate(startDate)} - ${formatShortDate(endDate)}`;
+}
+
+function getDefaultActualPlan(startDate?: string | null) {
   let cursor = startDate ? String(startDate).slice(0, 10) : toInputDate(new Date());
   return PHASES.map((phase) => {
     const start = cursor;
@@ -142,9 +171,9 @@ function getDefaultPhasePlan(startDate?: string | null) {
   });
 }
 
-function normalizePhaseRows(rows: SchedulePhase[] | undefined, type: ScheduleType, fallbackStart?: string | null) {
-  const existing = rows?.filter((row) => row.type === type) ?? [];
-  const fallback = getDefaultPhasePlan(fallbackStart);
+function normalizeActualPhases(rows: SchedulePhase[] | undefined, fallbackStart?: string | null) {
+  const existing = rows?.filter((row) => row.type === 'actual') ?? [];
+  const fallback = getDefaultActualPlan(fallbackStart);
   return PHASES.map((phase, index) => {
     const found = existing.find((row) => row.phase === phase.key);
     return {
@@ -158,27 +187,56 @@ function normalizePhaseRows(rows: SchedulePhase[] | undefined, type: ScheduleTyp
   });
 }
 
-function validateSuccessivePhases(phases: ReturnType<typeof normalizePhaseRows>) {
-  for (let index = 0; index < phases.length; index += 1) {
-    const currentStart = parseDate(phases[index].startDate);
-    const currentEnd = parseDate(phases[index].endDate);
-    if (!currentStart || !currentEnd || currentEnd < currentStart) {
-      return 'Cada etapa debe tener una fecha final igual o posterior a su inicio.';
+function validatePhaseRanges(phases: EditablePhase[]) {
+  for (const phase of phases) {
+    const start = parseDate(phase.startDate);
+    const end = parseDate(phase.endDate);
+
+    if (!start || !end) {
+      return 'Cada fase debe tener fecha de inicio y fin.';
     }
 
-    if (index > 0) {
-      const previousEnd = parseDate(phases[index - 1].endDate);
-      if (previousEnd) {
-        const expectedStart = new Date(previousEnd);
-        expectedStart.setDate(expectedStart.getDate() + 1);
-        if (currentStart.getTime() < expectedStart.getTime()) {
-          return 'Cada etapa debe comenzar al menos al dia siguiente de la etapa anterior.';
-        }
-      }
+    if (end < start) {
+      return 'La fecha final de cada fase debe ser igual o posterior a su inicio.';
     }
   }
 
+  const cuttingPhase = phases.find((phase) => phase.phase === 'cortado');
+  if (!cuttingPhase?.cuttingMachine) {
+    return 'Selecciona la cortadora de la fase de corte.';
+  }
+
   return null;
+}
+
+function dateRangesOverlap(startA: Date, endA: Date, startB: Date, endB: Date) {
+  return startA.getTime() <= endB.getTime() && endA.getTime() >= startB.getTime();
+}
+
+function daysBetween(startValue?: string | null, endValue?: string | null) {
+  const start = parseDate(startValue);
+  const end = parseDate(endValue);
+  if (!start || !end || end < start) return [];
+
+  const days: Date[] = [];
+  const cursor = new Date(start);
+  while (cursor.getTime() <= end.getTime()) {
+    days.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
+function buildMachineCalendarWindow(reservations: MachineReservation[], selectedStart?: string, selectedEnd?: string) {
+  const dates = [
+    parseDate(selectedStart),
+    parseDate(selectedEnd),
+    ...reservations.flatMap((reservation) => [parseDate(reservation.startDate), parseDate(reservation.endDate)]),
+  ].filter(Boolean) as Date[];
+
+  const base = dates.length ? new Date(Math.min(...dates.map((date) => date.getTime()))) : new Date();
+  base.setDate(base.getDate() - 3);
+  return daysBetween(toLocalDateString(base), toLocalDateString(new Date(base.getTime() + 20 * DAY_MS)));
 }
 
 function rangeFromOrders(orders: ProductionOrder[]) {
@@ -217,7 +275,7 @@ function formatWeekLabel(start: Date, end: Date) {
   return `Sem ${startDay}-${endDay}`;
 }
 
-function groupColumns<T>(dates: Date[], getKey: (date: Date) => string, getLabel: (date: Date, end: Date) => string) {
+function groupColumns(dates: Date[], getKey: (date: Date) => string, getLabel: (date: Date, end: Date) => string) {
   const groups: Array<{ key: string; label: string; span: number }> = [];
 
   dates.forEach((date) => {
@@ -278,6 +336,37 @@ function buildMonthWindows(dates: Date[]) {
   return months;
 }
 
+function assignPhaseLanes(rows: SchedulePhase[]) {
+  const laneEndTimes: number[] = [];
+
+  return [...rows]
+    .sort((left, right) => {
+      const leftStart = parseDate(left.startDate)?.getTime() ?? 0;
+      const rightStart = parseDate(right.startDate)?.getTime() ?? 0;
+      if (leftStart !== rightStart) return leftStart - rightStart;
+
+      const leftEnd = parseDate(left.endDate)?.getTime() ?? 0;
+      const rightEnd = parseDate(right.endDate)?.getTime() ?? 0;
+      if (leftEnd !== rightEnd) return leftEnd - rightEnd;
+
+      return PHASES.findIndex((phase) => phase.key === left.phase) - PHASES.findIndex((phase) => phase.key === right.phase);
+    })
+    .map((row) => {
+      const startTime = parseDate(row.startDate)?.getTime() ?? 0;
+      const endTime = parseDate(row.endDate)?.getTime() ?? 0;
+      let lane = laneEndTimes.findIndex((laneEnd) => laneEnd < startTime);
+
+      if (lane === -1) {
+        lane = laneEndTimes.length;
+        laneEndTimes.push(endTime);
+      } else {
+        laneEndTimes[lane] = endTime;
+      }
+
+      return { row, lane };
+    });
+}
+
 export function GanttSchedule() {
   const { user } = useAuth();
   const { currentRole } = useRole();
@@ -289,20 +378,17 @@ export function GanttSchedule() {
   const [contractors, setContractors] = useState<Contractor[]>([]);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
-  const [editing, setEditing] = useState<{
-    order: ProductionOrder;
-    type: ScheduleType;
-    phases: ReturnType<typeof normalizePhaseRows>;
-  } | null>(null);
-  const [selectedOrderId, setSelectedOrderId] = useState('');
+  const [projects, setProjects] = useState<Project[]>([]);
   const [selectedContractorFilter, setSelectedContractorFilter] = useState('all');
   const [selectedClientFilter, setSelectedClientFilter] = useState('all');
-  const [selectedMachineFilter, setSelectedMachineFilter] = useState<'all' | CuttingMachine>('all');
   const [scheduleViewMode, setScheduleViewMode] = useState<ScheduleViewMode>('mine');
   const [visibleMonthIndex, setVisibleMonthIndex] = useState(0);
+  const [editing, setEditing] = useState<{
+    order: ProductionOrder;
+    phases: EditablePhase[];
+  } | null>(null);
 
   const isContractor = currentRole === 'contractor';
-  const canCreateTentative = currentRole === 'admin' || currentRole === 'architect';
 
   async function loadData() {
     if (!apiBase) {
@@ -314,22 +400,25 @@ export function GanttSchedule() {
     setLoading(true);
     setError(null);
     try {
-      const [ordersResponse, contractorsResponse, quotationsResponse, clientsResponse] = await Promise.all([
+      const [ordersResponse, contractorsResponse, quotationsResponse, clientsResponse, projectsResponse] = await Promise.all([
         fetch(`${apiBase}/api/production-orders`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/contractors`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/quotations`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/clients`, { cache: 'no-store' }),
+        fetch(`${apiBase}/api/projects`, { cache: 'no-store' }),
       ]);
 
       if (!ordersResponse.ok) throw new Error('No se pudieron cargar las ordenes de produccion.');
       if (!contractorsResponse.ok) throw new Error('No se pudieron cargar los contratistas.');
       if (!quotationsResponse.ok) throw new Error('No se pudieron cargar las cotizaciones.');
       if (!clientsResponse.ok) throw new Error('No se pudieron cargar los clientes.');
+      if (!projectsResponse.ok) throw new Error('No se pudieron cargar los proyectos.');
 
       setOrders(await ordersResponse.json());
       setContractors(await contractorsResponse.json());
       setQuotations(await quotationsResponse.json());
       setClients(await clientsResponse.json());
+      setProjects(await projectsResponse.json());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error cargando cronograma.');
     } finally {
@@ -352,16 +441,41 @@ export function GanttSchedule() {
     if (scheduleViewMode === 'global') return orders;
     return orders.filter((order) => order.assignedContractorId === myContractor.id);
   }, [isContractor, myContractor, orders, scheduleViewMode]);
+
+  function getQuotation(order: ProductionOrder) {
+    return quotations.find((quotation) => quotation.id === order.quotationId);
+  }
+
+  function getProject(order: ProductionOrder) {
+    return projects.find((project) => project.id === order.projectId);
+  }
+
+  function getOrderClientId(order: ProductionOrder) {
+    return getProject(order)?.clientId ?? getQuotation(order)?.clientId;
+  }
+
+  function getClient(order: ProductionOrder) {
+    return clients.find((client) => client.id === getOrderClientId(order));
+  }
+
+  function getContractor(order: ProductionOrder) {
+    return contractors.find((contractor) => contractor.id === order.assignedContractorId);
+  }
+
+  function getFurnitureName(order: ProductionOrder) {
+    const project = getProject(order);
+    if (project?.name) return project.name;
+    const quotation = getQuotation(order);
+    return quotation?.items?.[0]?.description || order.items?.[0]?.description || 'Trabajo sin titulo';
+  }
+
   const filteredOrders = useMemo(() => {
     return visibleOrders.filter((order) => {
       const matchesContractor = selectedContractorFilter === 'all' || order.assignedContractorId === selectedContractorFilter;
-      const matchesClient = selectedClientFilter === 'all' || getQuotation(order)?.clientId === selectedClientFilter;
-      const matchesMachine = selectedMachineFilter === 'all' || (order.schedulePhases ?? []).some(
-        (phase) => phase.phase === 'cortado' && phase.cuttingMachine === selectedMachineFilter,
-      );
-      return matchesContractor && matchesClient && matchesMachine;
+      const matchesClient = selectedClientFilter === 'all' || getOrderClientId(order) === selectedClientFilter;
+      return matchesContractor && matchesClient;
     });
-  }, [selectedClientFilter, selectedContractorFilter, selectedMachineFilter, visibleOrders]);
+  }, [selectedClientFilter, selectedContractorFilter, visibleOrders]);
 
   const timeline = useMemo(() => rangeFromOrders(filteredOrders), [filteredOrders]);
   const dayColumns = useMemo(() => {
@@ -417,78 +531,49 @@ export function GanttSchedule() {
     });
   }, [monthWindows.length]);
 
-  function getQuotation(order: ProductionOrder) {
-    return quotations.find((quotation) => quotation.id === order.quotationId);
-  }
-
-  function getClient(order: ProductionOrder) {
-    const quotation = getQuotation(order);
-    return clients.find((client) => client.id === quotation?.clientId);
-  }
-
-  function getContractor(order: ProductionOrder) {
-    return contractors.find((contractor) => contractor.id === order.assignedContractorId);
-  }
-
-  function getFurnitureName(order: ProductionOrder) {
-    const quotation = getQuotation(order);
-    return quotation?.items?.[0]?.description || order.items?.[0]?.description || 'Trabajo sin titulo';
-  }
-
   const availableContractors = useMemo(() => {
     const ids = new Set(visibleOrders.map((order) => order.assignedContractorId).filter(Boolean));
     return contractors
       .filter((contractor) => ids.has(contractor.id))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((left, right) => left.name.localeCompare(right.name));
   }, [contractors, visibleOrders]);
 
   const availableClients = useMemo(() => {
     const ids = new Set(
       visibleOrders
-        .map((order) => getQuotation(order)?.clientId)
+        .map((order) => getOrderClientId(order))
         .filter((value): value is string => Boolean(value)),
     );
 
     return clients
       .filter((client) => ids.has(client.id))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [clients, quotations, visibleOrders]);
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [clients, visibleOrders]);
 
-  function startEditing(order: ProductionOrder, type: ScheduleType) {
+  function startEditing(order: ProductionOrder) {
+    setError(null);
     setEditing({
       order,
-      type,
-      phases: normalizePhaseRows(order.schedulePhases, type, order.startDate),
+      phases: normalizeActualPhases(order.schedulePhases, order.startDate),
     });
   }
 
-  function startCreateTentative() {
-    const order = filteredOrders.find((item) => item.id === selectedOrderId) ?? filteredOrders[0];
-    if (!order) return;
-    startEditing(order, 'tentative');
+  function closeEditing() {
+    if (saving) return;
+    setEditing(null);
   }
 
   function updatePhaseRange(index: number, startDate: string, endDate: string) {
     setEditing((current) => {
       if (!current) return current;
-      const next = current.phases.map((phase, phaseIndex) => (
-        phaseIndex === index
-          ? {
-              ...phase,
-              startDate,
-              endDate,
-            }
-          : phase
-      ));
-
-      if (endDate && index < next.length - 1) {
-        next[index + 1] = {
-          ...next[index + 1],
-          startDate: addDays(endDate, 1),
-        };
-      }
-
-      return { ...current, phases: next };
+      return {
+        ...current,
+        phases: current.phases.map((phase, phaseIndex) => (
+          phaseIndex === index
+            ? { ...phase, startDate, endDate }
+            : phase
+        )),
+      };
     });
   }
 
@@ -504,43 +589,42 @@ export function GanttSchedule() {
     });
   }
 
-  function validateCuttingMachineAvailability() {
-    if (!editing) return null;
+  const machineReservations = useMemo<MachineReservation[]>(() => {
+    if (!editing) return [];
     const cuttingPhase = editing.phases.find((phase) => phase.phase === 'cortado');
-    if (!cuttingPhase?.cuttingMachine) {
-      return 'Selecciona la cortadora que se usara en la etapa de corte.';
-    }
+    if (!cuttingPhase?.cuttingMachine) return [];
 
-    const start = parseDate(cuttingPhase.startDate);
-    const end = parseDate(cuttingPhase.endDate);
-    if (!start || !end) return null;
+    return orders
+      .flatMap((order) => {
+        if (order.id === editing.order.id) return [];
 
-    const conflict = orders.find((order) => {
-      if (order.id === editing.order.id) return false;
-      return (order.schedulePhases ?? []).some((phase) => {
-        if (phase.type !== editing.type || phase.phase !== 'cortado' || phase.cuttingMachine !== cuttingPhase.cuttingMachine) return false;
-        const otherStart = parseDate(phase.startDate);
-        const otherEnd = parseDate(phase.endDate);
-        if (!otherStart || !otherEnd) return false;
-        return start.getTime() <= otherEnd.getTime() && end.getTime() >= otherStart.getTime();
+        return (order.schedulePhases ?? [])
+          .filter((phase) => (
+            phase.type === 'actual' &&
+            phase.phase === 'cortado' &&
+            phase.cuttingMachine === cuttingPhase.cuttingMachine
+          ))
+          .map((phase) => ({
+            orderId: order.id,
+            furnitureName: getFurnitureName(order),
+            contractorName: getContractor(order)?.name ?? 'Sin contratista',
+            startDate: phase.startDate,
+            endDate: phase.endDate,
+          }));
+      })
+      .sort((left, right) => {
+        const leftStart = parseDate(left.startDate)?.getTime() ?? 0;
+        const rightStart = parseDate(right.startDate)?.getTime() ?? 0;
+        return leftStart - rightStart;
       });
-    });
-
-    if (!conflict) return null;
-    const machineLabel = CUTTING_MACHINES.find((machine) => machine.value === cuttingPhase.cuttingMachine)?.label ?? 'cortadora';
-    return `${machineLabel} ya esta ocupada en esas fechas por ${getFurnitureName(conflict)}.`;
-  }
+  }, [editing, orders]);
 
   async function saveSchedule() {
     if (!editing || !apiBase) return;
-    const validation = validateSuccessivePhases(editing.phases);
+
+    const validation = validatePhaseRanges(editing.phases);
     if (validation) {
       setError(validation);
-      return;
-    }
-    const machineValidation = validateCuttingMachineAvailability();
-    if (machineValidation) {
-      setError(machineValidation);
       return;
     }
 
@@ -551,19 +635,18 @@ export function GanttSchedule() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: editing.type,
+          type: 'actual',
           createdBy: user?.id && UUID_REGEX.test(user.id) ? user.id : null,
           phases: editing.phases,
         }),
       });
 
+      const body = await response.json().catch(() => null);
       if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        throw new Error(body?.error || 'No se pudo guardar el cronograma.');
+        throw new Error(body?.error || 'No se pudo guardar el cronograma por fases.');
       }
 
-      const updated = await response.json();
-      setOrders((prev) => prev.map((order) => (order.id === updated.id ? updated : order)));
+      setOrders((current) => current.map((order) => (order.id === body.id ? body : order)));
       setEditing(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error guardando cronograma.');
@@ -572,44 +655,90 @@ export function GanttSchedule() {
     }
   }
 
-  function renderPhaseBars(order: ProductionOrder, type: ScheduleType) {
-    const rows = (order.schedulePhases ?? []).filter((phase) => phase.type === type);
-    if (rows.length === 0) {
+  function getTimelinePlacement(startValue?: string | null, endValue?: string | null) {
+    const start = parseDate(startValue);
+    const end = parseDate(endValue);
+    if (!start || !end) return null;
+
+    const visibleStart = new Date(Math.max(start.getTime(), visibleTimelineStart.getTime()));
+    const visibleEnd = new Date(Math.min(end.getTime(), visibleTimelineStart.getTime() + ((visibleTimelineDays - 1) * DAY_MS)));
+    if (visibleEnd.getTime() < visibleTimelineStart.getTime() || visibleStart.getTime() > visibleEnd.getTime()) return null;
+
+    const left = Math.max(0, ((visibleStart.getTime() - visibleTimelineStart.getTime()) / DAY_MS / visibleTimelineDays) * 100);
+    const width = Math.max(2, (((visibleEnd.getTime() - visibleStart.getTime()) / DAY_MS + 1) / visibleTimelineDays) * 100);
+
+    return {
+      left,
+      width: Math.min(width, 100 - left),
+    };
+  }
+
+  function renderTentativeBar(order: ProductionOrder) {
+    const placement = getTimelinePlacement(order.startDate, order.estimatedDeliveryDate);
+    if (!placement) {
       return (
-        <div className="flex h-8 items-center rounded-md border border-dashed border-border bg-muted/20 px-3 text-xs text-muted-foreground">
-          {type === 'tentative' ? 'Sin cronograma tentativo' : 'Sin avance real registrado'}
+        <div className="flex h-9 items-center rounded-md border border-dashed border-border bg-muted/20 px-3 text-xs text-muted-foreground">
+          Sin tiempo tentativo asignado
         </div>
       );
     }
 
     return (
-      <div className="relative h-8 rounded-md bg-muted/30">
-        {rows.map((row) => {
-          const phaseConfig = PHASES.find((phase) => phase.key === row.phase);
-          const start = parseDate(row.startDate);
-          const end = parseDate(row.endDate);
-          if (!start || !end) return null;
-          const visibleStart = new Date(Math.max(start.getTime(), visibleTimelineStart.getTime()));
-          const visibleEnd = new Date(Math.min(end.getTime(), visibleTimelineStart.getTime() + ((visibleTimelineDays - 1) * DAY_MS)));
-          if (visibleEnd.getTime() < visibleTimelineStart.getTime() || visibleStart.getTime() > visibleEnd.getTime()) {
-            return null;
-          }
+      <div className="relative h-9 rounded-md bg-muted/25">
+        <div
+          className="absolute top-1 h-7 rounded-md bg-zinc-400 px-3 text-[11px] font-semibold leading-7 text-white shadow-sm ring-1 ring-zinc-500/20"
+          style={{ left: `${placement.left}%`, width: `${placement.width}%` }}
+          title={`Tiempo tentativo: ${formatShortDate(order.startDate)} - ${formatShortDate(order.estimatedDeliveryDate)}`}
+        >
+          <span className="block truncate">Tiempo tentativo</span>
+        </div>
+      </div>
+    );
+  }
 
-          const left = Math.max(0, ((visibleStart.getTime() - visibleTimelineStart.getTime()) / DAY_MS / visibleTimelineDays) * 100);
-          const width = Math.max(2, (((visibleEnd.getTime() - visibleStart.getTime()) / DAY_MS + 1) / visibleTimelineDays) * 100);
-          const color = type === 'tentative' ? '#a1a1aa' : phaseConfig?.color ?? '#eab676';
+  function renderActualBars(order: ProductionOrder, canEdit: boolean) {
+    const rows = (order.schedulePhases ?? []).filter((phase) => phase.type === 'actual');
+
+    if (rows.length === 0) {
+      return (
+        <div className="flex h-10 items-center justify-between gap-3 rounded-md border border-dashed border-border bg-muted/20 px-3 text-xs text-muted-foreground">
+          <span>Sin cronograma por fases registrado.</span>
+          {canEdit ? <span className="font-medium text-foreground/70">Usa "Editar fases".</span> : null}
+        </div>
+      );
+    }
+
+    const laneRows = assignPhaseLanes(rows);
+    const laneCount = Math.max(...laneRows.map((entry) => entry.lane)) + 1;
+    const contentHeight = Math.max(38, laneCount * 30 + 8);
+
+    return (
+      <div className="relative rounded-md bg-muted/30" style={{ height: `${contentHeight}px` }}>
+        {laneRows.map(({ row, lane }) => {
+          const phaseConfig = PHASES.find((phase) => phase.key === row.phase);
+          const placement = getTimelinePlacement(row.startDate, row.endDate);
+          if (!placement) return null;
+
           const machineLabel = row.phase === 'cortado'
             ? CUTTING_MACHINES.find((machine) => machine.value === row.cuttingMachine)?.label
             : null;
 
           return (
             <div
-              key={`${type}-${row.phase}`}
-              className="absolute top-1 h-6 rounded-md px-2 text-[11px] font-semibold leading-6 text-white shadow-sm"
-              style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%`, backgroundColor: color }}
-              title={`${phaseConfig?.label}: ${formatShortDate(row.startDate)} - ${formatShortDate(row.endDate)}${machineLabel ? ` · ${machineLabel}` : ''}`}
+              key={`actual-${row.phase}-${row.id ?? `${row.startDate}-${row.endDate}`}`}
+              className="absolute h-6 rounded-md px-2 text-[11px] font-semibold leading-6 text-white shadow-sm"
+              style={{
+                left: `${placement.left}%`,
+                width: `${Math.min(placement.width, 100 - placement.left)}%`,
+                top: `${lane * 30 + 4}px`,
+                backgroundColor: phaseConfig?.color ?? '#eab676',
+              }}
+              title={`${phaseConfig?.label}: ${formatRangeLabel(row.startDate, row.endDate)}${machineLabel ? ` · ${machineLabel}` : ''}`}
             >
-              <span className="block truncate">{phaseConfig?.label}{machineLabel ? ` · ${machineLabel.replace('Cortadora ', 'C')}` : ''}</span>
+              <span className="block truncate">
+                {phaseConfig?.label}
+                {machineLabel ? ` · ${machineLabel.replace('Cortadora ', 'C')}` : ''}
+              </span>
             </div>
           );
         })}
@@ -621,7 +750,7 @@ export function GanttSchedule() {
     return (
       <PageLoadingState
         title="Cargando cronograma"
-        description="Sincronizando ordenes, contratistas y fases de produccion."
+        description="Sincronizando ordenes, contratistas y tiempos tentativos."
       />
     );
   }
@@ -632,29 +761,9 @@ export function GanttSchedule() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Cronograma de produccion</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Compara tiempos tentativos con avance real por etapa.
+            El tiempo tentativo viene del proyecto y el contratista registra su cronograma por fases sobre ese marco.
           </p>
         </div>
-        {canCreateTentative ? (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <select
-              value={selectedOrderId}
-              onChange={(event) => setSelectedOrderId(event.target.value)}
-              className="h-10 min-w-[280px] rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="">Elegir cotizacion/trabajo...</option>
-              {filteredOrders.map((order) => (
-                <option key={order.id} value={order.id}>
-                  {getFurnitureName(order)} - {getClient(order)?.name ?? 'Cliente'}
-                </option>
-              ))}
-            </select>
-            <Button onClick={startCreateTentative} disabled={!selectedOrderId} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Crear tiempo tentativo
-            </Button>
-          </div>
-        ) : null}
       </div>
 
       {error ? (
@@ -694,8 +803,8 @@ export function GanttSchedule() {
 
       <div className="grid gap-3 md:grid-cols-4">
         <ScheduleMetric icon={<ClipboardList className="h-4 w-4" />} label="Trabajos" value={String(filteredOrders.length)} />
-        <ScheduleMetric icon={<Clock3 className="h-4 w-4" />} label="Tentativos" value={String(filteredOrders.filter((order) => order.schedulePhases?.some((phase) => phase.type === 'tentative')).length)} />
-        <ScheduleMetric icon={<CalendarDays className="h-4 w-4" />} label="Reales" value={String(filteredOrders.filter((order) => order.schedulePhases?.some((phase) => phase.type === 'actual')).length)} />
+        <ScheduleMetric icon={<Clock3 className="h-4 w-4" />} label="Tentativos" value={String(filteredOrders.filter((order) => order.startDate && order.estimatedDeliveryDate).length)} />
+        <ScheduleMetric icon={<CalendarRange className="h-4 w-4" />} label="Con fases" value={String(filteredOrders.filter((order) => order.schedulePhases?.some((phase) => phase.type === 'actual')).length)} />
         <ScheduleMetric icon={<CheckCircle2 className="h-4 w-4" />} label="Completos" value={String(filteredOrders.filter((order) => order.status === 'completed').length)} />
       </div>
 
@@ -712,12 +821,12 @@ export function GanttSchedule() {
               <div className="flex flex-wrap gap-3 text-xs text-foreground/80">
                 <span className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/70 px-3 py-1.5">
                   <span className="h-3 w-6 rounded bg-zinc-400" />
-                  Tentativo
+                  Tiempo tentativo
                 </span>
                 {PHASES.map((phase) => (
                   <span key={phase.key} className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/70 px-3 py-1.5">
                     <span className="h-3 w-6 rounded" style={{ backgroundColor: phase.color }} />
-                    Real {phase.label}
+                    {phase.label}
                   </span>
                 ))}
               </div>
@@ -749,18 +858,6 @@ export function GanttSchedule() {
                     </option>
                   ))}
                 </select>
-                <select
-                  value={selectedMachineFilter}
-                  onChange={(event) => setSelectedMachineFilter(event.target.value as 'all' | CuttingMachine)}
-                  className="h-10 min-w-[180px] rounded-md border border-border/70 bg-background/90 px-3 text-sm text-foreground shadow-sm"
-                >
-                  <option value="all">Todas las cortadoras</option>
-                  {CUTTING_MACHINES.map((machine) => (
-                    <option key={machine.value} value={machine.value}>
-                      {machine.label}
-                    </option>
-                  ))}
-                </select>
               </div>
               <div className="flex items-center gap-2">
                 <Button
@@ -788,118 +885,130 @@ export function GanttSchedule() {
 
         <div className="max-h-[68vh] overflow-auto">
           <div className="min-w-max">
-          <div className="sticky top-0 z-20 grid border-b border-border bg-muted/30 text-xs font-semibold text-muted-foreground shadow-sm" style={{ gridTemplateColumns: `280px ${timelineColumnWidth}` }}>
-            <div className="border-r border-border bg-muted/30 px-4 py-3">Mueble / Cliente / Contratista</div>
-            <div>
-              <div className="grid border-b border-border/50" style={{ gridTemplateColumns: `repeat(${visibleDayColumns.length}, minmax(32px, 1fr))` }}>
-              {monthGroups.map((group) => (
-                <div
-                  key={`month-${group.key}`}
-                  className="border-r border-border/40 bg-[#e8dfd1] px-2 py-2 text-center text-[11px] font-bold uppercase tracking-[0.18em] text-[#6f5840]"
-                  style={{ gridColumn: `span ${group.span} / span ${group.span}` }}
-                >
-                  {group.label}
+            <div className="sticky top-0 z-20 grid border-b border-border bg-muted/30 text-xs font-semibold text-muted-foreground shadow-sm" style={{ gridTemplateColumns: `320px ${timelineColumnWidth}` }}>
+              <div className="border-r border-border bg-muted/30 px-4 py-3">Mueble / Cliente / Contratista</div>
+              <div>
+                <div className="grid border-b border-border/50" style={{ gridTemplateColumns: `repeat(${visibleDayColumns.length}, minmax(32px, 1fr))` }}>
+                  {monthGroups.map((group) => (
+                    <div
+                      key={`month-${group.key}`}
+                      className="border-r border-border/40 bg-[#e8dfd1] px-2 py-2 text-center text-[11px] font-bold uppercase tracking-[0.18em] text-[#6f5840]"
+                      style={{ gridColumn: `span ${group.span} / span ${group.span}` }}
+                    >
+                      {group.label}
+                    </div>
+                  ))}
                 </div>
-              ))}
-              </div>
-              <div className="grid border-b border-border/40" style={{ gridTemplateColumns: `repeat(${visibleDayColumns.length}, minmax(32px, 1fr))` }}>
-              {weekGroups.map((group) => (
-                <div
-                  key={`week-${group.key}`}
-                  className="border-r border-border/30 bg-[#f3ede4] px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8a7257]"
-                  style={{ gridColumn: `span ${group.span} / span ${group.span}` }}
-                >
-                  {group.label}
+                <div className="grid border-b border-border/40" style={{ gridTemplateColumns: `repeat(${visibleDayColumns.length}, minmax(32px, 1fr))` }}>
+                  {weekGroups.map((group) => (
+                    <div
+                      key={`week-${group.key}`}
+                      className="border-r border-border/30 bg-[#f3ede4] px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8a7257]"
+                      style={{ gridColumn: `span ${group.span} / span ${group.span}` }}
+                    >
+                      {group.label}
+                    </div>
+                  ))}
                 </div>
-              ))}
-              </div>
-              <div className="grid" style={{ gridTemplateColumns: `repeat(${visibleDayColumns.length}, minmax(32px, 1fr))` }}>
-              {visibleDayColumns.map((day) => (
-                <div key={day.toISOString()} className="border-r border-border/40 px-1 py-2 text-center">
-                  <div className="text-[11px] font-semibold text-foreground">
-                    {new Intl.DateTimeFormat('es-BO', { day: '2-digit' }).format(day)}
-                  </div>
-                  <div className="mt-0.5 text-[10px] uppercase text-muted-foreground">
-                    {new Intl.DateTimeFormat('es-BO', { weekday: 'short' }).format(day)}
-                  </div>
+                <div className="grid" style={{ gridTemplateColumns: `repeat(${visibleDayColumns.length}, minmax(32px, 1fr))` }}>
+                  {visibleDayColumns.map((day) => (
+                    <div key={day.toISOString()} className="border-r border-border/40 px-1 py-2 text-center">
+                      <div className="text-[11px] font-semibold text-foreground">
+                        {new Intl.DateTimeFormat('es-BO', { day: '2-digit' }).format(day)}
+                      </div>
+                      <div className="mt-0.5 text-[10px] uppercase text-muted-foreground">
+                        {new Intl.DateTimeFormat('es-BO', { weekday: 'short' }).format(day)}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
               </div>
             </div>
-          </div>
 
-          {filteredOrders.map((order) => {
-            const contractor = getContractor(order);
-            const client = getClient(order);
-            const canEditActual = isContractor && scheduleViewMode === 'mine' && myContractor?.id === order.assignedContractorId;
-            const canOpenTentative = canCreateTentative;
+            {filteredOrders.map((order) => {
+              const contractor = getContractor(order);
+              const client = getClient(order);
+              const canEditActual = isContractor && scheduleViewMode === 'mine' && myContractor?.id === order.assignedContractorId;
 
-            return (
-              <div key={order.id} className="grid border-b border-border" style={{ gridTemplateColumns: `280px ${timelineColumnWidth}` }}>
-                <button
-                  type="button"
-                  onClick={() => (canEditActual ? startEditing(order, 'actual') : canOpenTentative ? startEditing(order, 'tentative') : undefined)}
-                  className={`border-r border-border px-4 py-4 text-left transition-colors ${
-                    canEditActual || canOpenTentative ? 'hover:bg-muted/40' : 'cursor-default'
-                  }`}
-                >
-                  <p className="text-sm font-semibold">{getFurnitureName(order)}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{client?.name ?? 'Cliente no registrado'}</p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <Badge variant="outline">{contractor?.name ?? 'Sin contratista'}</Badge>
-                    {canEditActual ? <Badge className="bg-emerald-100 text-emerald-700">Editable</Badge> : null}
-                    {isContractor && scheduleViewMode === 'global' ? <Badge variant="outline">Solo lectura</Badge> : null}
+              return (
+                <div key={order.id} className="grid border-b border-border" style={{ gridTemplateColumns: `320px ${timelineColumnWidth}` }}>
+                  <div className="border-r border-border px-4 py-4 text-left">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">{getFurnitureName(order)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{client?.name ?? 'Cliente no registrado'}</p>
+                      </div>
+                      {canEditActual ? (
+                        <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={() => startEditing(order)}>
+                          <PencilLine className="h-3.5 w-3.5" />
+                          Editar fases
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{contractor?.name ?? 'Sin contratista'}</Badge>
+                      {canEditActual ? <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Editable</Badge> : null}
+                      {isContractor && scheduleViewMode === 'global' ? <Badge variant="outline">Solo lectura</Badge> : null}
+                    </div>
                   </div>
-                </button>
-                <div
-                  className="space-y-2 px-3 py-4"
-                  style={{
-                    backgroundImage: 'repeating-linear-gradient(to right, transparent 0, transparent calc(42px - 1px), rgba(148,163,184,0.18) calc(42px - 1px), rgba(148,163,184,0.18) 42px)',
-                    backgroundSize: '42px 100%',
-                  }}
-                >
-                  {renderPhaseBars(order, 'tentative')}
-                  {renderPhaseBars(order, 'actual')}
+                  <div
+                    className="space-y-3 px-3 py-4"
+                    style={{
+                      backgroundImage: 'repeating-linear-gradient(to right, transparent 0, transparent calc(42px - 1px), rgba(148,163,184,0.18) calc(42px - 1px), rgba(148,163,184,0.18) 42px)',
+                      backgroundSize: '42px 100%',
+                    }}
+                  >
+                    {renderTentativeBar(order)}
+                    {renderActualBars(order, canEditActual)}
+                  </div>
                 </div>
+              );
+            })}
+
+            {filteredOrders.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">
+                No hay trabajos disponibles para este cronograma.
               </div>
-            );
-          })}
-          {filteredOrders.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">
-              No hay trabajos disponibles para este cronograma.
-            </div>
-          ) : null}
+            ) : null}
           </div>
         </div>
       </Card>
 
       {editing ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
-          <Card className="w-full max-w-3xl p-5">
+          <Card className="w-full max-w-4xl p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-lg font-semibold">
-                  {editing.type === 'tentative' ? 'Editar cronograma tentativo' : 'Editar cronograma real'}
-                </p>
+                <p className="text-lg font-semibold">Cronograma por fases del contratista</p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {getFurnitureName(editing.order)} - {getClient(editing.order)?.name ?? 'Cliente'}
                 </p>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => setEditing(null)}>
+              <Button variant="ghost" size="icon" onClick={closeEditing} disabled={saving}>
                 <X className="h-4 w-4" />
               </Button>
+            </div>
+
+            <div className="mt-4 rounded-lg border border-border bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
+              Puedes planificar fases en el mismo dia o en rangos superpuestos. La disponibilidad de cortadoras se muestra como referencia para elegir mejor tus fechas.
             </div>
 
             <div className="mt-5 grid gap-3">
               {editing.phases.map((phase, index) => {
                 const phaseConfig = PHASES.find((item) => item.key === phase.phase);
+                const selectedMachineLabel = CUTTING_MACHINES.find((machine) => machine.value === phase.cuttingMachine)?.label ?? 'Cortadora';
+
                 return (
-                  <div key={phase.phase} className="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-[140px_1fr] md:items-center">
+                  <div key={phase.phase} className="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-[150px_1fr] md:items-center">
                     <div className="flex items-center gap-2">
-                      <span className="h-3 w-3 rounded-full" style={{ backgroundColor: editing.type === 'tentative' ? '#a1a1aa' : phaseConfig?.color }} />
-                      <p className="text-sm font-semibold">{phaseConfig?.label}</p>
+                      <span className="h-3 w-3 rounded-full" style={{ backgroundColor: phaseConfig?.color }} />
+                      <div>
+                        <p className="text-sm font-semibold">{phaseConfig?.label}</p>
+                        <p className="text-[11px] text-muted-foreground">{formatRangeLabel(phase.startDate, phase.endDate)}</p>
+                      </div>
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px]">
+
+                    <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_260px]">
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
@@ -924,15 +1033,17 @@ export function GanttSchedule() {
                           <DateRangeCalendar
                             mode="range"
                             numberOfMonths={1}
+                            defaultMonth={parseDate(phase.startDate) ?? new Date()}
                             selected={{
                               from: parseDate(phase.startDate) ?? undefined,
                               to: parseDate(phase.endDate) ?? undefined,
                             }}
                             onSelect={(range) => {
+                              const nextStart = range?.from ? toLocalDateString(range.from) : '';
                               updatePhaseRange(
                                 index,
-                                range?.from ? toLocalDateString(range.from) : '',
-                                range?.to ? toLocalDateString(range.to) : '',
+                                nextStart,
+                                range?.to ? toLocalDateString(range.to) : nextStart,
                               );
                             }}
                             classNames={{
@@ -943,18 +1054,77 @@ export function GanttSchedule() {
                           />
                         </PopoverContent>
                       </Popover>
+
                       {phase.phase === 'cortado' ? (
-                        <select
-                          value={phase.cuttingMachine ?? 'cortadora-1'}
-                          onChange={(event) => updateCuttingMachine(event.target.value as CuttingMachine)}
-                          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                        >
-                          {CUTTING_MACHINES.map((machine) => (
-                            <option key={machine.value} value={machine.value}>
-                              {machine.label}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="flex gap-2">
+                          <select
+                            value={phase.cuttingMachine ?? 'cortadora-1'}
+                            onChange={(event) => updateCuttingMachine(event.target.value as CuttingMachine)}
+                            className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                          >
+                            {CUTTING_MACHINES.map((machine) => (
+                              <option key={machine.value} value={machine.value}>
+                                {machine.label}
+                              </option>
+                            ))}
+                          </select>
+
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button type="button" variant="outline" size="icon" aria-label={`Ver disponibilidad de ${selectedMachineLabel}`}>
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent align="end" className="w-[360px] p-0">
+                              <div className="border-b border-border px-4 py-3">
+                                <p className="font-semibold">Disponibilidad de {selectedMachineLabel}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Bloques ya ocupados por otros trabajos en la etapa de corte.
+                                </p>
+                              </div>
+                              <div className="space-y-3 p-4">
+                                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Rango que estas planificando</p>
+                                  <p className="mt-1 text-sm font-medium text-foreground">{formatRangeLabel(phase.startDate, phase.endDate)}</p>
+                                </div>
+
+                                <MachineAvailabilityMiniCalendar
+                                  reservations={machineReservations}
+                                  selectedStart={phase.startDate}
+                                  selectedEnd={phase.endDate}
+                                />
+
+                                {machineReservations.length === 0 ? (
+                                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                                    No hay reservas registradas para esta cortadora en otros trabajos.
+                                  </div>
+                                ) : (
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Mini cronograma</p>
+                                      <Badge variant="outline">{machineReservations.length} bloques</Badge>
+                                    </div>
+                                    <div className="max-h-72 space-y-2 overflow-auto pr-1">
+                                      {machineReservations.map((reservation) => (
+                                        <div key={`${reservation.orderId}-${reservation.startDate}-${reservation.endDate}`} className="rounded-lg border border-border/70 bg-background p-3">
+                                          <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                              <p className="truncate text-sm font-semibold text-foreground">{reservation.furnitureName}</p>
+                                              <p className="mt-1 text-xs text-muted-foreground">{reservation.contractorName}</p>
+                                            </div>
+                                            <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800">
+                                              {formatRangeLabel(reservation.startDate, reservation.endDate)}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
                       ) : null}
                     </div>
                   </div>
@@ -963,8 +1133,8 @@ export function GanttSchedule() {
             </div>
 
             <div className="mt-5 flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
-              <Button onClick={saveSchedule} disabled={saving} className="gap-2">
+              <Button variant="outline" onClick={closeEditing} disabled={saving}>Cancelar</Button>
+              <Button onClick={() => void saveSchedule()} disabled={saving} className="gap-2">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 Guardar cronograma
               </Button>
@@ -972,6 +1142,70 @@ export function GanttSchedule() {
           </Card>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function MachineAvailabilityMiniCalendar({
+  reservations,
+  selectedStart,
+  selectedEnd,
+}: {
+  reservations: MachineReservation[];
+  selectedStart: string;
+  selectedEnd: string;
+}) {
+  const days = buildMachineCalendarWindow(reservations, selectedStart, selectedEnd);
+  const selectedStartDate = parseDate(selectedStart);
+  const selectedEndDate = parseDate(selectedEnd);
+
+  return (
+    <div className="rounded-lg border border-border bg-background p-3">
+      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase text-muted-foreground">
+        {['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((day, index) => (
+          <div key={`${day}-${index}`} className="py-1">{day}</div>
+        ))}
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {days.map((day) => {
+          const occupied = reservations.some((reservation) => {
+            const start = parseDate(reservation.startDate);
+            const end = parseDate(reservation.endDate);
+            return start && end && dateRangesOverlap(day, day, start, end);
+          });
+          const selected = selectedStartDate && selectedEndDate && dateRangesOverlap(day, day, selectedStartDate, selectedEndDate);
+
+          return (
+            <div
+              key={day.toISOString()}
+              className={`flex h-8 items-center justify-center rounded-md border text-[11px] font-semibold ${
+                selected
+                  ? 'border-sky-400 bg-sky-100 text-sky-800'
+                  : occupied
+                    ? 'border-amber-200 bg-amber-100 text-amber-800'
+                    : 'border-emerald-100 bg-emerald-50 text-emerald-700'
+              }`}
+              title={`${formatDisplayDate(day)} ${occupied ? 'ocupado' : 'disponible'}${selected ? ' - rango elegido' : ''}`}
+            >
+              {day.getDate()}
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-emerald-100 ring-1 ring-emerald-200" />
+          Disponible
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-amber-100 ring-1 ring-amber-200" />
+          Ocupado
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-sky-100 ring-1 ring-sky-300" />
+          Tu rango
+        </span>
+      </div>
     </div>
   );
 }

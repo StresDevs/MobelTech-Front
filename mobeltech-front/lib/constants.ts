@@ -26,7 +26,7 @@ export const MODULES = [
     label: 'Mediciones y Clientes',
     path: '/clients',
     icon: 'Users',
-    roles: ['admin', 'architect', 'contractor', 'partner'],
+    roles: ['admin', 'architect'],
   },
   {
     id: 'prequotations',

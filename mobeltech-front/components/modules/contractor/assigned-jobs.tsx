@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { jsPDF } from 'jspdf';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -12,6 +11,8 @@ import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { BellRing, CalendarRange, Download, Loader2, RefreshCw, Upload, WalletCards } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { getNotificationTarget } from '@/lib/notification-routing';
 
 type ContractorRecord = {
   id: string;
@@ -200,6 +201,7 @@ async function loadLogoDataUrl() {
 
 export default function AssignedJobs() {
   const { user } = useAuth();
+  const router = useRouter();
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -314,6 +316,14 @@ export default function AssignedJobs() {
       setNotifications((prev) => prev.filter((notification) => notification.id !== notificationId));
     } catch {
       // Notification read state should not block the jobs page.
+    }
+  }
+
+  async function handleNotificationClick(notification: NotificationRecord) {
+    await markNotificationAsRead(notification.id);
+    const target = getNotificationTarget(notification, 'contractor');
+    if (target) {
+      router.push(target);
     }
   }
 
@@ -594,6 +604,7 @@ export default function AssignedJobs() {
   }
 
   async function generateWorkOrderPdf(job: ProductionOrderRecord) {
+    const { jsPDF } = await import('jspdf');
     const quotation = getQuotation(job);
     const client = getClient(job);
     const description = getLeadDescription(job);
@@ -742,16 +753,32 @@ export default function AssignedJobs() {
       {notifications.length > 0 ? (
         <div className="space-y-2">
           {notifications.map((notification) => (
-            <Card key={notification.id} className="border-amber-200 bg-amber-50 p-3">
+            <Card key={notification.id} className="border-amber-200 bg-amber-50 p-3 transition hover:border-amber-300 hover:bg-amber-100/80">
               <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() => void handleNotificationClick(notification)}
+                >
                   <div className="flex items-center gap-2">
                     <BellRing className="h-4 w-4 text-amber-600" />
                     <p className="truncate text-sm font-medium text-amber-900">{notification.message}</p>
                   </div>
-                  <p className="mt-1 text-xs text-amber-800/80">{formatDate(notification.createdAt)}</p>
-                </div>
-                <Button size="sm" variant="outline" onClick={() => void markNotificationAsRead(notification.id)}>
+                  <div className="mt-1 flex items-center gap-2">
+                    <p className="text-xs text-amber-800/80">{formatDate(notification.createdAt)}</p>
+                    {getNotificationTarget(notification, 'contractor') ? (
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-700">Abrir</span>
+                    ) : null}
+                  </div>
+                </button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void markNotificationAsRead(notification.id);
+                  }}
+                >
                   Marcar leído
                 </Button>
               </div>
