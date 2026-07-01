@@ -997,125 +997,129 @@ export default function AssignedJobs() {
       </Card>
 
       <Dialog open={!!laborJob} onOpenChange={(open) => { if (!open) { setEditingLaborJobId(null); setSelectedLaborLines([]); setLaborSearch(''); } }}>
-        <DialogContent className="max-w-6xl">
-          <DialogHeader>
-            <DialogTitle>Formulario de mano de obra</DialogTitle>
-            <DialogDescription>
-              Busca actividades, agrégalas y completa las medidas. El total quedará en revisión por administración.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] max-w-none overflow-hidden p-0 sm:max-w-none xl:w-[min(1240px,calc(100vw-3rem))]">
           {laborJob ? (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
-                <p className="font-medium">{getLeadDescription(laborJob)}</p>
-                <p className="text-xs text-muted-foreground">Trabajo {laborJob.id.slice(0, 8)}</p>
-              </div>
-              <div className="space-y-2">
-                <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-                  <div className="space-y-1.5">
-                    <Label>Buscador</Label>
-                    <Input value={laborSearch} onChange={(event) => setLaborSearch(event.target.value)} placeholder="Buscar actividad de mano de obra..." />
+            <div className="flex max-h-[90vh] flex-col">
+              <DialogHeader className="border-b border-border/70 px-5 py-4">
+                <DialogTitle>Formulario de mano de obra</DialogTitle>
+                <DialogDescription>
+                  Busca actividades, agrégalas y completa las medidas. El total quedará en revisión por administración.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 overflow-y-auto px-5 py-4">
+                <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                  <p className="font-medium">{getLeadDescription(laborJob)}</p>
+                  <p className="text-xs text-muted-foreground">Trabajo {laborJob.id.slice(0, 8)}</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                    <div className="space-y-1.5">
+                      <Label>Buscador</Label>
+                      <Input value={laborSearch} onChange={(event) => setLaborSearch(event.target.value)} placeholder="Buscar actividad de mano de obra..." />
+                    </div>
+                    <div className="flex items-end">
+                      <Button type="button" variant="outline" onClick={() => setLaborSearch('')}>Limpiar</Button>
+                    </div>
                   </div>
-                  <div className="flex items-end">
-                    <Button type="button" variant="outline" onClick={() => setLaborSearch('')}>Limpiar</Button>
-                  </div>
+
+                  {laborItems.length === 0 ? (
+                    <Card className="border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                      No hay actividades de mano de obra configuradas. Pide al admin, gerente o arquitecta que las cree en Solicitud de Pago Contratistas.
+                    </Card>
+                  ) : null}
+
+                  {availableLaborItems.length > 0 ? (
+                    <div className="max-h-36 overflow-auto rounded-md border border-border/70">
+                      {availableLaborItems.slice(0, 8).map((item) => (
+                        <div key={item.itemKey} className="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-2 last:border-b-0">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{item.label}</p>
+                            <p className="text-xs text-muted-foreground">{item.unit || 'UND'} · {formatCurrency(item.referencePrice ?? item.defaultAmount)}</p>
+                          </div>
+                          <Button type="button" size="sm" onClick={() => addLaborLine(item)}>Agregar</Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : laborItems.length > 0 ? (
+                    <p className="rounded-md border border-dashed border-border/70 px-3 py-4 text-center text-sm text-muted-foreground">
+                      No hay actividades disponibles para ese filtro.
+                    </p>
+                  ) : null}
                 </div>
 
-                {laborItems.length === 0 ? (
-                  <Card className="border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                    No hay actividades de mano de obra configuradas. Pide al admin, gerente o arquitecta que las cree en Solicitud de Pago Contratistas.
-                  </Card>
-                ) : null}
-
-                {availableLaborItems.length > 0 ? (
-                  <div className="max-h-36 overflow-auto rounded-md border border-border/70">
-                    {availableLaborItems.slice(0, 8).map((item) => (
-                      <div key={item.itemKey} className="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-2 last:border-b-0">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{item.label}</p>
-                          <p className="text-xs text-muted-foreground">{item.unit || 'UND'} · {formatCurrency(item.referencePrice ?? item.defaultAmount)}</p>
-                        </div>
-                        <Button type="button" size="sm" onClick={() => addLaborLine(item)}>Agregar</Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : laborItems.length > 0 ? (
-                  <p className="rounded-md border border-dashed border-border/70 px-3 py-4 text-center text-sm text-muted-foreground">
-                    No hay actividades disponibles para ese filtro.
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="overflow-x-auto rounded-md border border-border/70">
-                <table className="w-full min-w-[980px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border/70">
-                      <th className="w-12 px-2 py-2 text-center font-semibold text-muted-foreground">No</th>
-                      <th className="bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
-                      <th className="bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
-                      <th className="bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Alto</th>
-                      <th className="bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Ancho/Cantidad</th>
-                      <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">TOTAL</th>
-                      <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
-                      <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.PARCIAL</th>
-                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Acción</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedLaborLines.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">Agrega actividades desde el buscador.</td>
+                <div className="overflow-x-auto rounded-md border border-border/70">
+                  <table className="w-full min-w-[1120px] table-fixed text-sm">
+                    <thead>
+                      <tr className="border-b border-border/70">
+                        <th className="w-12 px-2 py-2 text-center font-semibold text-muted-foreground">No</th>
+                        <th className="w-[24%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
+                        <th className="w-[10%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
+                        <th className="w-[12%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Alto</th>
+                        <th className="w-[15%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Ancho/Cantidad</th>
+                        <th className="w-[11%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">TOTAL</th>
+                        <th className="w-[13%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
+                        <th className="w-[13%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.PARCIAL</th>
+                        <th className="w-[10%] px-3 py-2 text-right font-medium text-muted-foreground">Acción</th>
                       </tr>
-                    ) : selectedLaborLines.map((line, index) => (
-                      <tr key={line.itemKey} className="border-b border-border/60 last:border-b-0">
-                        <td className="px-2 py-2 text-center font-mono text-xs text-muted-foreground">{index + 1}</td>
-                        <td className="bg-amber-50/80 px-3 py-2 font-medium">{line.label}</td>
-                        <td className="bg-amber-50/80 px-3 py-2 text-center font-mono text-xs font-semibold">{line.unit}</td>
-                        <td className="bg-emerald-50 px-3 py-2">
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.001"
-                            value={line.width}
-                            onChange={(event) => updateLaborLine(index, 'width', event.target.value)}
-                            className="h-8 text-right font-mono"
-                            placeholder="0"
-                          />
-                        </td>
-                        <td className="bg-emerald-50 px-3 py-2">
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.001"
-                            value={line.heightQuantity}
-                            onChange={(event) => updateLaborLine(index, 'heightQuantity', event.target.value)}
-                            className="h-8 text-right font-mono"
-                            placeholder="0"
-                          />
-                        </td>
-                        <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">
-                          {getDraftLineMeasuredTotal(line).toLocaleString('es-BO', { maximumFractionDigits: 3 })}
-                        </td>
-                        <td className="bg-sky-50 px-3 py-2 text-right font-mono">{formatCurrency(line.unitPrice)}</td>
-                        <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{formatCurrency(getDraftLinePartial(line))}</td>
-                        <td className="px-3 py-2 text-right">
-                          <Button type="button" variant="ghost" size="sm" onClick={() => removeLaborLine(index)}>Quitar</Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {selectedLaborLines.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Agrega actividades desde el buscador.</td>
+                        </tr>
+                      ) : selectedLaborLines.map((line, index) => (
+                        <tr key={line.itemKey} className="border-b border-border/60 last:border-b-0">
+                          <td className="px-2 py-2 text-center font-mono text-xs text-muted-foreground">{index + 1}</td>
+                          <td className="truncate bg-amber-50/80 px-3 py-2 font-medium">{line.label}</td>
+                          <td className="bg-amber-50/80 px-3 py-2 text-center font-mono text-xs font-semibold">{line.unit}</td>
+                          <td className="bg-emerald-50 px-3 py-2">
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.001"
+                              value={line.width}
+                              onChange={(event) => updateLaborLine(index, 'width', event.target.value)}
+                              className="h-8 text-right font-mono"
+                              placeholder="0"
+                            />
+                          </td>
+                          <td className="bg-emerald-50 px-3 py-2">
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.001"
+                              value={line.heightQuantity}
+                              onChange={(event) => updateLaborLine(index, 'heightQuantity', event.target.value)}
+                              className="h-8 text-right font-mono"
+                              placeholder="0"
+                            />
+                          </td>
+                          <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">
+                            {getDraftLineMeasuredTotal(line).toLocaleString('es-BO', { maximumFractionDigits: 3 })}
+                          </td>
+                          <td className="bg-sky-50 px-3 py-2 text-right font-mono">{formatCurrency(line.unitPrice)}</td>
+                          <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{formatCurrency(getDraftLinePartial(line))}</td>
+                          <td className="px-3 py-2 text-right">
+                            <Button type="button" variant="ghost" size="sm" onClick={() => removeLaborLine(index)}>Quitar</Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
-              <div className="flex items-center justify-between rounded-lg bg-sky-50 px-3 py-2 text-sm">
-                <span className="font-medium text-sky-800">Total mano de obra</span>
-                <span className="font-mono font-semibold text-sky-800">{formatCurrency(laborTotal)}</span>
-              </div>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button variant="outline" onClick={() => setEditingLaborJobId(null)}>Cerrar</Button>
-                <Button disabled={savingLabor || selectedLaborLines.length === 0 || laborTotal <= 0} onClick={() => void saveLaborPlan(laborJob)}>
-                  {savingLabor ? 'Enviando...' : 'Enviar a revisión'}
-                </Button>
+              <div className="flex flex-col gap-3 border-t border-border/70 bg-background px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center justify-between rounded-lg bg-sky-50 px-3 py-2 text-sm sm:min-w-80">
+                  <span className="font-medium text-sky-800">Total mano de obra</span>
+                  <span className="font-mono font-semibold text-sky-800">{formatCurrency(laborTotal)}</span>
+                </div>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <Button variant="outline" onClick={() => setEditingLaborJobId(null)}>Cerrar</Button>
+                  <Button disabled={savingLabor || selectedLaborLines.length === 0 || laborTotal <= 0} onClick={() => void saveLaborPlan(laborJob)}>
+                    {savingLabor ? 'Enviando...' : 'Enviar a revisión'}
+                  </Button>
+                </div>
               </div>
             </div>
           ) : null}

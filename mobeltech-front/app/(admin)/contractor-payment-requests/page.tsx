@@ -323,117 +323,125 @@ export default function ContractorPaymentRequestsPage() {
         </Card>
 
         <Dialog open={activitiesOpen} onOpenChange={(open) => { setActivitiesOpen(open); if (!open) resetActivityForm(); }}>
-          <DialogContent className="max-w-3xl">
-            <DialogHeader>
-              <DialogTitle>Actividades de mano de obra</DialogTitle>
-              <DialogDescription>Agrega actividades con precio fijo para el formulario del contratista.</DialogDescription>
-            </DialogHeader>
-            <Card className="border-border/70 p-4">
-              <div className="grid gap-3 md:grid-cols-[1fr_110px_160px_auto_auto] md:items-end">
-                <div className="space-y-1.5">
-                  <Label>Item</Label>
-                  <Input value={activityLabel} onChange={(event) => setActivityLabel(event.target.value)} placeholder="Ej. Armado de cajonería" />
+          <DialogContent className="max-h-[88vh] w-[calc(100vw-2rem)] max-w-none overflow-hidden p-0 sm:max-w-none lg:w-[min(1100px,calc(100vw-3rem))]">
+            <div className="flex max-h-[88vh] flex-col">
+              <DialogHeader className="border-b border-border/70 px-5 py-4">
+                <DialogTitle>Actividades de mano de obra</DialogTitle>
+                <DialogDescription>Agrega actividades con precio fijo para el formulario del contratista.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 overflow-y-auto px-5 py-4">
+                <div className="rounded-lg border border-border/70 bg-muted/25 p-4">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_120px_170px_auto_auto] lg:items-end">
+                    <div className="space-y-1.5">
+                      <Label>Item</Label>
+                      <Input value={activityLabel} onChange={(event) => setActivityLabel(event.target.value)} placeholder="Ej. Armado de cajonería" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Unidad</Label>
+                      <Input value={activityUnit} onChange={(event) => setActivityUnit(event.target.value)} placeholder="ML" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>P. unitario Bs.</Label>
+                      <Input type="number" value={activityAmount} onChange={(event) => setActivityAmount(event.target.value)} placeholder="0.00" />
+                    </div>
+                    <Button type="button" variant="outline" onClick={resetActivityForm}>Limpiar</Button>
+                    <Button type="button" disabled={savingActivity} onClick={() => void saveActivity()}>
+                      {savingActivity ? 'Guardando...' : editingActivityId ? 'Actualizar' : 'Agregar'}
+                    </Button>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Unidad</Label>
-                  <Input value={activityUnit} onChange={(event) => setActivityUnit(event.target.value)} placeholder="ML" />
+                <div className="overflow-x-auto rounded-md border border-border/70">
+                  <table className="w-full min-w-[860px] table-fixed text-sm">
+                    <thead>
+                      <tr className="border-b border-border/70">
+                        <th className="w-[36%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
+                        <th className="w-[14%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
+                        <th className="w-[18%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
+                        <th className="w-[14%] px-3 py-2 text-left font-medium text-muted-foreground">Estado</th>
+                        <th className="w-[18%] px-3 py-2 text-right font-medium text-muted-foreground">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {laborItems.length === 0 ? (
+                        <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">No hay actividades creadas.</td></tr>
+                      ) : laborItems.map((item) => (
+                        <tr key={item.id} className="border-b border-border/60 last:border-b-0">
+                          <td className="truncate bg-amber-50/80 px-3 py-3 font-medium">{item.label}</td>
+                          <td className="bg-amber-50/80 px-3 py-3 text-center font-mono text-xs font-semibold">{item.unit || 'UND'}</td>
+                          <td className="bg-sky-50 px-3 py-3 text-right font-mono font-semibold">{money(item.referencePrice ?? item.defaultAmount)}</td>
+                          <td className="px-3 py-3">
+                            <Badge className={item.active ? 'bg-emerald-100 text-emerald-800' : 'bg-zinc-100 text-zinc-700'}>
+                              {item.active ? 'Activa' : 'Inactiva'}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex justify-end gap-2">
+                              <Button variant="outline" size="sm" onClick={() => editActivity(item)}>Editar</Button>
+                              <Button variant="ghost" size="sm" disabled={savingActivity} onClick={() => void toggleActivity(item)}>
+                                {item.active ? 'Desactivar' : 'Activar'}
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>P. unitario Bs.</Label>
-                  <Input type="number" value={activityAmount} onChange={(event) => setActivityAmount(event.target.value)} placeholder="0.00" />
-                </div>
-                <Button type="button" variant="outline" onClick={resetActivityForm}>Limpiar</Button>
-                <Button type="button" disabled={savingActivity} onClick={() => void saveActivity()}>
-                  {savingActivity ? 'Guardando...' : editingActivityId ? 'Actualizar' : 'Agregar'}
-                </Button>
               </div>
-            </Card>
-            <div className="max-h-[360px] overflow-auto rounded-md border border-border/70">
-              <table className="w-full min-w-[780px] text-sm">
-                <thead>
-                  <tr className="border-b border-border/70">
-                    <th className="bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
-                    <th className="bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
-                    <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">Estado</th>
-                    <th className="px-3 py-2 text-right font-medium text-muted-foreground">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {laborItems.length === 0 ? (
-                    <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">No hay actividades creadas.</td></tr>
-                  ) : laborItems.map((item) => (
-                    <tr key={item.id} className="border-b border-border/60 last:border-b-0">
-                      <td className="bg-amber-50/80 px-3 py-3 font-medium">{item.label}</td>
-                      <td className="bg-amber-50/80 px-3 py-3 text-center font-mono text-xs font-semibold">{item.unit || 'UND'}</td>
-                      <td className="bg-sky-50 px-3 py-3 text-right font-mono font-semibold">{money(item.referencePrice ?? item.defaultAmount)}</td>
-                      <td className="px-3 py-3">
-                        <Badge className={item.active ? 'bg-emerald-100 text-emerald-800' : 'bg-zinc-100 text-zinc-700'}>
-                          {item.active ? 'Activa' : 'Inactiva'}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => editActivity(item)}>Editar</Button>
-                          <Button variant="ghost" size="sm" disabled={savingActivity} onClick={() => void toggleActivity(item)}>
-                            {item.active ? 'Desactivar' : 'Activar'}
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
           </DialogContent>
         </Dialog>
 
         <Dialog open={!!selectedPlan} onOpenChange={(open) => { if (!open) setSelectedPlan(null); }}>
-          <DialogContent className="max-w-6xl">
-            <DialogHeader>
-              <DialogTitle>Detalle de solicitud</DialogTitle>
-              <DialogDescription>{selectedPlan?.contractorName} · {selectedPlan?.jobName}</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="overflow-x-auto rounded-md border border-border/70">
-                <table className="w-full min-w-[980px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border/70">
-                      <th className="w-12 px-2 py-2 text-center font-semibold text-muted-foreground">No</th>
-                      <th className="bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
-                      <th className="bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
-                      <th className="bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Alto</th>
-                      <th className="bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Ancho/Cantidad</th>
-                      <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">TOTAL</th>
-                      <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
-                      <th className="bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.PARCIAL (Bs)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedPlan?.lines.map((line, index) => (
-                      <tr key={line.id ?? line.phaseKey} className="border-b border-border/60 last:border-b-0">
-                        <td className="px-2 py-2 text-center font-mono text-xs text-muted-foreground">{index + 1}</td>
-                        <td className="bg-amber-50/80 px-3 py-2 font-medium">{line.phaseLabel}</td>
-                        <td className="bg-amber-50/80 px-3 py-2 text-center font-mono text-xs font-semibold">{line.unit || 'UND'}</td>
-                        <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{Number(line.width ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
-                        <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{Number(line.heightQuantity ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
-                        <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{Number(line.measuredTotal ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
-                        <td className="bg-sky-50 px-3 py-2 text-right font-mono">{money(line.unitPrice ?? 0)}</td>
-                        <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{money(line.plannedAmount)}</td>
+          <DialogContent className="max-h-[88vh] w-[calc(100vw-2rem)] max-w-none overflow-hidden p-0 sm:max-w-none lg:w-[min(1180px,calc(100vw-3rem))]">
+            <div className="flex max-h-[88vh] flex-col">
+              <DialogHeader className="border-b border-border/70 px-5 py-4">
+                <DialogTitle>Detalle de solicitud</DialogTitle>
+                <DialogDescription>{selectedPlan?.contractorName} · {selectedPlan?.jobName}</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 overflow-y-auto px-5 py-4">
+                <div className="overflow-x-auto rounded-md border border-border/70">
+                  <table className="w-full min-w-[1040px] table-fixed text-sm">
+                    <thead>
+                      <tr className="border-b border-border/70">
+                        <th className="w-12 px-2 py-2 text-center font-semibold text-muted-foreground">No</th>
+                        <th className="w-[28%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
+                        <th className="w-[10%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
+                        <th className="w-[10%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Alto</th>
+                        <th className="w-[14%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Ancho/Cantidad</th>
+                        <th className="w-[11%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">TOTAL</th>
+                        <th className="w-[13%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
+                        <th className="w-[14%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.PARCIAL (Bs)</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {selectedPlan?.lines.map((line, index) => (
+                        <tr key={line.id ?? line.phaseKey} className="border-b border-border/60 last:border-b-0">
+                          <td className="px-2 py-2 text-center font-mono text-xs text-muted-foreground">{index + 1}</td>
+                          <td className="truncate bg-amber-50/80 px-3 py-2 font-medium">{line.phaseLabel}</td>
+                          <td className="bg-amber-50/80 px-3 py-2 text-center font-mono text-xs font-semibold">{line.unit || 'UND'}</td>
+                          <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{Number(line.width ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
+                          <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{Number(line.heightQuantity ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
+                          <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{Number(line.measuredTotal ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
+                          <td className="bg-sky-50 px-3 py-2 text-right font-mono">{money(line.unitPrice ?? 0)}</td>
+                          <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{money(line.plannedAmount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <div className="flex items-center justify-between rounded-md bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800">
-                <span>Total solicitud</span>
-                <span className="font-mono">{money(selectedPlan?.totalAmount ?? 0)}</span>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" disabled={saving || selectedPlan?.reviewStatus === 'approved'} onClick={() => selectedPlan ? reviewPlan(selectedPlan, 'approved') : undefined}>Aprobar</Button>
-                <Button variant="outline" className="border-red-200 text-red-700 hover:bg-red-50" disabled={saving} onClick={() => { if (selectedPlan) setRejectPlan(selectedPlan); }}>
-                  Rechazar
-                </Button>
+              <div className="flex flex-col gap-3 border-t border-border/70 bg-background px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center justify-between rounded-md bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800 sm:min-w-72">
+                  <span>Total solicitud</span>
+                  <span className="font-mono">{money(selectedPlan?.totalAmount ?? 0)}</span>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" disabled={saving || selectedPlan?.reviewStatus === 'approved'} onClick={() => selectedPlan ? reviewPlan(selectedPlan, 'approved') : undefined}>Aprobar</Button>
+                  <Button variant="outline" className="border-red-200 text-red-700 hover:bg-red-50" disabled={saving} onClick={() => { if (selectedPlan) setRejectPlan(selectedPlan); }}>
+                    Rechazar
+                  </Button>
+                </div>
               </div>
             </div>
           </DialogContent>
