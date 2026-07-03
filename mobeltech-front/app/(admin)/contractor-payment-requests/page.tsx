@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { CheckCircle2, Eye, Loader2, Plus, Search, XCircle } from 'lucide-react';
+import { CalendarRange, CheckCircle2, Download, Eye, Loader2, Plus, Search, XCircle } from 'lucide-react';
 
 type PlanLine = {
   id?: string;
@@ -20,6 +20,8 @@ type PlanLine = {
   unit?: string;
   width?: number;
   heightQuantity?: number;
+  enableHeight?: boolean;
+  enableWidthQuantity?: boolean;
   measuredTotal?: number;
   unitPrice?: number;
   plannedAmount: number;
@@ -34,7 +36,15 @@ type PaymentPlan = {
   totalAmount: number;
   reviewStatus?: 'submitted' | 'approved' | 'rejected' | string;
   reviewNotes?: string | null;
+  estimatedSchedule?: EstimatedScheduleRow[];
   lines: PlanLine[];
+};
+
+type EstimatedScheduleRow = {
+  phaseKey: string;
+  phaseLabel: string;
+  startDate: string;
+  endDate: string;
 };
 
 type LaborCatalogItem = {
@@ -46,6 +56,8 @@ type LaborCatalogItem = {
   referencePrice?: number;
   active: boolean;
   sortOrder: number;
+  enableHeight?: boolean;
+  enableWidthQuantity?: boolean;
 };
 
 const money = (value: number) =>
@@ -76,6 +88,12 @@ function statusClass(status?: string) {
   return 'bg-amber-100 text-amber-800';
 }
 
+function formatDate(value?: string | null) {
+  if (!value) return 'N/A';
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleDateString('es-BO');
+}
+
 function slugifyLaborKey(value: string) {
   const normalized = value
     .normalize('NFD')
@@ -99,6 +117,7 @@ export default function ContractorPaymentRequestsPage() {
   const [laborItems, setLaborItems] = useState<LaborCatalogItem[]>([]);
   const [search, setSearch] = useState('');
   const [selectedPlan, setSelectedPlan] = useState<PaymentPlan | null>(null);
+  const [schedulePlan, setSchedulePlan] = useState<PaymentPlan | null>(null);
   const [rejectPlan, setRejectPlan] = useState<PaymentPlan | null>(null);
   const [rejectNotes, setRejectNotes] = useState('');
   const [activitiesOpen, setActivitiesOpen] = useState(false);
@@ -106,6 +125,8 @@ export default function ContractorPaymentRequestsPage() {
   const [activityLabel, setActivityLabel] = useState('');
   const [activityUnit, setActivityUnit] = useState('ML');
   const [activityAmount, setActivityAmount] = useState('');
+  const [activityEnableHeight, setActivityEnableHeight] = useState(true);
+  const [activityEnableWidthQuantity, setActivityEnableWidthQuantity] = useState(true);
   const [savingActivity, setSavingActivity] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -153,6 +174,8 @@ export default function ContractorPaymentRequestsPage() {
     setActivityLabel('');
     setActivityUnit('ML');
     setActivityAmount('');
+    setActivityEnableHeight(true);
+    setActivityEnableWidthQuantity(true);
   }
 
   function editActivity(item: LaborCatalogItem) {
@@ -160,6 +183,73 @@ export default function ContractorPaymentRequestsPage() {
     setActivityLabel(item.label);
     setActivityUnit(item.unit || 'ML');
     setActivityAmount(String(item.referencePrice ?? item.defaultAmount));
+    setActivityEnableHeight(item.enableHeight ?? true);
+    setActivityEnableWidthQuantity(item.enableWidthQuantity ?? true);
+  }
+
+  async function downloadApprovedPlanPdf(plan: PaymentPlan) {
+    if (plan.reviewStatus !== 'approved') return;
+    const { jsPDF } = await import('jspdf');
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+
+    doc.setFontSize(16);
+    doc.text('MOBELTECH', 14, 18);
+    doc.setFontSize(11);
+    doc.text('Solicitud de pago de mano de obra aprobada', 14, 26);
+    doc.setDrawColor(220, 220, 220);
+    doc.line(14, 34, 196, 34);
+
+    let y = 44;
+    doc.setFontSize(10);
+    doc.text(`Contratista: ${plan.contractorName}`, 14, y);
+    y += 6;
+    doc.text(`Trabajo: ${plan.jobName}`, 14, y, { maxWidth: 178 });
+    y += 8;
+    doc.text(`Total aprobado: ${money(plan.totalAmount)}`, 14, y);
+    y += 10;
+
+    doc.setFontSize(11);
+    doc.text('Detalle de actividades', 14, y);
+    y += 7;
+    doc.setFontSize(8);
+    doc.text('Item', 14, y);
+    doc.text('Total', 112, y, { align: 'right' });
+    doc.text('P.Unit.', 144, y, { align: 'right' });
+    doc.text('Parcial', 188, y, { align: 'right' });
+    y += 5;
+    doc.line(14, y, 196, y);
+    y += 5;
+
+    plan.lines.forEach((line, index) => {
+      if (y > 250) {
+        doc.addPage();
+        y = 18;
+      }
+      doc.text(`${index + 1}. ${line.phaseLabel}`, 14, y, { maxWidth: 86 });
+      doc.text(Number(line.measuredTotal ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 }), 112, y, { align: 'right' });
+      doc.text(money(line.unitPrice ?? 0), 144, y, { align: 'right' });
+      doc.text(money(line.plannedAmount), 188, y, { align: 'right' });
+      y += 7;
+    });
+
+    y += 5;
+    doc.setFontSize(11);
+    doc.text('Cronograma estimado', 14, y);
+    y += 7;
+    doc.setFontSize(9);
+    (plan.estimatedSchedule ?? []).forEach((phase) => {
+      if (y > 270) {
+        doc.addPage();
+        y = 18;
+      }
+      doc.text(`${phase.phaseLabel}: ${formatDate(phase.startDate)} - ${formatDate(phase.endDate)}`, 16, y);
+      y += 6;
+    });
+
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`Generado: ${new Date().toLocaleString('es-BO')}`, 14, 286);
+    doc.save(`mano_obra_aprobada_${plan.id.slice(0, 8)}.pdf`);
   }
 
   async function reviewPlan(plan: PaymentPlan, reviewStatus: 'approved' | 'rejected', notes?: string) {
@@ -211,6 +301,8 @@ export default function ContractorPaymentRequestsPage() {
           unit: activityUnit.trim().toUpperCase() || 'UND',
           referencePrice: numberValue(activityAmount),
           defaultAmount: numberValue(activityAmount),
+          enableHeight: activityEnableHeight,
+          enableWidthQuantity: activityEnableWidthQuantity,
           active: 'true',
           sortOrder: editingActivityId ? laborItems.find((item) => item.id === editingActivityId)?.sortOrder ?? 0 : laborItems.length + 1,
         }),
@@ -305,6 +397,14 @@ export default function ContractorPaymentRequestsPage() {
                           <Eye className="h-4 w-4" />
                           Ver
                         </Button>
+                        <Button variant="outline" size="sm" onClick={() => setSchedulePlan(plan)} className="gap-1.5">
+                          <CalendarRange className="h-4 w-4" />
+                          Cronograma
+                        </Button>
+                        <Button variant="outline" size="sm" disabled={plan.reviewStatus !== 'approved'} onClick={() => void downloadApprovedPlanPdf(plan)} className="gap-1.5">
+                          <Download className="h-4 w-4" />
+                          PDF
+                        </Button>
                         <Button variant="outline" size="sm" disabled={saving || plan.reviewStatus === 'approved'} onClick={() => void reviewPlan(plan, 'approved')} className="gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50">
                           <CheckCircle2 className="h-4 w-4" />
                           Aprobar
@@ -331,7 +431,7 @@ export default function ContractorPaymentRequestsPage() {
               </DialogHeader>
               <div className="space-y-4 overflow-y-auto px-5 py-4">
                 <div className="rounded-lg border border-border/70 bg-muted/25 p-4">
-                  <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_120px_170px_auto_auto] lg:items-end">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_100px_150px_220px_auto_auto] lg:items-end">
                     <div className="space-y-1.5">
                       <Label>Item</Label>
                       <Input value={activityLabel} onChange={(event) => setActivityLabel(event.target.value)} placeholder="Ej. Armado de cajonería" />
@@ -344,6 +444,17 @@ export default function ContractorPaymentRequestsPage() {
                       <Label>P. unitario Bs.</Label>
                       <Input type="number" value={activityAmount} onChange={(event) => setActivityAmount(event.target.value)} placeholder="0.00" />
                     </div>
+                    <div className="rounded-md border border-border/70 bg-background p-3">
+                      <p className="mb-2 text-xs font-semibold text-muted-foreground">Columnas habilitadas</p>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={activityEnableHeight} onChange={(event) => setActivityEnableHeight(event.target.checked)} />
+                        Alto
+                      </label>
+                      <label className="mt-1 flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={activityEnableWidthQuantity} onChange={(event) => setActivityEnableWidthQuantity(event.target.checked)} />
+                        Ancho/Cantidad
+                      </label>
+                    </div>
                     <Button type="button" variant="outline" onClick={resetActivityForm}>Limpiar</Button>
                     <Button type="button" disabled={savingActivity} onClick={() => void saveActivity()}>
                       {savingActivity ? 'Guardando...' : editingActivityId ? 'Actualizar' : 'Agregar'}
@@ -351,23 +462,31 @@ export default function ContractorPaymentRequestsPage() {
                   </div>
                 </div>
                 <div className="overflow-x-auto rounded-md border border-border/70">
-                  <table className="w-full min-w-[860px] table-fixed text-sm">
+                  <table className="w-full min-w-[980px] table-fixed text-sm">
                     <thead>
                       <tr className="border-b border-border/70">
-                        <th className="w-[36%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
-                        <th className="w-[14%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
-                        <th className="w-[18%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
+                        <th className="w-[34%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
+                        <th className="w-[12%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
+                        <th className="w-[18%] bg-emerald-100 px-3 py-2 text-left font-semibold text-emerald-950">MEDIDAS</th>
+                        <th className="w-[16%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
                         <th className="w-[14%] px-3 py-2 text-left font-medium text-muted-foreground">Estado</th>
-                        <th className="w-[18%] px-3 py-2 text-right font-medium text-muted-foreground">Acciones</th>
+                        <th className="w-[16%] px-3 py-2 text-right font-medium text-muted-foreground">Acciones</th>
                       </tr>
                     </thead>
                     <tbody>
                       {laborItems.length === 0 ? (
-                        <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">No hay actividades creadas.</td></tr>
+                        <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">No hay actividades creadas.</td></tr>
                       ) : laborItems.map((item) => (
                         <tr key={item.id} className="border-b border-border/60 last:border-b-0">
-                          <td className="truncate bg-amber-50/80 px-3 py-3 font-medium">{item.label}</td>
+                          <td className="bg-amber-50/80 px-3 py-3 font-medium"><span className="block whitespace-normal leading-snug">{item.label}</span></td>
                           <td className="bg-amber-50/80 px-3 py-3 text-center font-mono text-xs font-semibold">{item.unit || 'UND'}</td>
+                          <td className="bg-emerald-50 px-3 py-3">
+                            <div className="flex flex-wrap gap-1">
+                              {item.enableHeight ?? true ? <Badge className="bg-emerald-100 text-emerald-800">Alto</Badge> : null}
+                              {item.enableWidthQuantity ?? true ? <Badge className="bg-emerald-100 text-emerald-800">Ancho/Cantidad</Badge> : null}
+                              {!(item.enableHeight ?? true) && !(item.enableWidthQuantity ?? true) ? <Badge className="bg-zinc-100 text-zinc-700">Sin medidas</Badge> : null}
+                            </div>
+                          </td>
                           <td className="bg-sky-50 px-3 py-3 text-right font-mono font-semibold">{money(item.referencePrice ?? item.defaultAmount)}</td>
                           <td className="px-3 py-3">
                             <Badge className={item.active ? 'bg-emerald-100 text-emerald-800' : 'bg-zinc-100 text-zinc-700'}>
@@ -405,10 +524,10 @@ export default function ContractorPaymentRequestsPage() {
                     <thead>
                       <tr className="border-b border-border/70">
                         <th className="w-12 px-2 py-2 text-center font-semibold text-muted-foreground">No</th>
-                        <th className="w-[28%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
-                        <th className="w-[10%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
-                        <th className="w-[10%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Alto</th>
-                        <th className="w-[14%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Ancho/Cantidad</th>
+                        <th className="w-[34%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
+                        <th className="w-[8%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
+                        <th className="w-[9%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Alto</th>
+                        <th className="w-[11%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Ancho/Cantidad</th>
                         <th className="w-[11%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">TOTAL</th>
                         <th className="w-[13%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
                         <th className="w-[14%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.PARCIAL (Bs)</th>
@@ -418,10 +537,10 @@ export default function ContractorPaymentRequestsPage() {
                       {selectedPlan?.lines.map((line, index) => (
                         <tr key={line.id ?? line.phaseKey} className="border-b border-border/60 last:border-b-0">
                           <td className="px-2 py-2 text-center font-mono text-xs text-muted-foreground">{index + 1}</td>
-                          <td className="truncate bg-amber-50/80 px-3 py-2 font-medium">{line.phaseLabel}</td>
+                          <td className="bg-amber-50/80 px-3 py-2 font-medium"><span className="block whitespace-normal leading-snug">{line.phaseLabel}</span></td>
                           <td className="bg-amber-50/80 px-3 py-2 text-center font-mono text-xs font-semibold">{line.unit || 'UND'}</td>
-                          <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{Number(line.width ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
-                          <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{Number(line.heightQuantity ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
+                          <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{line.enableHeight === false ? 'N/A' : Number(line.width ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
+                          <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{line.enableWidthQuantity === false ? 'N/A' : Number(line.heightQuantity ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
                           <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{Number(line.measuredTotal ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
                           <td className="bg-sky-50 px-3 py-2 text-right font-mono">{money(line.unitPrice ?? 0)}</td>
                           <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{money(line.plannedAmount)}</td>
@@ -437,12 +556,57 @@ export default function ContractorPaymentRequestsPage() {
                   <span className="font-mono">{money(selectedPlan?.totalAmount ?? 0)}</span>
                 </div>
                 <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => selectedPlan ? setSchedulePlan(selectedPlan) : undefined} className="gap-2">
+                    <CalendarRange className="h-4 w-4" />
+                    Cronograma
+                  </Button>
+                  <Button variant="outline" disabled={selectedPlan?.reviewStatus !== 'approved'} onClick={() => selectedPlan ? void downloadApprovedPlanPdf(selectedPlan) : undefined} className="gap-2">
+                    <Download className="h-4 w-4" />
+                    PDF aprobado
+                  </Button>
                   <Button variant="outline" disabled={saving || selectedPlan?.reviewStatus === 'approved'} onClick={() => selectedPlan ? reviewPlan(selectedPlan, 'approved') : undefined}>Aprobar</Button>
                   <Button variant="outline" className="border-red-200 text-red-700 hover:bg-red-50" disabled={saving} onClick={() => { if (selectedPlan) setRejectPlan(selectedPlan); }}>
                     Rechazar
                   </Button>
                 </div>
               </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!schedulePlan} onOpenChange={(open) => { if (!open) setSchedulePlan(null); }}>
+          <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Cronograma estimado</DialogTitle>
+              <DialogDescription>{schedulePlan?.contractorName} · {schedulePlan?.jobName}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              {(schedulePlan?.estimatedSchedule?.length ?? 0) === 0 ? (
+                <Card className="border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                  Esta solicitud no tiene cronograma estimado registrado.
+                </Card>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {schedulePlan?.estimatedSchedule?.map((phase, index) => (
+                    <div key={`${phase.phaseKey}-${index}`} className="rounded-lg border border-border/70 bg-muted/20 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-semibold">{phase.phaseLabel}</p>
+                        <Badge className="bg-emerald-100 text-emerald-800">Etapa {index + 1}</Badge>
+                      </div>
+                      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Inicio</p>
+                          <p className="font-medium">{formatDate(phase.startDate)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Fin</p>
+                          <p className="font-medium">{formatDate(phase.endDate)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </DialogContent>
         </Dialog>

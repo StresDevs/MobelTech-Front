@@ -114,6 +114,7 @@ type ContractorPaymentPlan = {
   totalAmount: number;
   reviewStatus?: 'submitted' | 'approved' | 'rejected' | string;
   reviewNotes?: string | null;
+  estimatedSchedule?: LaborScheduleRow[];
   paidAmount: number;
   remainingAmount: number;
   lines?: Array<{
@@ -123,6 +124,8 @@ type ContractorPaymentPlan = {
     unit?: string;
     width?: number;
     heightQuantity?: number;
+    enableHeight?: boolean;
+    enableWidthQuantity?: boolean;
     measuredTotal?: number;
     unitPrice?: number;
     plannedAmount: number;
@@ -162,6 +165,8 @@ type LaborCatalogItem = {
   referencePrice?: number;
   active: boolean;
   sortOrder: number;
+  enableHeight?: boolean;
+  enableWidthQuantity?: boolean;
 };
 
 type LaborDraftLine = {
@@ -172,6 +177,21 @@ type LaborDraftLine = {
   width: string;
   heightQuantity: string;
   unitPrice: number;
+  enableHeight: boolean;
+  enableWidthQuantity: boolean;
+};
+
+type LaborScheduleRow = {
+  phaseKey: ProductionPhase;
+  phaseLabel: string;
+  startDate: string;
+  endDate: string;
+};
+
+type LaborDraftSnapshot = {
+  lines: LaborDraftLine[];
+  schedule: LaborScheduleRow[];
+  savedAt: string;
 };
 
 function normalizeDate(value?: string | Date | null) {
@@ -251,6 +271,8 @@ export default function AssignedJobs() {
   const [contractor, setContractor] = useState<ContractorRecord | null>(null);
   const [editingLaborJobId, setEditingLaborJobId] = useState<string | null>(null);
   const [selectedLaborLines, setSelectedLaborLines] = useState<LaborDraftLine[]>([]);
+  const [laborScheduleRows, setLaborScheduleRows] = useState<LaborScheduleRow[]>([]);
+  const [laborDraftSavedAt, setLaborDraftSavedAt] = useState<string | null>(null);
   const [laborSearch, setLaborSearch] = useState('');
   const [savingLabor, setSavingLabor] = useState(false);
   const [uploadingFinalJobId, setUploadingFinalJobId] = useState<string | null>(null);
@@ -338,6 +360,22 @@ export default function AssignedJobs() {
 
     return () => window.clearInterval(interval);
   }, [apiBase, user?.id, contractor?.id]);
+
+  useEffect(() => {
+    if (!editingLaborJobId) return;
+    const timeout = window.setTimeout(() => {
+      const savedAt = new Date().toISOString();
+      const draft: LaborDraftSnapshot = {
+        lines: selectedLaborLines,
+        schedule: laborScheduleRows,
+        savedAt,
+      };
+      window.localStorage.setItem(getLaborDraftKey(editingLaborJobId), JSON.stringify(draft));
+      setLaborDraftSavedAt(savedAt);
+    }, 650);
+
+    return () => window.clearTimeout(timeout);
+  }, [editingLaborJobId, selectedLaborLines, laborScheduleRows, user?.id, contractor?.id]);
 
   async function markNotificationAsRead(notificationId: string) {
     if (!apiBase) return;
@@ -454,8 +492,56 @@ export default function AssignedJobs() {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
+  function createEmptyLaborSchedule(): LaborScheduleRow[] {
+    return PRODUCTION_PHASE_OPTIONS.map((phase) => ({
+      phaseKey: phase.value,
+      phaseLabel: phase.label,
+      startDate: '',
+      endDate: '',
+    }));
+  }
+
+  function normalizeScheduleRows(rows?: LaborScheduleRow[] | null) {
+    const byKey = new Map((rows ?? []).map((row) => [row.phaseKey, row]));
+    return PRODUCTION_PHASE_OPTIONS.map((phase) => {
+      const current = byKey.get(phase.value);
+      return {
+        phaseKey: phase.value,
+        phaseLabel: phase.label,
+        startDate: current?.startDate ?? '',
+        endDate: current?.endDate ?? '',
+      };
+    });
+  }
+
+  function getLaborDraftKey(jobId: string) {
+    return `mobeltech:labor-payment-draft:${user?.id ?? 'guest'}:${contractor?.id ?? 'contractor'}:${jobId}`;
+  }
+
+  function readLaborDraft(jobId: string) {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(getLaborDraftKey(jobId));
+      if (!raw) return null;
+      const draft = JSON.parse(raw) as LaborDraftSnapshot;
+      if (!Array.isArray(draft.lines) || !Array.isArray(draft.schedule)) return null;
+      return draft;
+    } catch {
+      return null;
+    }
+  }
+
+  function clearLaborDraft(jobId: string) {
+    if (typeof window === 'undefined') return;
+    window.localStorage.removeItem(getLaborDraftKey(jobId));
+    setLaborDraftSavedAt(null);
+  }
+
   function getDraftLineMeasuredTotal(line: LaborDraftLine) {
-    return parseMeasure(line.width) * parseMeasure(line.heightQuantity);
+    const height = line.enableHeight ? parseMeasure(line.width) : 1;
+    const widthQuantity = line.enableWidthQuantity ? parseMeasure(line.heightQuantity) : 1;
+    const calculated = height * widthQuantity;
+    return calculated > 0 ? calculated : 0;
   }
 
   function getDraftLinePartial(line: LaborDraftLine) {
@@ -474,6 +560,8 @@ export default function AssignedJobs() {
           width: '',
           heightQuantity: '',
           unitPrice: item.referencePrice ?? item.defaultAmount,
+          enableHeight: item.enableHeight ?? true,
+          enableWidthQuantity: item.enableWidthQuantity ?? true,
         },
       ];
     });
@@ -490,12 +578,20 @@ export default function AssignedJobs() {
     setSelectedLaborLines((current) => current.filter((_, currentIndex) => currentIndex !== index));
   }
 
+  function updateLaborSchedule(index: number, field: 'startDate' | 'endDate', value: string) {
+    setLaborScheduleRows((current) =>
+      current.map((row, currentIndex) => (currentIndex === index ? { ...row, [field]: value } : row)),
+    );
+  }
+
   function openLaborForm(job: ProductionOrderRecord) {
     const plan = getPaymentPlan(job);
+    const draft = readLaborDraft(job.id);
+    const draftLines = draft?.lines?.length ? draft.lines : null;
     setEditingLaborJobId(job.id);
     setLaborSearch('');
     setSelectedLaborLines(
-      plan?.lines?.map((line) => ({
+      draftLines ?? plan?.lines?.map((line) => ({
         id: line.id,
         itemKey: line.phaseKey,
         label: line.phaseLabel,
@@ -503,8 +599,12 @@ export default function AssignedJobs() {
         width: line.width ? String(line.width) : '',
         heightQuantity: line.heightQuantity ? String(line.heightQuantity) : '',
         unitPrice: line.unitPrice ?? laborItems.find((item) => item.itemKey === line.phaseKey)?.defaultAmount ?? 0,
+        enableHeight: line.enableHeight ?? laborItems.find((item) => item.itemKey === line.phaseKey)?.enableHeight ?? true,
+        enableWidthQuantity: line.enableWidthQuantity ?? laborItems.find((item) => item.itemKey === line.phaseKey)?.enableWidthQuantity ?? true,
       })) ?? [],
     );
+    setLaborScheduleRows(normalizeScheduleRows(draft?.schedule ?? plan?.estimatedSchedule ?? createEmptyLaborSchedule()));
+    setLaborDraftSavedAt(draft?.savedAt ?? null);
   }
 
   async function saveLaborPlan(job: ProductionOrderRecord) {
@@ -512,6 +612,10 @@ export default function AssignedJobs() {
     setSavingLabor(true);
     setError(null);
     try {
+      const invalidSchedule = laborScheduleRows.find((row) => !row.startDate || !row.endDate || new Date(row.endDate) < new Date(row.startDate));
+      if (invalidSchedule) {
+        throw new Error('Completa el cronograma estimado por etapas antes de enviar la solicitud.');
+      }
       const lines = selectedLaborLines.map((line, index) => {
         const measuredTotal = getDraftLineMeasuredTotal(line);
         const plannedAmount = measuredTotal * line.unitPrice;
@@ -520,8 +624,10 @@ export default function AssignedJobs() {
           phaseKey: line.itemKey,
           phaseLabel: line.label,
           unit: line.unit,
-          width: parseMeasure(line.width),
-          heightQuantity: parseMeasure(line.heightQuantity),
+          width: line.enableHeight ? parseMeasure(line.width) : 0,
+          heightQuantity: line.enableWidthQuantity ? parseMeasure(line.heightQuantity) : 0,
+          enableHeight: line.enableHeight,
+          enableWidthQuantity: line.enableWidthQuantity,
           measuredTotal,
           unitPrice: line.unitPrice,
           plannedAmount,
@@ -540,14 +646,17 @@ export default function AssignedJobs() {
           productionOrderId: job.id,
           totalAmount,
           lines,
+          estimatedSchedule: laborScheduleRows,
         }),
       });
-      if (!response.ok) throw new Error('No se pudo enviar el presupuesto de mano de obra.');
-      const saved = await response.json() as ContractorPaymentPlan;
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(readApiError(data, 'No se pudo enviar el presupuesto de mano de obra.'));
+      const saved = data as ContractorPaymentPlan;
       setPaymentPlans((current) => {
         const withoutCurrent = current.filter((plan) => plan.productionOrderId !== job.id);
         return saved ? [...withoutCurrent, saved] : current;
       });
+      clearLaborDraft(job.id);
       setEditingLaborJobId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error guardando mano de obra.');
@@ -803,6 +912,76 @@ export default function AssignedJobs() {
     doc.save(`orden_trabajo_${safeName}_${job.id.slice(0, 8)}.pdf`);
   }
 
+  async function generateLaborPlanPdf(plan: ContractorPaymentPlan, job: ProductionOrderRecord) {
+    if (plan.reviewStatus !== 'approved') return;
+    const { jsPDF } = await import('jspdf');
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const logoDataUrl = await loadLogoDataUrl();
+    const title = getLeadDescription(job);
+
+    if (logoDataUrl) doc.addImage(logoDataUrl, 'PNG', 14, 12, 24, 16);
+    doc.setFontSize(16);
+    doc.text('MOBELTECH', 42, 18);
+    doc.setFontSize(11);
+    doc.text('Solicitud de pago de mano de obra aprobada', 42, 26);
+    doc.setDrawColor(220, 220, 220);
+    doc.line(14, 34, 196, 34);
+
+    let y = 44;
+    doc.setFontSize(10);
+    doc.text(`Trabajo: ${title}`, 14, y, { maxWidth: 178 });
+    y += 8;
+    doc.text(`Contratista: ${contractor?.name ?? 'Contratista'}`, 14, y);
+    y += 6;
+    doc.text(`Estado: Aprobada`, 14, y);
+    y += 6;
+    doc.text(`Total aprobado: ${formatCurrency(plan.totalAmount)}`, 14, y);
+    y += 10;
+
+    doc.setFontSize(11);
+    doc.text('Detalle de actividades', 14, y);
+    y += 7;
+    doc.setFontSize(8);
+    doc.text('Item', 14, y);
+    doc.text('Total', 112, y, { align: 'right' });
+    doc.text('P.Unit.', 144, y, { align: 'right' });
+    doc.text('Parcial', 188, y, { align: 'right' });
+    y += 5;
+    doc.line(14, y, 196, y);
+    y += 5;
+
+    (plan.lines ?? []).forEach((line, index) => {
+      if (y > 250) {
+        doc.addPage();
+        y = 18;
+      }
+      doc.text(`${index + 1}. ${line.phaseLabel}`, 14, y, { maxWidth: 86 });
+      doc.text(Number(line.measuredTotal ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 }), 112, y, { align: 'right' });
+      doc.text(formatCurrency(line.unitPrice ?? 0), 144, y, { align: 'right' });
+      doc.text(formatCurrency(line.plannedAmount), 188, y, { align: 'right' });
+      y += 7;
+    });
+
+    y += 5;
+    doc.setFontSize(11);
+    doc.text('Cronograma estimado', 14, y);
+    y += 7;
+    doc.setFontSize(9);
+    (plan.estimatedSchedule ?? []).forEach((phase) => {
+      if (y > 270) {
+        doc.addPage();
+        y = 18;
+      }
+      doc.text(`${phase.phaseLabel}: ${formatDate(phase.startDate)} - ${formatDate(phase.endDate)}`, 16, y);
+      y += 6;
+    });
+
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`Generado: ${new Date().toLocaleString('es-BO')}`, 14, 286);
+    doc.save(`mano_obra_aprobada_${job.id.slice(0, 8)}.pdf`);
+  }
+
   if (!user) {
     return <Card className="p-4">Inicia sesión para ver tus trabajos asignados.</Card>;
   }
@@ -827,6 +1006,10 @@ export default function AssignedJobs() {
     return !alreadyAdded && matchesSearch;
   });
   const laborTotal = selectedLaborLines.reduce((sum, line) => sum + getDraftLinePartial(line), 0);
+  const laborScheduleComplete = laborScheduleRows.length === PRODUCTION_PHASE_OPTIONS.length && laborScheduleRows.every((row) => (
+    row.startDate && row.endDate && new Date(row.endDate) >= new Date(row.startDate)
+  ));
+  const canSubmitLaborPlan = selectedLaborLines.length > 0 && laborTotal > 0 && laborScheduleComplete;
   const selectedJob = selectedJobId ? jobs.find((job) => job.id === selectedJobId) ?? null : null;
   const selectedJobClient = selectedJob ? getClient(selectedJob) : null;
   const selectedJobEnvironment = selectedJob ? getEnvironment(selectedJob) : null;
@@ -1038,6 +1221,10 @@ export default function AssignedJobs() {
                         <WalletCards className="h-4 w-4" />
                         {selectedJobAdvanceRequest ? 'Ver solicitud de anticipo' : 'Solicitar anticipo'}
                       </Button>
+                      <Button variant="outline" className="justify-start gap-2" disabled={!selectedJobPlan || selectedJobPlan.reviewStatus !== 'approved'} onClick={() => selectedJobPlan ? void generateLaborPlanPdf(selectedJobPlan, selectedJob) : undefined}>
+                        <Download className="h-4 w-4" />
+                        Descargar mano de obra PDF
+                      </Button>
                       <Button variant="outline" className="justify-start gap-2" onClick={() => window.location.assign('/schedule')}>
                         <CalendarRange className="h-4 w-4" />
                         Ver cronograma
@@ -1140,10 +1327,16 @@ export default function AssignedJobs() {
                       <p className="max-w-[180px] truncate text-xs text-muted-foreground">{client?.address || client?.phone || 'Sin direccion'}</p>
                     </td>
                     <td className="px-4 py-3">
-                      <Button size="sm" variant="outline" className="gap-2" onClick={() => openLaborForm(job)}>
-                        <WalletCards className="h-4 w-4" />
-                        {plan ? formatCurrency(plan.totalAmount) : 'Calcular mano de obra'}
-                      </Button>
+                      <div className="flex flex-col items-start gap-2">
+                        <Button size="sm" variant="outline" className="gap-2" onClick={() => openLaborForm(job)}>
+                          <WalletCards className="h-4 w-4" />
+                          {plan ? formatCurrency(plan.totalAmount) : 'Calcular mano de obra'}
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" disabled={!plan || plan.reviewStatus !== 'approved'} onClick={() => plan ? void generateLaborPlanPdf(plan, job) : undefined}>
+                          <Download className="h-3.5 w-3.5" />
+                          PDF aprobado
+                        </Button>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <p>{formatDate(job.startDate)}</p>
@@ -1215,15 +1408,22 @@ export default function AssignedJobs() {
       </Card>
       )}
 
-      <Dialog open={!!laborJob} onOpenChange={(open) => { if (!open) { setEditingLaborJobId(null); setSelectedLaborLines([]); setLaborSearch(''); } }}>
+      <Dialog open={!!laborJob} onOpenChange={(open) => { if (!open) { setEditingLaborJobId(null); setSelectedLaborLines([]); setLaborScheduleRows([]); setLaborDraftSavedAt(null); setLaborSearch(''); } }}>
         <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] max-w-none overflow-hidden p-0 sm:max-w-none xl:w-[min(1240px,calc(100vw-3rem))]">
           {laborJob ? (
             <div className="flex max-h-[90vh] flex-col">
               <DialogHeader className="border-b border-border/70 px-5 py-4">
-                <DialogTitle>Formulario de mano de obra</DialogTitle>
-                <DialogDescription>
-                  Busca actividades, agrégalas y completa las medidas. El total quedará en revisión por administración.
-                </DialogDescription>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <DialogTitle>Formulario de mano de obra</DialogTitle>
+                    <DialogDescription>
+                      Busca actividades, agrégalas y completa las medidas. El total quedará en revisión por administración.
+                    </DialogDescription>
+                  </div>
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+                    {savingLabor ? 'Enviando solicitud...' : laborDraftSavedAt ? `Guardado ${new Date(laborDraftSavedAt).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}` : 'Autosave listo'}
+                  </div>
+                </div>
               </DialogHeader>
               <div className="space-y-4 overflow-y-auto px-5 py-4">
                 <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
@@ -1250,12 +1450,16 @@ export default function AssignedJobs() {
                   {availableLaborItems.length > 0 ? (
                     <div className="max-h-36 overflow-auto rounded-md border border-border/70">
                       {availableLaborItems.slice(0, 8).map((item) => (
-                        <div key={item.itemKey} className="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-2 last:border-b-0">
+                        <div key={item.itemKey} className="flex items-center justify-between gap-3 border-b border-border/60 bg-emerald-50/60 px-3 py-2 transition hover:bg-emerald-100/70 last:border-b-0">
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">{item.label}</p>
-                            <p className="text-xs text-muted-foreground">{item.unit || 'UND'} · {formatCurrency(item.referencePrice ?? item.defaultAmount)}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {item.unit || 'UND'} · {formatCurrency(item.referencePrice ?? item.defaultAmount)}
+                              {' · '}
+                              {[item.enableHeight ?? true ? 'Alto' : null, item.enableWidthQuantity ?? true ? 'Ancho/Cantidad' : null].filter(Boolean).join(' + ') || 'Sin medidas'}
+                            </p>
                           </div>
-                          <Button type="button" size="sm" onClick={() => addLaborLine(item)}>Agregar</Button>
+                          <Button type="button" size="sm" className="shrink-0" onClick={() => addLaborLine(item)}>Agregar</Button>
                         </div>
                       ))}
                     </div>
@@ -1271,14 +1475,14 @@ export default function AssignedJobs() {
                     <thead>
                       <tr className="border-b border-border/70">
                         <th className="w-12 px-2 py-2 text-center font-semibold text-muted-foreground">No</th>
-                        <th className="w-[24%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
-                        <th className="w-[10%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
-                        <th className="w-[12%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Alto</th>
-                        <th className="w-[15%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Ancho/Cantidad</th>
+                        <th className="w-[34%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
+                        <th className="w-[8%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
+                        <th className="w-[9%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Alto</th>
+                        <th className="w-[11%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Ancho/Cantidad</th>
                         <th className="w-[11%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">TOTAL</th>
                         <th className="w-[13%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
-                        <th className="w-[13%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.PARCIAL</th>
-                        <th className="w-[10%] px-3 py-2 text-right font-medium text-muted-foreground">Acción</th>
+                        <th className="w-[12%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.PARCIAL</th>
+                        <th className="w-[8%] px-3 py-2 text-right font-medium text-muted-foreground">Acción</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1289,29 +1493,33 @@ export default function AssignedJobs() {
                       ) : selectedLaborLines.map((line, index) => (
                         <tr key={line.itemKey} className="border-b border-border/60 last:border-b-0">
                           <td className="px-2 py-2 text-center font-mono text-xs text-muted-foreground">{index + 1}</td>
-                          <td className="truncate bg-amber-50/80 px-3 py-2 font-medium">{line.label}</td>
+                          <td className="bg-amber-50/80 px-3 py-2 font-medium"><span className="block whitespace-normal leading-snug">{line.label}</span></td>
                           <td className="bg-amber-50/80 px-3 py-2 text-center font-mono text-xs font-semibold">{line.unit}</td>
                           <td className="bg-emerald-50 px-3 py-2">
-                            <Input
-                              type="number"
-                              min="0"
-                              step="0.001"
-                              value={line.width}
-                              onChange={(event) => updateLaborLine(index, 'width', event.target.value)}
-                              className="h-8 text-right font-mono"
-                              placeholder="0"
-                            />
+                            {line.enableHeight ? (
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.001"
+                                value={line.width}
+                                onChange={(event) => updateLaborLine(index, 'width', event.target.value)}
+                                className="h-8 text-right font-mono"
+                                placeholder="0"
+                              />
+                            ) : <span className="block text-center text-xs text-muted-foreground">No aplica</span>}
                           </td>
                           <td className="bg-emerald-50 px-3 py-2">
-                            <Input
-                              type="number"
-                              min="0"
-                              step="0.001"
-                              value={line.heightQuantity}
-                              onChange={(event) => updateLaborLine(index, 'heightQuantity', event.target.value)}
-                              className="h-8 text-right font-mono"
-                              placeholder="0"
-                            />
+                            {line.enableWidthQuantity ? (
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.001"
+                                value={line.heightQuantity}
+                                onChange={(event) => updateLaborLine(index, 'heightQuantity', event.target.value)}
+                                className="h-8 text-right font-mono"
+                                placeholder="0"
+                              />
+                            ) : <span className="block text-center text-xs text-muted-foreground">No aplica</span>}
                           </td>
                           <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">
                             {getDraftLineMeasuredTotal(line).toLocaleString('es-BO', { maximumFractionDigits: 3 })}
@@ -1326,16 +1534,42 @@ export default function AssignedJobs() {
                     </tbody>
                   </table>
                 </div>
+
+                <div className="rounded-lg border border-border/70 bg-muted/20 p-4">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold">Cronograma estimado por etapas</p>
+                      <p className="text-xs text-muted-foreground">Es obligatorio para enviar la solicitud a revisión.</p>
+                    </div>
+                    <Badge className={laborScheduleComplete ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>
+                      {laborScheduleComplete ? 'Completo' : 'Pendiente'}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                    {laborScheduleRows.map((row, index) => (
+                      <div key={row.phaseKey} className="rounded-md border border-border/70 bg-background p-3">
+                        <p className="text-sm font-medium">{row.phaseLabel}</p>
+                        <div className="mt-2 grid gap-2">
+                          <Input type="date" value={row.startDate} onChange={(event) => updateLaborSchedule(index, 'startDate', event.target.value)} />
+                          <Input type="date" value={row.endDate} onChange={(event) => updateLaborSchedule(index, 'endDate', event.target.value)} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <div className="flex flex-col gap-3 border-t border-border/70 bg-background px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center justify-between rounded-lg bg-sky-50 px-3 py-2 text-sm sm:min-w-80">
-                  <span className="font-medium text-sky-800">Total mano de obra</span>
+                  <div>
+                    <span className="font-medium text-sky-800">Total mano de obra</span>
+                    {!laborScheduleComplete ? <p className="text-xs font-normal text-amber-700">Completa el cronograma para enviar.</p> : null}
+                  </div>
                   <span className="font-mono font-semibold text-sky-800">{formatCurrency(laborTotal)}</span>
                 </div>
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <Button variant="outline" onClick={() => setEditingLaborJobId(null)}>Cerrar</Button>
-                  <Button disabled={savingLabor || selectedLaborLines.length === 0 || laborTotal <= 0} onClick={() => void saveLaborPlan(laborJob)}>
+                  <Button disabled={savingLabor || !canSubmitLaborPlan} onClick={() => void saveLaborPlan(laborJob)}>
                     {savingLabor ? 'Enviando...' : 'Enviar a revisión'}
                   </Button>
                 </div>
