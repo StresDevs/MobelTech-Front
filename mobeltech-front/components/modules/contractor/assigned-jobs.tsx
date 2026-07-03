@@ -10,8 +10,23 @@ import { Label } from '@/components/ui/label';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { BellRing, CalendarRange, Download, Loader2, RefreshCw, Upload, WalletCards } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import {
+  ArrowLeft,
+  BellRing,
+  CalendarRange,
+  CheckCircle2,
+  ClipboardList,
+  Download,
+  FileText,
+  Loader2,
+  PackageCheck,
+  Phone,
+  RefreshCw,
+  Upload,
+  User,
+  WalletCards,
+} from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { getNotificationTarget } from '@/lib/notification-routing';
 
 type ContractorRecord = {
@@ -219,6 +234,8 @@ async function loadLogoDataUrl() {
 export default function AssignedJobs() {
   const { user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedJobId = searchParams.get('jobId');
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -343,6 +360,14 @@ export default function AssignedJobs() {
     if (target) {
       router.push(target);
     }
+  }
+
+  function openJobDetail(jobId: string) {
+    router.push(`/assigned-jobs?jobId=${encodeURIComponent(jobId)}`);
+  }
+
+  function closeJobDetail() {
+    router.push('/assigned-jobs');
   }
 
   const summary = useMemo(() => ({
@@ -802,6 +827,14 @@ export default function AssignedJobs() {
     return !alreadyAdded && matchesSearch;
   });
   const laborTotal = selectedLaborLines.reduce((sum, line) => sum + getDraftLinePartial(line), 0);
+  const selectedJob = selectedJobId ? jobs.find((job) => job.id === selectedJobId) ?? null : null;
+  const selectedJobClient = selectedJob ? getClient(selectedJob) : null;
+  const selectedJobEnvironment = selectedJob ? getEnvironment(selectedJob) : null;
+  const selectedJobPlan = selectedJob ? getPaymentPlan(selectedJob) : undefined;
+  const selectedJobAdvanceRequest = selectedJob ? getAdvanceRequest(selectedJob) : undefined;
+  const selectedJobInitialSketchup = selectedJob ? getInitialSketchupFile(selectedJob) : undefined;
+  const selectedJobFinalSketchup = selectedJob ? getFinalSketchupFile(selectedJob) : undefined;
+  const selectedJobProgress = selectedJob ? getJobProgress(selectedJob) : 0;
 
   return (
     <div className="space-y-4">
@@ -867,6 +900,188 @@ export default function AssignedJobs() {
         </div>
       ) : null}
 
+      {selectedJobId ? (
+        selectedJob ? (
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="outline" size="sm" className="gap-2 self-start" onClick={closeJobDetail}>
+                <ArrowLeft className="h-4 w-4" />
+                Volver a trabajos
+              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => void generateWorkOrderPdf(selectedJob)}>
+                  <Download className="h-4 w-4" />
+                  Orden PDF
+                </Button>
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => void loadAssignedData({ silent: true })}>
+                  <RefreshCw className="h-4 w-4" />
+                  Actualizar
+                </Button>
+              </div>
+            </div>
+
+            <Card className="overflow-hidden">
+              <div className="border-b border-border bg-muted/25 px-5 py-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className={statusClass(selectedJob.status)}>{statusLabel(selectedJob.status)}</Badge>
+                      <Badge className={laborStatusClass(selectedJobPlan)}>{laborStatusLabel(selectedJobPlan)}</Badge>
+                    </div>
+                    <h3 className="mt-3 text-xl font-semibold tracking-tight">
+                      {getLeadDescription(selectedJob)}
+                    </h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Trabajo #{selectedJob.id.slice(0, 8)}
+                      {selectedJobEnvironment?.ambience ? ` · ${selectedJobEnvironment.ambience}` : ''}
+                    </p>
+                  </div>
+                  <div className="min-w-[220px] rounded-lg border border-border bg-background p-3">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Avance general</span>
+                      <span className="font-mono font-semibold">{selectedJobProgress}%</span>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-[#eab676]" style={{ width: `${selectedJobProgress}%` }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <InfoTile icon={<User className="h-4 w-4" />} label="Cliente" value={selectedJobClient?.name ?? 'N/A'} detail={selectedJobClient?.phone ?? selectedJobClient?.email ?? undefined} />
+                    <InfoTile icon={<CalendarRange className="h-4 w-4" />} label="Inicio / entrega" value={`${formatDate(selectedJob.startDate)} - ${formatDate(selectedJob.estimatedDeliveryDate)}`} detail={selectedJob.actualDeliveryDate ? `Entregado: ${formatDate(selectedJob.actualDeliveryDate)}` : undefined} />
+                    <InfoTile icon={<WalletCards className="h-4 w-4" />} label="Mano de obra" value={selectedJobPlan ? formatCurrency(selectedJobPlan.totalAmount) : 'Pendiente'} detail={selectedJobPlan?.reviewNotes ?? undefined} />
+                    <InfoTile icon={<Phone className="h-4 w-4" />} label="Contacto / dirección" value={selectedJobClient?.address ?? selectedJobClient?.phone ?? 'Sin datos'} />
+                  </div>
+
+                  <div className="rounded-xl border border-border">
+                    <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+                      <ClipboardList className="h-4 w-4 text-muted-foreground" />
+                      <p className="text-sm font-semibold">Tareas del trabajo</p>
+                    </div>
+                    <div className="divide-y divide-border">
+                      {(selectedJob.items.length > 0 ? selectedJob.items : [{ id: 'empty', description: selectedJobEnvironment?.description || 'Trabajo sin tareas registradas', quantity: 1 }]).map((item) => (
+                        <div key={item.id} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_120px] sm:items-center">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{item.description}</p>
+                            <p className="text-xs text-muted-foreground">Cantidad: {item.quantity}</p>
+                          </div>
+                          <div className="text-left sm:text-right">
+                            <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+                              {item.progress ?? selectedJobProgress}% avance
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {selectedJobEnvironment?.description ? (
+                    <div className="rounded-xl border border-border bg-muted/20 p-4">
+                      <div className="mb-2 flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        <p className="text-sm font-semibold">Detalle del ambiente</p>
+                      </div>
+                      <p className="whitespace-pre-line text-sm text-muted-foreground">{selectedJobEnvironment.description}</p>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-border p-4">
+                    <div className="mb-3 flex items-center gap-2">
+                      <PackageCheck className="h-4 w-4 text-muted-foreground" />
+                      <p className="text-sm font-semibold">Archivos SketchUp</p>
+                    </div>
+                    <div className="space-y-3">
+                      <FileActionRow
+                        label="Inicial"
+                        fileName={selectedJobInitialSketchup?.fileName ?? selectedJobEnvironment?.sketchupFileName ?? 'Sin archivo inicial'}
+                        disabled={!selectedJobInitialSketchup}
+                        onDownload={() => selectedJobInitialSketchup ? void downloadSketchupFile(selectedJobInitialSketchup) : undefined}
+                      />
+                      <FileActionRow
+                        label="Final"
+                        fileName={selectedJobFinalSketchup?.fileName ?? 'Sin archivo final'}
+                        disabled={!selectedJobFinalSketchup}
+                        onDownload={() => selectedJobFinalSketchup ? void downloadSketchupFile(selectedJobFinalSketchup) : undefined}
+                      />
+                      <Label className="flex h-10 cursor-pointer items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs hover:bg-accent hover:text-accent-foreground">
+                        {uploadingFinalJobId === selectedJob.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                        {selectedJobFinalSketchup ? 'Reemplazar final' : 'Subir SketchUp final'}
+                        <Input
+                          type="file"
+                          accept=".skp,.skb,application/octet-stream"
+                          disabled={uploadingFinalJobId === selectedJob.id}
+                          className="hidden"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            void uploadFinalSketchup(selectedJob, file);
+                            event.target.value = '';
+                          }}
+                        />
+                      </Label>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border p-4">
+                    <p className="text-sm font-semibold">Acciones</p>
+                    <div className="mt-3 grid gap-2">
+                      <Button variant="outline" className="justify-start gap-2" onClick={() => openLaborForm(selectedJob)}>
+                        <WalletCards className="h-4 w-4" />
+                        {selectedJobPlan ? 'Editar mano de obra' : 'Calcular mano de obra'}
+                      </Button>
+                      <Button variant="outline" className="justify-start gap-2" disabled={!selectedJobPlan || selectedJobPlan.reviewStatus !== 'approved'} onClick={() => openAdvanceModal(selectedJob)}>
+                        <WalletCards className="h-4 w-4" />
+                        {selectedJobAdvanceRequest ? 'Ver solicitud de anticipo' : 'Solicitar anticipo'}
+                      </Button>
+                      <Button variant="outline" className="justify-start gap-2" onClick={() => window.location.assign('/schedule')}>
+                        <CalendarRange className="h-4 w-4" />
+                        Ver cronograma
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border p-4">
+                    <p className="text-sm font-semibold">Etapa actual</p>
+                    {selectedJobPlan?.reviewStatus === 'approved' ? (
+                      <select
+                        value={getCurrentPhase(selectedJob)}
+                        onChange={(event) => void updateJobPhase(selectedJob.id, event.target.value as ProductionPhase)}
+                        className="mt-3 h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none"
+                      >
+                        {PRODUCTION_PHASE_OPTIONS.map((phase) => (
+                          <option key={phase.value} value={phase.value}>{phase.label} · {phase.progress}%</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="mt-2 text-sm text-muted-foreground">La etapa se habilita cuando administración aprueba la mano de obra.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </div>
+        ) : (
+          <Card className="p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-lg font-semibold">Trabajo no encontrado</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  La notificación apunta a un trabajo que no está disponible para este contratista o todavía se está sincronizando.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={closeJobDetail}>Volver</Button>
+                <Button onClick={() => void loadAssignedData({ silent: true })}>Actualizar</Button>
+              </div>
+            </div>
+          </Card>
+        )
+      ) : (
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1180px] text-sm">
@@ -901,6 +1116,9 @@ export default function AssignedJobs() {
                   <tr key={job.id} className="border-b border-border/70 last:border-b-0">
                     <td className="px-4 py-3">
                       <p className="font-mono text-xs text-muted-foreground">{job.id.slice(0, 8)}</p>
+                      <Button size="sm" variant="ghost" className="mt-1 h-7 px-2 text-xs" onClick={() => openJobDetail(job.id)}>
+                        Ver detalle
+                      </Button>
                       <p className="font-medium">Sketch UP inicial</p>
                       <Button
                         size="sm"
@@ -995,6 +1213,7 @@ export default function AssignedJobs() {
           </table>
         </div>
       </Card>
+      )}
 
       <Dialog open={!!laborJob} onOpenChange={(open) => { if (!open) { setEditingLaborJobId(null); setSelectedLaborLines([]); setLaborSearch(''); } }}>
         <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] max-w-none overflow-hidden p-0 sm:max-w-none xl:w-[min(1240px,calc(100vw-3rem))]">
@@ -1186,5 +1405,58 @@ function SummaryPill({ label, value }: { label: string; value: number }) {
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="text-xl font-semibold">{value}</p>
     </Card>
+  );
+}
+
+function InfoTile({
+  icon,
+  label,
+  value,
+  detail,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  detail?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/15 p-4">
+      <div className="flex items-center gap-2 text-muted-foreground">
+        {icon}
+        <p className="text-xs font-medium uppercase tracking-wide">{label}</p>
+      </div>
+      <p className="mt-2 truncate text-sm font-semibold">{value}</p>
+      {detail ? <p className="mt-1 truncate text-xs text-muted-foreground">{detail}</p> : null}
+    </div>
+  );
+}
+
+function FileActionRow({
+  label,
+  fileName,
+  disabled,
+  onDownload,
+}: {
+  label: string;
+  fileName: string;
+  disabled?: boolean;
+  onDownload: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/15 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className={`h-3.5 w-3.5 ${disabled ? 'text-muted-foreground/40' : 'text-emerald-600'}`} />
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+          </div>
+          <p className="mt-1 truncate text-sm font-medium">{fileName}</p>
+        </div>
+        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={onDownload} className="h-8 shrink-0 gap-1.5">
+          <Download className="h-3.5 w-3.5" />
+          Descargar
+        </Button>
+      </div>
+    </div>
   );
 }
