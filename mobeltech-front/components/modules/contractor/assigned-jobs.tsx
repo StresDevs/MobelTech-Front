@@ -210,6 +210,13 @@ function formatCurrency(amount: number) {
   return `Bs. ${Number(amount || 0).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+const tableItemHeaderClass = 'bg-amber-100 text-amber-950 dark:bg-amber-500/20 dark:text-amber-100';
+const tableItemCellClass = 'bg-amber-50/80 text-zinc-900 dark:bg-amber-500/10 dark:text-zinc-100';
+const tableMeasureHeaderClass = 'bg-emerald-100 text-emerald-950 dark:bg-emerald-500/20 dark:text-emerald-100';
+const tableMeasureCellClass = 'bg-emerald-50 text-zinc-900 dark:bg-emerald-500/10 dark:text-zinc-100';
+const tableMoneyHeaderClass = 'bg-sky-100 text-sky-950 dark:bg-sky-500/20 dark:text-sky-100';
+const tableMoneyCellClass = 'bg-sky-50 text-sky-950 dark:bg-sky-500/10 dark:text-sky-100';
+
 function statusLabel(status: ProductionOrderRecord['status']) {
   if (status === 'pending') return 'Pendiente';
   if (status === 'in-progress') return 'En progreso';
@@ -1420,7 +1427,7 @@ export default function AssignedJobs() {
                       Busca actividades, agrégalas y completa las medidas. El total quedará en revisión por administración.
                     </DialogDescription>
                   </div>
-                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
                     {savingLabor ? 'Enviando solicitud...' : laborDraftSavedAt ? `Guardado ${new Date(laborDraftSavedAt).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}` : 'Autosave listo'}
                   </div>
                 </div>
@@ -1442,7 +1449,7 @@ export default function AssignedJobs() {
                   </div>
 
                   {laborItems.length === 0 ? (
-                    <Card className="border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    <Card className="border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
                       No hay actividades de mano de obra configuradas. Pide al admin, gerente o arquitecta que las cree en Solicitud de Pago Contratistas.
                     </Card>
                   ) : null}
@@ -1450,7 +1457,7 @@ export default function AssignedJobs() {
                   {availableLaborItems.length > 0 ? (
                     <div className="max-h-36 overflow-auto rounded-md border border-border/70">
                       {availableLaborItems.slice(0, 8).map((item) => (
-                        <div key={item.itemKey} className="flex items-center justify-between gap-3 border-b border-border/60 bg-emerald-50/60 px-3 py-2 transition hover:bg-emerald-100/70 last:border-b-0">
+                        <div key={item.itemKey} className="flex items-center justify-between gap-3 border-b border-border/60 bg-emerald-50/60 px-3 py-2 text-zinc-900 transition hover:bg-emerald-100/70 last:border-b-0 dark:bg-emerald-500/10 dark:text-zinc-100 dark:hover:bg-emerald-500/15">
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">{item.label}</p>
                             <p className="text-xs text-muted-foreground">
@@ -1475,13 +1482,13 @@ export default function AssignedJobs() {
                     <thead>
                       <tr className="border-b border-border/70">
                         <th className="w-12 px-2 py-2 text-center font-semibold text-muted-foreground">No</th>
-                        <th className="w-[34%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
-                        <th className="w-[8%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
-                        <th className="w-[9%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Alto</th>
-                        <th className="w-[11%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Ancho/Cantidad</th>
-                        <th className="w-[11%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">TOTAL</th>
-                        <th className="w-[13%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
-                        <th className="w-[12%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.PARCIAL</th>
+                        <th className={`w-[34%] px-3 py-2 text-left font-semibold ${tableItemHeaderClass}`}>ITEM</th>
+                        <th className={`w-[8%] px-3 py-2 text-center font-semibold ${tableItemHeaderClass}`}>UNIDAD</th>
+                        <th className={`w-[9%] px-3 py-2 text-right font-semibold ${tableMeasureHeaderClass}`}>Alto</th>
+                        <th className={`w-[11%] px-3 py-2 text-right font-semibold ${tableMeasureHeaderClass}`}>Ancho/Cantidad</th>
+                        <th className={`w-[11%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>TOTAL</th>
+                        <th className={`w-[13%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>P.UNITARIO</th>
+                        <th className={`w-[12%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>P.PARCIAL</th>
                         <th className="w-[8%] px-3 py-2 text-right font-medium text-muted-foreground">Acción</th>
                       </tr>
                     </thead>
@@ -1493,9 +1500,9 @@ export default function AssignedJobs() {
                       ) : selectedLaborLines.map((line, index) => (
                         <tr key={line.itemKey} className="border-b border-border/60 last:border-b-0">
                           <td className="px-2 py-2 text-center font-mono text-xs text-muted-foreground">{index + 1}</td>
-                          <td className="bg-amber-50/80 px-3 py-2 font-medium"><span className="block whitespace-normal leading-snug">{line.label}</span></td>
-                          <td className="bg-amber-50/80 px-3 py-2 text-center font-mono text-xs font-semibold">{line.unit}</td>
-                          <td className="bg-emerald-50 px-3 py-2">
+                          <td className={`px-3 py-2 font-medium ${tableItemCellClass}`}><span className="block whitespace-normal leading-snug">{line.label}</span></td>
+                          <td className={`px-3 py-2 text-center font-mono text-xs font-semibold ${tableItemCellClass}`}>{line.unit}</td>
+                          <td className={`px-3 py-2 ${tableMeasureCellClass}`}>
                             {line.enableHeight ? (
                               <Input
                                 type="number"
@@ -1503,12 +1510,12 @@ export default function AssignedJobs() {
                                 step="0.001"
                                 value={line.width}
                                 onChange={(event) => updateLaborLine(index, 'width', event.target.value)}
-                                className="h-8 text-right font-mono"
+                                className="h-8 text-right font-mono dark:border-zinc-600 dark:bg-zinc-950/40 dark:text-zinc-100"
                                 placeholder="0"
                               />
                             ) : <span className="block text-center text-xs text-muted-foreground">No aplica</span>}
                           </td>
-                          <td className="bg-emerald-50 px-3 py-2">
+                          <td className={`px-3 py-2 ${tableMeasureCellClass}`}>
                             {line.enableWidthQuantity ? (
                               <Input
                                 type="number"
@@ -1516,16 +1523,16 @@ export default function AssignedJobs() {
                                 step="0.001"
                                 value={line.heightQuantity}
                                 onChange={(event) => updateLaborLine(index, 'heightQuantity', event.target.value)}
-                                className="h-8 text-right font-mono"
+                                className="h-8 text-right font-mono dark:border-zinc-600 dark:bg-zinc-950/40 dark:text-zinc-100"
                                 placeholder="0"
                               />
                             ) : <span className="block text-center text-xs text-muted-foreground">No aplica</span>}
                           </td>
-                          <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">
+                          <td className={`px-3 py-2 text-right font-mono font-semibold ${tableMoneyCellClass}`}>
                             {getDraftLineMeasuredTotal(line).toLocaleString('es-BO', { maximumFractionDigits: 3 })}
                           </td>
-                          <td className="bg-sky-50 px-3 py-2 text-right font-mono">{formatCurrency(line.unitPrice)}</td>
-                          <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{formatCurrency(getDraftLinePartial(line))}</td>
+                          <td className={`px-3 py-2 text-right font-mono ${tableMoneyCellClass}`}>{formatCurrency(line.unitPrice)}</td>
+                          <td className={`px-3 py-2 text-right font-mono font-semibold ${tableMoneyCellClass}`}>{formatCurrency(getDraftLinePartial(line))}</td>
                           <td className="px-3 py-2 text-right">
                             <Button type="button" variant="ghost" size="sm" onClick={() => removeLaborLine(index)}>Quitar</Button>
                           </td>
@@ -1541,7 +1548,7 @@ export default function AssignedJobs() {
                       <p className="text-sm font-semibold">Cronograma estimado por etapas</p>
                       <p className="text-xs text-muted-foreground">Es obligatorio para enviar la solicitud a revisión.</p>
                     </div>
-                    <Badge className={laborScheduleComplete ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>
+                    <Badge className={laborScheduleComplete ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100'}>
                       {laborScheduleComplete ? 'Completo' : 'Pendiente'}
                     </Badge>
                   </div>
@@ -1560,12 +1567,12 @@ export default function AssignedJobs() {
               </div>
 
               <div className="flex flex-col gap-3 border-t border-border/70 bg-background px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center justify-between rounded-lg bg-sky-50 px-3 py-2 text-sm sm:min-w-80">
+                <div className="flex items-center justify-between rounded-lg bg-sky-50 px-3 py-2 text-sm dark:bg-sky-500/10 sm:min-w-80">
                   <div>
-                    <span className="font-medium text-sky-800">Total mano de obra</span>
-                    {!laborScheduleComplete ? <p className="text-xs font-normal text-amber-700">Completa el cronograma para enviar.</p> : null}
+                    <span className="font-medium text-sky-800 dark:text-sky-100">Total mano de obra</span>
+                    {!laborScheduleComplete ? <p className="text-xs font-normal text-amber-700 dark:text-amber-200">Completa el cronograma para enviar.</p> : null}
                   </div>
-                  <span className="font-mono font-semibold text-sky-800">{formatCurrency(laborTotal)}</span>
+                  <span className="font-mono font-semibold text-sky-800 dark:text-sky-100">{formatCurrency(laborTotal)}</span>
                 </div>
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <Button variant="outline" onClick={() => setEditingLaborJobId(null)}>Cerrar</Button>
@@ -1606,7 +1613,7 @@ export default function AssignedJobs() {
               </div>
 
               {activeAdvanceRequest?.reviewNotes ? (
-                <Card className="border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                <Card className="border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
                   {activeAdvanceRequest.reviewNotes}
                 </Card>
               ) : null}

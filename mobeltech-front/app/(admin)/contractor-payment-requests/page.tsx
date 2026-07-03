@@ -63,6 +63,13 @@ type LaborCatalogItem = {
 const money = (value: number) =>
   `Bs. ${Number(value || 0).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+const tableItemHeaderClass = 'bg-amber-100 text-amber-950 dark:bg-amber-500/20 dark:text-amber-100';
+const tableItemCellClass = 'bg-amber-50/80 text-zinc-900 dark:bg-amber-500/10 dark:text-zinc-100';
+const tableMeasureHeaderClass = 'bg-emerald-100 text-emerald-950 dark:bg-emerald-500/20 dark:text-emerald-100';
+const tableMeasureCellClass = 'bg-emerald-50 text-zinc-900 dark:bg-emerald-500/10 dark:text-zinc-100';
+const tableMoneyHeaderClass = 'bg-sky-100 text-sky-950 dark:bg-sky-500/20 dark:text-sky-100';
+const tableMoneyCellClass = 'bg-sky-50 text-sky-950 dark:bg-sky-500/10 dark:text-sky-100';
+
 function numberValue(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -465,10 +472,10 @@ export default function ContractorPaymentRequestsPage() {
                   <table className="w-full min-w-[980px] table-fixed text-sm">
                     <thead>
                       <tr className="border-b border-border/70">
-                        <th className="w-[34%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
-                        <th className="w-[12%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
-                        <th className="w-[18%] bg-emerald-100 px-3 py-2 text-left font-semibold text-emerald-950">MEDIDAS</th>
-                        <th className="w-[16%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
+                        <th className={`w-[34%] px-3 py-2 text-left font-semibold ${tableItemHeaderClass}`}>ITEM</th>
+                        <th className={`w-[12%] px-3 py-2 text-center font-semibold ${tableItemHeaderClass}`}>UNIDAD</th>
+                        <th className={`w-[18%] px-3 py-2 text-left font-semibold ${tableMeasureHeaderClass}`}>MEDIDAS</th>
+                        <th className={`w-[16%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>P.UNITARIO</th>
                         <th className="w-[14%] px-3 py-2 text-left font-medium text-muted-foreground">Estado</th>
                         <th className="w-[16%] px-3 py-2 text-right font-medium text-muted-foreground">Acciones</th>
                       </tr>
@@ -478,18 +485,18 @@ export default function ContractorPaymentRequestsPage() {
                         <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">No hay actividades creadas.</td></tr>
                       ) : laborItems.map((item) => (
                         <tr key={item.id} className="border-b border-border/60 last:border-b-0">
-                          <td className="bg-amber-50/80 px-3 py-3 font-medium"><span className="block whitespace-normal leading-snug">{item.label}</span></td>
-                          <td className="bg-amber-50/80 px-3 py-3 text-center font-mono text-xs font-semibold">{item.unit || 'UND'}</td>
-                          <td className="bg-emerald-50 px-3 py-3">
+                          <td className={`px-3 py-3 font-medium ${tableItemCellClass}`}><span className="block whitespace-normal leading-snug">{item.label}</span></td>
+                          <td className={`px-3 py-3 text-center font-mono text-xs font-semibold ${tableItemCellClass}`}>{item.unit || 'UND'}</td>
+                          <td className={`px-3 py-3 ${tableMeasureCellClass}`}>
                             <div className="flex flex-wrap gap-1">
-                              {item.enableHeight ?? true ? <Badge className="bg-emerald-100 text-emerald-800">Alto</Badge> : null}
-                              {item.enableWidthQuantity ?? true ? <Badge className="bg-emerald-100 text-emerald-800">Ancho/Cantidad</Badge> : null}
-                              {!(item.enableHeight ?? true) && !(item.enableWidthQuantity ?? true) ? <Badge className="bg-zinc-100 text-zinc-700">Sin medidas</Badge> : null}
+                              {item.enableHeight ?? true ? <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100">Alto</Badge> : null}
+                              {item.enableWidthQuantity ?? true ? <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100">Ancho/Cantidad</Badge> : null}
+                              {!(item.enableHeight ?? true) && !(item.enableWidthQuantity ?? true) ? <Badge className="bg-zinc-100 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100">Sin medidas</Badge> : null}
                             </div>
                           </td>
-                          <td className="bg-sky-50 px-3 py-3 text-right font-mono font-semibold">{money(item.referencePrice ?? item.defaultAmount)}</td>
+                          <td className={`px-3 py-3 text-right font-mono font-semibold ${tableMoneyCellClass}`}>{money(item.referencePrice ?? item.defaultAmount)}</td>
                           <td className="px-3 py-3">
-                            <Badge className={item.active ? 'bg-emerald-100 text-emerald-800' : 'bg-zinc-100 text-zinc-700'}>
+                            <Badge className={item.active ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100' : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100'}>
                               {item.active ? 'Activa' : 'Inactiva'}
                             </Badge>
                           </td>
@@ -524,26 +531,26 @@ export default function ContractorPaymentRequestsPage() {
                     <thead>
                       <tr className="border-b border-border/70">
                         <th className="w-12 px-2 py-2 text-center font-semibold text-muted-foreground">No</th>
-                        <th className="w-[34%] bg-amber-100 px-3 py-2 text-left font-semibold text-amber-950">ITEM</th>
-                        <th className="w-[8%] bg-amber-100 px-3 py-2 text-center font-semibold text-amber-950">UNIDAD</th>
-                        <th className="w-[9%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Alto</th>
-                        <th className="w-[11%] bg-emerald-100 px-3 py-2 text-right font-semibold text-emerald-950">Ancho/Cantidad</th>
-                        <th className="w-[11%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">TOTAL</th>
-                        <th className="w-[13%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.UNITARIO</th>
-                        <th className="w-[14%] bg-sky-100 px-3 py-2 text-right font-semibold text-sky-950">P.PARCIAL (Bs)</th>
+                        <th className={`w-[34%] px-3 py-2 text-left font-semibold ${tableItemHeaderClass}`}>ITEM</th>
+                        <th className={`w-[8%] px-3 py-2 text-center font-semibold ${tableItemHeaderClass}`}>UNIDAD</th>
+                        <th className={`w-[9%] px-3 py-2 text-right font-semibold ${tableMeasureHeaderClass}`}>Alto</th>
+                        <th className={`w-[11%] px-3 py-2 text-right font-semibold ${tableMeasureHeaderClass}`}>Ancho/Cantidad</th>
+                        <th className={`w-[11%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>TOTAL</th>
+                        <th className={`w-[13%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>P.UNITARIO</th>
+                        <th className={`w-[14%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>P.PARCIAL (Bs)</th>
                       </tr>
                     </thead>
                     <tbody>
                       {selectedPlan?.lines.map((line, index) => (
                         <tr key={line.id ?? line.phaseKey} className="border-b border-border/60 last:border-b-0">
                           <td className="px-2 py-2 text-center font-mono text-xs text-muted-foreground">{index + 1}</td>
-                          <td className="bg-amber-50/80 px-3 py-2 font-medium"><span className="block whitespace-normal leading-snug">{line.phaseLabel}</span></td>
-                          <td className="bg-amber-50/80 px-3 py-2 text-center font-mono text-xs font-semibold">{line.unit || 'UND'}</td>
-                          <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{line.enableHeight === false ? 'N/A' : Number(line.width ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
-                          <td className="bg-emerald-50 px-3 py-2 text-right font-mono">{line.enableWidthQuantity === false ? 'N/A' : Number(line.heightQuantity ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
-                          <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{Number(line.measuredTotal ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
-                          <td className="bg-sky-50 px-3 py-2 text-right font-mono">{money(line.unitPrice ?? 0)}</td>
-                          <td className="bg-sky-50 px-3 py-2 text-right font-mono font-semibold">{money(line.plannedAmount)}</td>
+                          <td className={`px-3 py-2 font-medium ${tableItemCellClass}`}><span className="block whitespace-normal leading-snug">{line.phaseLabel}</span></td>
+                          <td className={`px-3 py-2 text-center font-mono text-xs font-semibold ${tableItemCellClass}`}>{line.unit || 'UND'}</td>
+                          <td className={`px-3 py-2 text-right font-mono ${tableMeasureCellClass}`}>{line.enableHeight === false ? 'N/A' : Number(line.width ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
+                          <td className={`px-3 py-2 text-right font-mono ${tableMeasureCellClass}`}>{line.enableWidthQuantity === false ? 'N/A' : Number(line.heightQuantity ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
+                          <td className={`px-3 py-2 text-right font-mono font-semibold ${tableMoneyCellClass}`}>{Number(line.measuredTotal ?? 0).toLocaleString('es-BO', { maximumFractionDigits: 3 })}</td>
+                          <td className={`px-3 py-2 text-right font-mono ${tableMoneyCellClass}`}>{money(line.unitPrice ?? 0)}</td>
+                          <td className={`px-3 py-2 text-right font-mono font-semibold ${tableMoneyCellClass}`}>{money(line.plannedAmount)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -551,7 +558,7 @@ export default function ContractorPaymentRequestsPage() {
                 </div>
               </div>
               <div className="flex flex-col gap-3 border-t border-border/70 bg-background px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center justify-between rounded-md bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800 sm:min-w-72">
+                <div className="flex items-center justify-between rounded-md bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800 dark:bg-sky-500/10 dark:text-sky-100 sm:min-w-72">
                   <span>Total solicitud</span>
                   <span className="font-mono">{money(selectedPlan?.totalAmount ?? 0)}</span>
                 </div>
@@ -582,7 +589,7 @@ export default function ContractorPaymentRequestsPage() {
             </DialogHeader>
             <div className="space-y-3">
               {(schedulePlan?.estimatedSchedule?.length ?? 0) === 0 ? (
-                <Card className="border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                <Card className="border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
                   Esta solicitud no tiene cronograma estimado registrado.
                 </Card>
               ) : (
@@ -591,7 +598,7 @@ export default function ContractorPaymentRequestsPage() {
                     <div key={`${phase.phaseKey}-${index}`} className="rounded-lg border border-border/70 bg-muted/20 p-4">
                       <div className="flex items-center justify-between gap-3">
                         <p className="font-semibold">{phase.phaseLabel}</p>
-                        <Badge className="bg-emerald-100 text-emerald-800">Etapa {index + 1}</Badge>
+                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100">Etapa {index + 1}</Badge>
                       </div>
                       <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
                         <div>
