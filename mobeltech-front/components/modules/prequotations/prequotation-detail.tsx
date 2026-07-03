@@ -89,6 +89,8 @@ const NEXT_STATUS_LABEL: Partial<Record<PrequotationStatus, string>> = {
 };
 
 const CLIENT_CONFIRMED_DESCRIPTION = 'Cliente confirmó la precotización para avanzar a cotización.';
+const MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024;
+const ACCEPTED_FILE_EXTENSIONS = ['.pdf', '.xlsx', '.xls', '.csv'];
 
 function formatDateTime(d: Date) {
   const value = d instanceof Date ? d : new Date(d as any);
@@ -114,6 +116,47 @@ function toSafeDate(value: unknown) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function sortVersionsByNumber(versions: PrequotationVersion[]) {
+  return [...versions].sort((a, b) => a.version - b.version);
+}
+
+function getNextVersionNumber(versions: PrequotationVersion[], currentVersion: number) {
+  return Math.max(currentVersion, 0, ...versions.map((version) => version.version || 0)) + 1;
+}
+
+function getFileExtension(fileName: string) {
+  const dotIndex = fileName.lastIndexOf('.');
+  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : '';
+}
+
+function getFileType(fileName: string): PrequotationVersion['fileType'] {
+  return ['.xlsx', '.xls', '.csv'].includes(getFileExtension(fileName)) ? 'excel' : 'pdf';
+}
+
+function validateUploadFile(file: File) {
+  const extension = getFileExtension(file.name);
+  if (!ACCEPTED_FILE_EXTENSIONS.includes(extension)) {
+    return 'Solo se permiten archivos PDF, Excel o CSV.';
+  }
+  if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+    return 'El archivo no puede superar los 20 MB.';
+  }
+  return null;
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo seleccionado.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function eventHasFiles(event: DragEvent | React.DragEvent) {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
 function normalizePrequotationState(raw: any): Prequotation {
   return {
     ...raw,
@@ -122,10 +165,12 @@ function normalizePrequotationState(raw: any): Prequotation {
     uidAssignedAt: toSafeDate(raw.uidAssignedAt),
     totalAmount: raw.totalAmount != null ? Number(raw.totalAmount) : undefined,
     advanceAmount: raw.advanceAmount != null ? Number(raw.advanceAmount) : undefined,
-    versions: (raw.versions ?? []).map((version: any) => ({
-      ...version,
-      uploadedAt: toSafeDate(version.uploadedAt) ?? new Date(),
-    })),
+    versions: sortVersionsByNumber(
+      (raw.versions ?? []).map((version: any) => ({
+        ...version,
+        uploadedAt: toSafeDate(version.uploadedAt) ?? new Date(),
+      })),
+    ),
     logs: (raw.logs ?? []).map((log: any) => ({
       ...log,
       performedAt: toSafeDate(log.performedAt) ?? new Date(),
@@ -148,6 +193,9 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
   const [showConvertConfirm, setShowConvertConfirm] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [statusAction, setStatusAction] = useState<PrequotationStatus | 'client-confirmed' | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const cfg = STATUS_CONFIG[p.status];
@@ -166,6 +214,49 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
   useEffect(() => {
     setP((current) => normalizePrequotationState(current));
   }, [prequotation]);
+
+  useEffect(() => {
+    let dragDepth = 0;
+
+    function handleWindowDragEnter(event: DragEvent) {
+      if (!eventHasFiles(event)) return;
+      event.preventDefault();
+      dragDepth += 1;
+      setIsDraggingFile(true);
+    }
+
+    function handleWindowDragOver(event: DragEvent) {
+      if (!eventHasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = isUploading ? 'none' : 'copy';
+    }
+
+    function handleWindowDragLeave(event: DragEvent) {
+      if (!eventHasFiles(event)) return;
+      event.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setIsDraggingFile(false);
+    }
+
+    function handleWindowDrop(event: DragEvent) {
+      if (!eventHasFiles(event)) return;
+      event.preventDefault();
+      dragDepth = 0;
+      setIsDraggingFile(false);
+    }
+
+    window.addEventListener('dragenter', handleWindowDragEnter);
+    window.addEventListener('dragover', handleWindowDragOver);
+    window.addEventListener('dragleave', handleWindowDragLeave);
+    window.addEventListener('drop', handleWindowDrop);
+
+    return () => {
+      window.removeEventListener('dragenter', handleWindowDragEnter);
+      window.removeEventListener('dragover', handleWindowDragOver);
+      window.removeEventListener('dragleave', handleWindowDragLeave);
+      window.removeEventListener('drop', handleWindowDrop);
+    };
+  }, [isUploading]);
 
   const hasClientConfirmation = p.status === 'confirmed' || p.logs.some((log) => log.description === CLIENT_CONFIRMED_DESCRIPTION);
 
@@ -264,19 +355,25 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
     setComment('');
   }
 
-  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const isExcel =
-      file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv');
-    const reader = new FileReader();
-    reader.onload = () => {
-      const fileUrl = String(reader.result ?? '');
+  async function processUploadFile(file: File) {
+    if (isUploading) return;
+    const validationError = validateUploadFile(file);
+    if (validationError) {
+      setUploadError(validationError);
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    try {
+      const fileUrl = await fileToDataUrl(file);
+      const nextVersionNumber = getNextVersionNumber(p.versions, p.currentVersion);
       const newVersion: PrequotationVersion & { fileUrl: string } = {
         id: `ver-${Date.now()}`,
-        version: p.currentVersion + 1,
+        version: nextVersionNumber,
         fileName: file.name,
-        fileType: isExcel ? 'excel' : 'pdf',
+        fileType: getFileType(file.name),
         fileSize: `${Math.round(file.size / 1024)} KB`,
         uploadedBy: 'Juan Pérez',
         uploadedAt: new Date(),
@@ -289,19 +386,45 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
         performedAt: new Date(),
         description: `Archivo subido: ${file.name} (v${newVersion.version})`,
       };
-      void (async () => {
-        const next = await persist({
-          ...p,
-          currentVersion: newVersion.version,
-          versions: [...p.versions, newVersion as PrequotationVersion],
-          logs: [...p.logs, log],
-          updatedAt: new Date(),
-        });
-        applyUpdate(next);
-      })();
-    };
-    reader.readAsDataURL(file);
+      const versions = sortVersionsByNumber([...p.versions, newVersion as PrequotationVersion]);
+      const next = await persist({
+        ...p,
+        currentVersion: newVersion.version,
+        versions,
+        logs: [...p.logs, log],
+        updatedAt: new Date(),
+      });
+      applyUpdate(next);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'No se pudo subir el archivo.');
+    } finally {
+      setIsUploading(false);
+      setIsDraggingFile(false);
+    }
+  }
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    void processUploadFile(file);
     e.target.value = '';
+  }
+
+  function handleUploadDrop(e: React.DragEvent<HTMLElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    void processUploadFile(file);
+  }
+
+  function handleUploadDragOver(e: React.DragEvent<HTMLElement>) {
+    if (!eventHasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = isUploading ? 'none' : 'copy';
+    setIsDraggingFile(true);
   }
 
   function simulateDownload(version: PrequotationVersion & { fileUrl?: string }) {
@@ -379,7 +502,11 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
   });
 
   return (
-    <div className="space-y-6">
+    <div
+      className="space-y-6"
+      onDragOver={handleUploadDragOver}
+      onDrop={handleUploadDrop}
+    >
       {/* Back + header */}
       <div className="flex items-start gap-4">
         <button
@@ -555,24 +682,60 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
                   accept=".pdf,.xlsx,.xls,.csv"
                   className="hidden"
                   onChange={handleFileUpload}
+                  disabled={isUploading}
                 />
                 <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-full border-2 border-dashed border-border rounded-xl p-6 flex flex-col items-center gap-2 hover:border-foreground/30 hover:bg-muted/30 transition-all group"
+                  onDragOver={handleUploadDragOver}
+                  onDrop={handleUploadDrop}
+                  disabled={isUploading}
+                  aria-busy={isUploading}
+                  className={`relative w-full overflow-hidden border-2 border-dashed rounded-xl p-5 sm:p-6 flex flex-col items-center gap-2 transition-all group ${
+                    isDraggingFile
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-950 shadow-sm dark:bg-emerald-950/30 dark:text-emerald-100'
+                      : 'border-border hover:border-foreground/30 hover:bg-muted/30'
+                  } ${isUploading ? 'cursor-wait opacity-90' : ''}`}
                 >
                   <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform"
-                    style={{ backgroundColor: '#eab676' + '33' }}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-transform ${
+                      isUploading ? '' : 'group-hover:scale-110'
+                    }`}
+                    style={{ backgroundColor: isDraggingFile ? '#10b98122' : '#eab676' + '33' }}
                   >
-                    <Upload className="w-5 h-5" style={{ color: '#eab676' }} />
+                    {isUploading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" style={{ color: '#eab676' }} />
+                    ) : isDraggingFile ? (
+                      <FileText className="w-5 h-5 text-emerald-600" />
+                    ) : (
+                      <Upload className="w-5 h-5" style={{ color: '#eab676' }} />
+                    )}
                   </div>
-                  <p className="text-sm font-medium">Subir nueva versión</p>
-                  <p className="text-xs text-muted-foreground">PDF, Excel · Máx. 20 MB</p>
+                  <p className="text-sm font-medium text-center">
+                    {isUploading
+                      ? 'Cargando archivo...'
+                      : isDraggingFile
+                      ? 'Suelta el archivo para agregarlo'
+                      : 'Subir nueva versión'}
+                  </p>
+                  <p className={`text-xs text-center ${isDraggingFile ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`}>
+                    {isUploading ? 'Espera un momento antes de subir otro documento' : 'Haz clic o arrastra aquí un PDF, Excel o CSV · Máx. 20 MB'}
+                  </p>
+                  {isUploading && (
+                    <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden bg-muted">
+                      <div className="h-full w-1/2 animate-pulse rounded-r-full" style={{ backgroundColor: '#eab676' }} />
+                    </div>
+                  )}
                 </button>
+                {uploadError && (
+                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {uploadError}
+                  </div>
+                )}
 
                 {/* Version list (newest first) */}
                 <div className="space-y-2">
-                  {[...p.versions].reverse().map((v) => (
+                  {sortVersionsByNumber(p.versions).reverse().map((v) => (
                     <div
                       key={v.id}
                       className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${

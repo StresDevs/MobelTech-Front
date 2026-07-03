@@ -104,10 +104,12 @@ export function PrequotationsModule() {
       uidAssignedAt: p.uidAssignedAt ? new Date(p.uidAssignedAt) : null,
       totalAmount: p.totalAmount != null ? Number(p.totalAmount) : undefined,
       advanceAmount: p.advanceAmount != null ? Number(p.advanceAmount) : undefined,
-      versions: (p.versions ?? []).map((v: any) => ({
-        ...v,
-        uploadedAt: new Date(v.uploadedAt),
-      })),
+      versions: (p.versions ?? [])
+        .map((v: any) => ({
+          ...v,
+          uploadedAt: new Date(v.uploadedAt),
+        }))
+        .sort((a: Prequotation['versions'][number], b: Prequotation['versions'][number]) => a.version - b.version),
       logs: (p.logs ?? []).map((l: any) => ({
         ...l,
         performedAt: new Date(l.performedAt),
