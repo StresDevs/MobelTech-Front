@@ -49,6 +49,7 @@ export interface QuotationAudit {
   field: string;
   previousValue: string;
   nextValue: string;
+  comment?: string | null;
   changedBy: string;
   changedAt: Date;
 }

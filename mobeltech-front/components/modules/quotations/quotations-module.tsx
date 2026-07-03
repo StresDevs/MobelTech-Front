@@ -258,6 +258,8 @@ export function QuotationsModule() {
     items?: QuotationItem[];
     totalAmount?: number;
     advanceAmount?: number;
+    adjustmentComment?: string;
+    changedBy?: string;
   }) {
     if (!apiBase) return;
 
@@ -680,7 +682,7 @@ interface DetailProps {
   prequotationTitle?: string;
   onBack: () => void;
   onReplaceQuotation: (quotation: ApiQuotation) => void;
-  onSave: (payload: { items?: QuotationItem[]; totalAmount?: number; advanceAmount?: number; status?: QuotationStatus }) => void;
+  onSave: (payload: { items?: QuotationItem[]; totalAmount?: number; advanceAmount?: number; status?: QuotationStatus; adjustmentComment?: string; changedBy?: string }) => void;
   saving: boolean;
 }
 
@@ -727,6 +729,12 @@ function QuotationDetail({
   const [environmentSaving, setEnvironmentSaving] = useState(false);
   const [environmentError, setEnvironmentError] = useState<string | null>(null);
   const [editingEnvironment, setEditingEnvironment] = useState<QuotationEnvironmentProject | null>(null);
+  const [showBudgetAdjuster, setShowBudgetAdjuster] = useState(false);
+  const [budgetAdjustmentTotal, setBudgetAdjustmentTotal] = useState('');
+  const [budgetAdjustmentComment, setBudgetAdjustmentComment] = useState('');
+  const [budgetAdjustmentMinimum, setBudgetAdjustmentMinimum] = useState(0);
+  const [budgetAdjustmentSaving, setBudgetAdjustmentSaving] = useState(false);
+  const [budgetAdjustmentError, setBudgetAdjustmentError] = useState<string | null>(null);
   const [environmentEditForm, setEnvironmentEditForm] = useState({
     ambience: '',
     description: '',
@@ -767,6 +775,7 @@ function QuotationDetail({
   const environmentDraftTotal = environmentRows.reduce((sum, row) => sum + Number(row.price || 0), 0);
   const environmentProjectedTotal = environmentTotal + environmentDraftTotal;
   const environmentDraftExceeds = environmentProjectedTotal > displayTotal;
+  const environmentBudgetUsed = displayTotal > 0 ? Math.min((environmentTotal / displayTotal) * 100, 100) : 0;
 
   useEffect(() => {
     setEditableItems(currentQuotation.items.map((it: any) => ({ ...it })));
@@ -815,6 +824,70 @@ function QuotationDetail({
       description: `Los ambientes suman ${formatCurrency(projectedTotal)} y exceden la cotización por ${formatCurrency(exceededBy)}.`,
       variant: 'destructive',
     });
+  }
+
+  function openBudgetAdjuster(options?: { suggestedTotal?: number; minimumTotal?: number; comment?: string }) {
+    const minimumTotal = Math.max(options?.minimumTotal ?? environmentTotal, 0);
+    const suggestedTotal = Math.max(options?.suggestedTotal ?? displayTotal, minimumTotal);
+    setBudgetAdjustmentTotal(String(suggestedTotal));
+    setBudgetAdjustmentComment(options?.comment ?? '');
+    setBudgetAdjustmentMinimum(minimumTotal);
+    setBudgetAdjustmentError(null);
+    setShowBudgetAdjuster(true);
+  }
+
+  async function saveBudgetAdjustment() {
+    const nextTotal = Number(budgetAdjustmentTotal);
+    const comment = budgetAdjustmentComment.trim();
+
+    if (!Number.isFinite(nextTotal) || nextTotal < 0) {
+      setBudgetAdjustmentError('Ingresa un monto válido para la cotización.');
+      return;
+    }
+
+    if (nextTotal < budgetAdjustmentMinimum) {
+      setBudgetAdjustmentError(`El nuevo monto debe cubrir al menos ${formatCurrency(budgetAdjustmentMinimum)}.`);
+      return;
+    }
+
+    if (!comment) {
+      setBudgetAdjustmentError('Deja un comentario breve explicando el reajuste.');
+      return;
+    }
+
+    setBudgetAdjustmentSaving(true);
+    setBudgetAdjustmentError(null);
+
+    try {
+      const response = await fetch(`${apiBase}/api/quotations/${quotation.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          totalAmount: nextTotal,
+          adjustmentComment: comment,
+          changedBy: userName,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || 'No se pudo reajustar el monto de la cotización.');
+      }
+
+      const updatedQuotation = normalizeQuotationRecord(await response.json());
+      onReplaceQuotation(updatedQuotation);
+      setShowBudgetAdjuster(false);
+      toast({
+        title: 'Monto reajustado',
+        description: `La cotización ahora tiene un total de ${formatCurrency(nextTotal)}.`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo reajustar el monto de la cotización.';
+      setBudgetAdjustmentError(message);
+      toast({ title: 'Error al reajustar', description: message, variant: 'destructive' });
+    } finally {
+      setBudgetAdjustmentSaving(false);
+    }
   }
 
   function openEnvironmentEditor(environment: QuotationEnvironmentProject) {
@@ -1160,15 +1233,26 @@ function QuotationDetail({
                 </p>
               </div>
               {canCreateEnvironmentProjects && (
-                <Button
-                  size="sm"
-                  className="gap-1.5 self-start"
-                  onClick={() => setShowEnvironmentBuilder(true)}
-                  style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
-                >
-                  <FolderPlus className="w-3.5 h-3.5" />
-                  Crear proyectos por ambiente
-                </Button>
+                <div className="flex flex-wrap gap-2 sm:justify-end">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => openBudgetAdjuster({ minimumTotal: environmentTotal })}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Reajustar monto
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setShowEnvironmentBuilder(true)}
+                    style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
+                  >
+                    <FolderPlus className="w-3.5 h-3.5" />
+                    Crear proyectos por ambiente
+                  </Button>
+                </div>
               )}
             </div>
 
@@ -1176,6 +1260,9 @@ function QuotationDetail({
               <div className="rounded-xl border border-border bg-muted/20 p-3">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Monto cotizado</p>
                 <p className="mt-1 font-mono text-sm font-bold">{formatCurrency(displayTotal)}</p>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-[#eab676]" style={{ width: `${environmentBudgetUsed}%` }} />
+                </div>
               </div>
               <div className="rounded-xl border border-border bg-muted/20 p-3">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Asignado a ambientes</p>
@@ -1407,6 +1494,11 @@ function QuotationDetail({
                               <span className="text-muted-foreground text-[11px]">{formatDateTime(changedAt)}</span>
                             </p>
                             <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
+                            {a.comment && (
+                              <p className="mt-1 rounded-md bg-muted/50 px-2 py-1 text-[11px] text-muted-foreground">
+                                {a.comment}
+                              </p>
+                            )}
                           </div>
                         );
                       })}
@@ -1415,6 +1507,81 @@ function QuotationDetail({
           )}
         </div>
       </div>
+
+      {showBudgetAdjuster && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-2xl max-h-[88vh] overflow-y-auto p-6 space-y-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-lg font-semibold">Reajustar monto de cotización</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Cambia el total comercial y deja el motivo para liberar o ajustar presupuesto por ambientes.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setShowBudgetAdjuster(false)} disabled={budgetAdjustmentSaving}>
+                Cerrar
+              </Button>
+            </div>
+
+            {budgetAdjustmentError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {budgetAdjustmentError}
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Total actual</p>
+                <p className="mt-1 font-mono text-sm font-bold">{formatCurrency(displayTotal)}</p>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Asignado</p>
+                <p className="mt-1 font-mono text-sm font-bold">{formatCurrency(environmentTotal)}</p>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Mínimo requerido</p>
+                <p className="mt-1 font-mono text-sm font-bold">{formatCurrency(budgetAdjustmentMinimum)}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Nuevo total cotizado</p>
+                <Input
+                  type="number"
+                  min={budgetAdjustmentMinimum}
+                  step="0.01"
+                  value={budgetAdjustmentTotal}
+                  onChange={(e) => setBudgetAdjustmentTotal(e.target.value)}
+                  className="font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Disponible después del reajuste: {formatCurrency(Math.max(Number(budgetAdjustmentTotal || 0) - environmentTotal, 0))}
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Comentario *</p>
+                <Textarea
+                  rows={4}
+                  value={budgetAdjustmentComment}
+                  onChange={(e) => setBudgetAdjustmentComment(e.target.value)}
+                  placeholder="Ej: Cliente aprobó ampliar alcance para cocina y lavandería."
+                  className="resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="outline" onClick={() => setShowBudgetAdjuster(false)} disabled={budgetAdjustmentSaving}>
+                Cancelar
+              </Button>
+              <Button onClick={saveBudgetAdjustment} disabled={budgetAdjustmentSaving} style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
+                {budgetAdjustmentSaving ? 'Guardando...' : 'Guardar reajuste'}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {editingEnvironment && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
@@ -1604,9 +1771,27 @@ function QuotationDetail({
                 </div>
               </div>
               {environmentDraftExceeds && (
-                <p className="mt-2 text-xs font-medium">
-                  La suma de ambientes no puede superar el monto cotizado.
-                </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs font-medium">
+                    La suma de ambientes no puede superar el monto cotizado. Reajusta la cotización para continuar.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 self-start border-red-200 bg-white text-red-700 hover:bg-red-50"
+                    onClick={() =>
+                      openBudgetAdjuster({
+                        suggestedTotal: environmentProjectedTotal,
+                        minimumTotal: environmentProjectedTotal,
+                        comment: `Reajuste para crear ambientes adicionales por ${formatCurrency(environmentDraftTotal)}.`,
+                      })
+                    }
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Reajustar a {formatCurrency(environmentProjectedTotal)}
+                  </Button>
+                </div>
               )}
             </div>
 
