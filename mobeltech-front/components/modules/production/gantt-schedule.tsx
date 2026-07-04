@@ -139,6 +139,14 @@ type PendingLaborDraft = {
   draft: LaborDraftSnapshot;
 };
 
+type MachineAvailabilityView = {
+  phaseLabel: string;
+  machineLabel: string;
+  reservations: MachineReservation[];
+  selectedStart: string;
+  selectedEnd: string;
+};
+
 const PHASES: Array<{ key: PhaseName; label: string; color: string }> = [
   { key: 'cortado', label: 'Corte', color: '#3b82f6' },
   { key: 'canteado', label: 'Canteado', color: '#f59e0b' },
@@ -303,8 +311,32 @@ function buildMachineCalendarWindow(reservations: MachineReservation[], selected
   ].filter(Boolean) as Date[];
 
   const base = dates.length ? new Date(Math.min(...dates.map((date) => date.getTime()))) : new Date();
-  base.setDate(base.getDate() - 3);
-  return daysBetween(toLocalDateString(base), toLocalDateString(new Date(base.getTime() + 20 * DAY_MS)));
+  base.setDate(1);
+  const end = new Date(base.getFullYear(), base.getMonth() + 2, 0);
+  return daysBetween(toLocalDateString(base), toLocalDateString(end));
+}
+
+function groupDaysByMonth(days: Date[]) {
+  const groups: Array<{ key: string; label: string; days: Date[] }> = [];
+  days.forEach((day) => {
+    const key = `${day.getFullYear()}-${day.getMonth()}`;
+    const current = groups[groups.length - 1];
+    if (current?.key === key) {
+      current.days.push(day);
+      return;
+    }
+    groups.push({
+      key,
+      label: new Intl.DateTimeFormat('es-BO', { month: 'long', year: 'numeric' }).format(day),
+      days: [day],
+    });
+  });
+  return groups;
+}
+
+function getMondayFirstOffset(day: Date) {
+  const weekday = day.getDay();
+  return weekday === 0 ? 6 : weekday - 1;
 }
 
 function rangeFromOrders(orders: ProductionOrder[]) {
@@ -464,6 +496,7 @@ export function GanttSchedule() {
     order: ProductionOrder;
     phases: EditablePhase[];
   } | null>(null);
+  const [machineAvailabilityView, setMachineAvailabilityView] = useState<MachineAvailabilityView | null>(null);
   const [pendingLaborDrafts, setPendingLaborDrafts] = useState<PendingLaborDraft[]>([]);
   const [openedLaborJobIdParam, setOpenedLaborJobIdParam] = useState<string | null>(null);
 
@@ -1408,8 +1441,8 @@ export function GanttSchedule() {
 
       {editing ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
-          <Card className="w-full max-w-4xl p-5">
-            <div className="flex items-start justify-between gap-4">
+          <Card className="flex max-h-[calc(100dvh-2rem)] w-full max-w-6xl flex-col overflow-hidden p-0">
+            <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
               <div>
                 <p className="text-lg font-semibold">Cronograma por fases del contratista</p>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -1421,20 +1454,21 @@ export function GanttSchedule() {
               </Button>
             </div>
 
-            <div className="mt-4 rounded-lg border border-border bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
-              Las fases deben quedar dentro del rango tentativo definido por arquitectura: {formatDisplayDate(editing.order.startDate)} - {formatDisplayDate(editing.order.estimatedDeliveryDate)}. La disponibilidad de máquinas se muestra como referencia para elegir mejor tus fechas.
-            </div>
-
-            {getPendingLaborDraft(editing.order.id) ? (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-                <p className="font-semibold">Este cronograma cerrará una solicitud de pago pendiente.</p>
-                <p className="mt-1">
-                  Al guardar, el sistema enviará a revisión la mano de obra cargada para este trabajo junto con estas fechas.
-                </p>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              <div className="rounded-lg border border-border bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
+                Las fases deben quedar dentro del rango tentativo definido por arquitectura: {formatDisplayDate(editing.order.startDate)} - {formatDisplayDate(editing.order.estimatedDeliveryDate)}. La disponibilidad de máquinas se muestra como referencia para elegir mejor tus fechas.
               </div>
-            ) : null}
 
-            <div className="mt-5 grid gap-3">
+              {getPendingLaborDraft(editing.order.id) ? (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                  <p className="font-semibold">Este cronograma cerrará una solicitud de pago pendiente.</p>
+                  <p className="mt-1">
+                    Al guardar, el sistema enviará a revisión la mano de obra cargada para este trabajo junto con estas fechas.
+                  </p>
+                </div>
+              ) : null}
+
+            <div className="mt-4 grid gap-3">
               {editing.phases.map((phase, index) => {
                 const phaseConfig = PHASES.find((item) => item.key === phase.phase);
                 const phaseMachinesForPhase = getMachinesForPhase(phase.phase);
@@ -1468,61 +1502,21 @@ export function GanttSchedule() {
                             ))}
                           </select>
 
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button type="button" variant="outline" size="icon" aria-label={`Ver disponibilidad de ${selectedMachineLabel}`}>
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent side="bottom" align="start" className="max-h-[72vh] w-[min(92vw,620px)] overflow-y-auto p-0">
-                              <div className="border-b border-border px-4 py-3">
-                                <p className="font-semibold">Disponibilidad de {selectedMachineLabel}</p>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  Bloques ya ocupados por otros trabajos en {phaseConfig?.label ?? 'esta fase'}.
-                                </p>
-                              </div>
-                              <div className="space-y-3 p-4">
-                                <div className="rounded-lg border border-border bg-muted/20 p-3">
-                                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Rango que estas planificando</p>
-                                  <p className="mt-1 text-sm font-medium text-foreground">{formatRangeLabel(phase.startDate, phase.endDate)}</p>
-                                </div>
-
-                                <MachineAvailabilityMiniCalendar
-                                  reservations={reservations}
-                                  selectedStart={phase.startDate}
-                                  selectedEnd={phase.endDate}
-                                />
-
-                                {reservations.length === 0 ? (
-                                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
-                                    No hay reservas registradas para esta máquina en otros trabajos.
-                                  </div>
-                                ) : (
-                                  <div className="space-y-2">
-                                    <div className="flex items-center justify-between">
-                                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Mini cronograma</p>
-                                      <Badge variant="outline">{reservations.length} bloques</Badge>
-                                    </div>
-                                    <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-                                      {reservations.map((reservation) => (
-                                        <div key={`${reservation.orderId}-${reservation.startDate}-${reservation.endDate}`} className="rounded-lg border border-border/70 bg-background p-3">
-                                          <div className="flex items-start justify-between gap-3">
-                                            <div className="min-w-0">
-                                              <p className="truncate text-sm font-semibold text-foreground">{reservation.furnitureName}</p>
-                                              <p className="mt-1 text-xs text-muted-foreground">{reservation.contractorName}</p>
-                                            </div>
-                                            <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800">
-                                              {formatRangeLabel(reservation.startDate, reservation.endDate)}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </PopoverContent>
-                          </Popover>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            aria-label={`Ver disponibilidad de ${selectedMachineLabel}`}
+                            onClick={() => setMachineAvailabilityView({
+                              phaseLabel: phaseConfig?.label ?? 'Fase',
+                              machineLabel: selectedMachineLabel,
+                              reservations,
+                              selectedStart: phase.startDate,
+                              selectedEnd: phase.endDate,
+                            })}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
                         </div>
                       ) : <div className="hidden lg:block" />}
 
@@ -1577,8 +1571,9 @@ export function GanttSchedule() {
                 );
               })}
             </div>
+            </div>
 
-            <div className="mt-5 flex justify-end gap-2">
+            <div className="flex justify-end gap-2 border-t border-border bg-background px-5 py-4">
               <Button variant="outline" onClick={closeEditing} disabled={saving}>Cancelar</Button>
               <Button onClick={() => void saveSchedule()} disabled={saving} className="gap-2">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1588,11 +1583,74 @@ export function GanttSchedule() {
           </Card>
         </div>
       ) : null}
+
+      {machineAvailabilityView ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm sm:p-4">
+          <Card className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-5xl flex-col overflow-hidden p-0">
+            <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-3 sm:px-5 sm:py-4">
+              <div className="min-w-0">
+                <p className="truncate text-base font-semibold sm:text-lg">Disponibilidad de {machineAvailabilityView.machineLabel}</p>
+                <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
+                  {machineAvailabilityView.phaseLabel} · {formatRangeLabel(machineAvailabilityView.selectedStart, machineAvailabilityView.selectedEnd)}
+                </p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setMachineAvailabilityView(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                <MachineAvailabilityCalendar
+                  reservations={machineAvailabilityView.reservations}
+                  selectedStart={machineAvailabilityView.selectedStart}
+                  selectedEnd={machineAvailabilityView.selectedEnd}
+                />
+
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-border bg-muted/20 p-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Rango que estás planificando</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">{formatRangeLabel(machineAvailabilityView.selectedStart, machineAvailabilityView.selectedEnd)}</p>
+                  </div>
+
+                  {machineAvailabilityView.reservations.length === 0 ? (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+                      No hay reservas registradas para esta máquina en otros trabajos.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Reservas</p>
+                        <Badge variant="outline">{machineAvailabilityView.reservations.length} bloques</Badge>
+                      </div>
+                      <div className="max-h-[42vh] space-y-2 overflow-y-auto pr-1">
+                        {machineAvailabilityView.reservations.map((reservation) => (
+                          <div key={`${reservation.orderId}-${reservation.startDate}-${reservation.endDate}`} className="rounded-lg border border-border/70 bg-background p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-foreground">{reservation.furnitureName}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">{reservation.contractorName}</p>
+                              </div>
+                              <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-100">
+                                {formatRangeLabel(reservation.startDate, reservation.endDate)}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function MachineAvailabilityMiniCalendar({
+function MachineAvailabilityCalendar({
   reservations,
   selectedStart,
   selectedEnd,
@@ -1602,41 +1660,52 @@ function MachineAvailabilityMiniCalendar({
   selectedEnd: string;
 }) {
   const days = buildMachineCalendarWindow(reservations, selectedStart, selectedEnd);
+  const monthGroups = groupDaysByMonth(days);
   const selectedStartDate = parseDate(selectedStart);
   const selectedEndDate = parseDate(selectedEnd);
 
   return (
     <div className="rounded-lg border border-border bg-background p-3">
-      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase text-muted-foreground">
-        {['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((day, index) => (
-          <div key={`${day}-${index}`} className="py-1">{day}</div>
-        ))}
-      </div>
-      <div className="mt-1 grid grid-cols-7 gap-1">
-        {days.map((day) => {
-          const occupied = reservations.some((reservation) => {
-            const start = parseDate(reservation.startDate);
-            const end = parseDate(reservation.endDate);
-            return start && end && dateRangesOverlap(day, day, start, end);
-          });
-          const selected = selectedStartDate && selectedEndDate && dateRangesOverlap(day, day, selectedStartDate, selectedEndDate);
-
-          return (
-            <div
-              key={day.toISOString()}
-              className={`flex h-8 items-center justify-center rounded-md border text-[11px] font-semibold ${
-                selected
-                  ? 'border-sky-400 bg-sky-100 text-sky-800'
-                  : occupied
-                    ? 'border-amber-200 bg-amber-100 text-amber-800'
-                    : 'border-emerald-100 bg-emerald-50 text-emerald-700'
-              }`}
-              title={`${formatDisplayDate(day)} ${occupied ? 'ocupado' : 'disponible'}${selected ? ' - rango elegido' : ''}`}
-            >
-              {day.getDate()}
+      <div className="grid gap-3 lg:grid-cols-2">
+        {monthGroups.map((month) => (
+          <div key={month.key} className="rounded-md border border-border/70 bg-muted/10 p-3">
+            <p className="mb-2 text-center text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{month.label}</p>
+            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase text-muted-foreground">
+              {['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((day, index) => (
+                <div key={`${month.key}-${day}-${index}`} className="py-1">{day}</div>
+              ))}
             </div>
-          );
-        })}
+            <div className="mt-1 grid grid-cols-7 gap-1">
+              {Array.from({ length: getMondayFirstOffset(month.days[0]) }).map((_, index) => (
+                <div key={`${month.key}-blank-${index}`} className="h-8 rounded-md border border-transparent sm:h-9" />
+              ))}
+              {month.days.map((day) => {
+                const occupied = reservations.some((reservation) => {
+                  const start = parseDate(reservation.startDate);
+                  const end = parseDate(reservation.endDate);
+                  return start && end && dateRangesOverlap(day, day, start, end);
+                });
+                const selected = selectedStartDate && selectedEndDate && dateRangesOverlap(day, day, selectedStartDate, selectedEndDate);
+
+                return (
+                  <div
+                    key={day.toISOString()}
+                    className={`flex h-8 items-center justify-center rounded-md border text-[11px] font-semibold sm:h-9 ${
+                      selected
+                        ? 'border-sky-400 bg-sky-100 text-sky-800 dark:border-sky-400/70 dark:bg-sky-500/20 dark:text-sky-100'
+                        : occupied
+                          ? 'border-amber-200 bg-amber-100 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/20 dark:text-amber-100'
+                          : 'border-emerald-100 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100'
+                    }`}
+                    title={`${formatDisplayDate(day)} ${occupied ? 'ocupado' : 'disponible'}${selected ? ' - rango elegido' : ''}`}
+                  >
+                    {day.getDate()}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
       <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
