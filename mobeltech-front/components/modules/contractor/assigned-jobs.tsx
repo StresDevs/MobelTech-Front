@@ -793,9 +793,50 @@ export default function AssignedJobs() {
     return new Date().toISOString().slice(0, 10);
   }
 
+  function applyRealPhaseUpdate(
+    previousJob: ProductionOrderRecord,
+    updatedJob: ProductionOrderRecord,
+    phase: ProductionPhase,
+    action: 'start' | 'finish',
+    date: string,
+  ): ProductionOrderRecord {
+    const existingRealPhase = updatedJob.schedulePhases?.find((entry) => entry.type === 'real' && entry.phase === phase);
+    const fallbackStartDate = existingRealPhase?.startDate ?? getRealPhase(previousJob, phase)?.startDate ?? date;
+    const nextRealPhase = {
+      ...(existingRealPhase ?? {
+        id: `local-real-${updatedJob.id}-${phase}`,
+        type: 'real' as const,
+        phase,
+        startDate: fallbackStartDate,
+        endDate: fallbackStartDate,
+        cuttingMachine: null,
+      }),
+      startDate: action === 'start' ? date : fallbackStartDate,
+      endDate: action === 'finish' ? date : (existingRealPhase?.endDate ?? fallbackStartDate),
+    };
+    const schedulePhases = [
+      ...(updatedJob.schedulePhases ?? []).filter((entry) => !(entry.type === 'real' && entry.phase === phase)),
+      nextRealPhase,
+    ];
+    const items = updatedJob.items.map((item) => {
+      if (action !== 'finish') return item;
+      const otherPhases = item.phases?.filter((entry) => entry.phase !== phase) ?? [];
+      return {
+        ...item,
+        phases: [
+          ...otherPhases,
+          { phase, completed: 'true', completedDate: date },
+        ],
+      };
+    });
+
+    return { ...updatedJob, schedulePhases, items };
+  }
+
   async function updateJobRealPhase(jobId: string, phase: ProductionPhase, action: 'start' | 'finish') {
     if (!apiBase) return;
     const updateKey = `${jobId}-${phase}-${action}`;
+    const progressDate = todayDateString();
     setUpdatingRealPhaseKey(updateKey);
     setError(null);
     try {
@@ -805,13 +846,17 @@ export default function AssignedJobs() {
         body: JSON.stringify({
           phase,
           action,
-          date: todayDateString(),
+          date: progressDate,
           createdBy: user?.id ?? null,
         }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(readApiError(data, 'No se pudo actualizar el avance real.'));
-      setJobs((current) => current.map((job) => (job.id === jobId ? data as ProductionOrderRecord : job)));
+      setJobs((current) => current.map((job) => {
+        if (job.id !== jobId) return job;
+        const updatedJob = data && typeof data === 'object' ? data as ProductionOrderRecord : job;
+        return applyRealPhaseUpdate(job, updatedJob, phase, action, progressDate);
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error actualizando avance real.');
     } finally {
