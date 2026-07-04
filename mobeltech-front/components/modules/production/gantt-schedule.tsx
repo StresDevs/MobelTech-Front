@@ -53,6 +53,7 @@ type SchedulePhase = {
   phase: PhaseName;
   startDate: string;
   endDate: string;
+  completed?: string | null;
   cuttingMachine?: string | null;
 };
 

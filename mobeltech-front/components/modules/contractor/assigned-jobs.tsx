@@ -93,6 +93,7 @@ type ProductionOrderRecord = {
     phase: ProductionPhase;
     startDate: string;
     endDate: string;
+    completed?: string | null;
     cuttingMachine?: string | null;
   }>;
 };
@@ -767,6 +768,8 @@ export default function AssignedJobs() {
   }
 
   function isPhaseFinished(job: ProductionOrderRecord, phase: ProductionPhase) {
+    const realPhase = getRealPhase(job, phase);
+    if (realPhase?.completed === 'true') return true;
     if (job.items.length === 0) return false;
     return job.items.every((item) => item.phases?.some((entry) => entry.phase === phase && entry.completed === 'true'));
   }
@@ -809,13 +812,22 @@ export default function AssignedJobs() {
         phase,
         startDate: fallbackStartDate,
         endDate: fallbackStartDate,
+        completed: 'false',
         cuttingMachine: null,
       }),
       startDate: action === 'start' ? date : fallbackStartDate,
       endDate: action === 'finish' ? date : (existingRealPhase?.endDate ?? fallbackStartDate),
+      completed: action === 'finish' ? 'true' : (existingRealPhase?.completed ?? 'false'),
     };
+    const phaseIndex = PRODUCTION_PHASE_OPTIONS.findIndex((option) => option.value === phase);
     const schedulePhases = [
-      ...(updatedJob.schedulePhases ?? []).filter((entry) => !(entry.type === 'real' && entry.phase === phase)),
+      ...(updatedJob.schedulePhases ?? []).filter((entry) => {
+        if (entry.type !== 'real') return true;
+        if (entry.phase === phase) return false;
+        const entryIndex = PRODUCTION_PHASE_OPTIONS.findIndex((option) => option.value === entry.phase);
+        if (action === 'finish' && entryIndex > phaseIndex && entry.completed !== 'true') return false;
+        return true;
+      }),
       nextRealPhase,
     ];
     const items = updatedJob.items.map((item) => {
@@ -878,13 +890,14 @@ export default function AssignedJobs() {
           {PRODUCTION_PHASE_OPTIONS.map((phase) => {
             const started = isPhaseStarted(job, phase.value);
             const finished = isPhaseFinished(job, phase.value);
+            const open = started && !finished && nextStep?.phase === phase.value;
             return (
               <span
                 key={phase.value}
                 className={`h-2.5 w-8 rounded-full ${
-                  finished ? 'bg-emerald-500' : started ? 'bg-emerald-300' : 'bg-muted'
+                  finished ? 'bg-emerald-500' : open ? 'bg-emerald-300' : 'bg-muted'
                 }`}
-                title={`${phase.label}: ${finished ? 'finalizado' : started ? 'en curso' : 'pendiente'}`}
+                title={`${phase.label}: ${finished ? 'finalizado' : open ? 'en curso' : 'pendiente'}`}
               />
             );
           })}
@@ -925,6 +938,8 @@ export default function AssignedJobs() {
       );
     }
 
+    const nextStep = getNextRealPhaseStep(job);
+
     return (
       <div className="rounded-xl border border-border p-4">
         <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
@@ -939,6 +954,8 @@ export default function AssignedJobs() {
             const realPhase = getRealPhase(job, phase.value);
             const started = Boolean(realPhase);
             const finished = isPhaseFinished(job, phase.value);
+            const isCurrentPhase = nextStep?.phase === phase.value;
+            const open = started && !finished && isCurrentPhase;
             const startKey = `${job.id}-${phase.value}-start`;
             const finishKey = `${job.id}-${phase.value}-finish`;
 
@@ -947,10 +964,10 @@ export default function AssignedJobs() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className={`h-2.5 w-2.5 rounded-full ${finished ? 'bg-emerald-500' : started ? 'bg-emerald-300' : 'bg-muted-foreground/30'}`} />
+                      <span className={`h-2.5 w-2.5 rounded-full ${finished ? 'bg-emerald-500' : open ? 'bg-emerald-300' : 'bg-muted-foreground/30'}`} />
                       <p className="text-sm font-semibold">{phase.label}</p>
                       <Badge variant="outline" className="text-[10px]">
-                        {finished ? 'Finalizado' : started ? 'En curso' : 'Pendiente'}
+                        {finished ? 'Finalizado' : open ? 'En curso' : 'Pendiente'}
                       </Badge>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -963,7 +980,7 @@ export default function AssignedJobs() {
                       size="sm"
                       variant="outline"
                       className="h-8 gap-1.5"
-                      disabled={started || updatingRealPhaseKey === startKey}
+                      disabled={!isCurrentPhase || started || finished || updatingRealPhaseKey === startKey}
                       onClick={() => void updateJobRealPhase(job.id, phase.value, 'start')}
                     >
                       {updatingRealPhaseKey === startKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarRange className="h-3.5 w-3.5" />}
@@ -973,7 +990,7 @@ export default function AssignedJobs() {
                       type="button"
                       size="sm"
                       className="h-8 gap-1.5"
-                      disabled={!started || finished || updatingRealPhaseKey === finishKey}
+                      disabled={!isCurrentPhase || !started || finished || updatingRealPhaseKey === finishKey}
                       onClick={() => void updateJobRealPhase(job.id, phase.value, 'finish')}
                     >
                       {updatingRealPhaseKey === finishKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
