@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Box, ChevronRight, Download, FileArchive, History, Loader2, Search, Upload } from 'lucide-react';
+import { ArrowLeft, Box, ChevronRight, Download, FileArchive, Inbox, Loader2, Search, Send, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,7 @@ type FurnitureFile = {
   version: number;
   fileName: string;
   fileSize?: string | null;
+  fileKind?: 'initial' | 'contractor_final' | string;
   uploadedBy: string;
   notes?: string | null;
   createdAt: string;
@@ -181,12 +182,29 @@ export function FurnitureModule() {
 
   const selectedQuotation = visibleQuotations.find((quotation) => quotation.id === selectedQuotationId) ?? null;
   const selectedFiles = files.filter((file) => file.quotationId === selectedQuotation?.id);
+  const selectedReceivedFiles = selectedFiles.filter((file) => isReceivedFile(file));
+  const selectedSentFiles = selectedFiles.filter((file) => isSentFile(file));
   const environmentOptions = useMemo(() => {
     const environments = selectedQuotation?.environmentProjects ?? [];
     if (!isContractor || !contractorId) return environments;
     return environments.filter((environment) => environment.assignedContractorId === contractorId);
   }, [contractorId, isContractor, selectedQuotation]);
   const selectedEnvironment = environmentOptions.find((environment) => environment.id === selectedEnvironmentId) ?? environmentOptions[0] ?? null;
+
+  function isReceivedFile(file: FurnitureFile) {
+    return isContractor ? file.fileKind !== 'contractor_final' : file.fileKind === 'contractor_final';
+  }
+
+  function isSentFile(file: FurnitureFile) {
+    return !isReceivedFile(file);
+  }
+
+  function getLatestFile(rows: FurnitureFile[]) {
+    return [...rows].sort((left, right) => {
+      if (right.version !== left.version) return right.version - left.version;
+      return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+    })[0] ?? null;
+  }
 
   async function uploadFile() {
     if (!selectedFile || !selectedQuotation || !apiBase || !canUpload) return;
@@ -253,7 +271,7 @@ export function FurnitureModule() {
               {selectedEnvironment ? <Badge className="bg-emerald-100 text-emerald-700">{selectedEnvironment.ambience}</Badge> : null}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {selectedQuotation.clientName ?? 'Cliente'} · {selectedFiles.length} archivo{selectedFiles.length === 1 ? '' : 's'} SketchUp
+              {selectedQuotation.clientName ?? 'Cliente'} · {selectedReceivedFiles.length} recibido{selectedReceivedFiles.length === 1 ? '' : 's'} · {selectedSentFiles.length} enviado{selectedSentFiles.length === 1 ? '' : 's'}
             </p>
           </div>
         </div>
@@ -262,6 +280,23 @@ export function FurnitureModule() {
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-5">
+            <div className="grid gap-3 md:grid-cols-2">
+              <FileDirectionCard
+                icon="received"
+                title="Recibidos"
+                description={isContractor ? 'Archivos enviados por administración para este mueble.' : 'Archivos recibidos desde contratistas.'}
+                files={selectedReceivedFiles}
+                latestFile={getLatestFile(selectedReceivedFiles)}
+              />
+              <FileDirectionCard
+                icon="sent"
+                title="Enviados"
+                description={isContractor ? 'Archivos enviados por ti al equipo.' : 'Versiones enviadas al contratista.'}
+                files={selectedSentFiles}
+                latestFile={getLatestFile(selectedSentFiles)}
+              />
+            </div>
+
             <Card className="overflow-hidden">
               <div className="grid grid-cols-2 border-b border-border">
                 <div className="border-b-2 px-5 py-4 text-center text-sm font-medium" style={{ borderColor: '#eab676' }}>
@@ -379,6 +414,10 @@ export function FurnitureModule() {
           <Card className="p-8 text-center text-sm text-muted-foreground">No hay cotizaciones disponibles para Muebles.</Card>
         ) : visibleQuotations.map((quotation) => {
           const quotationFiles = files.filter((file) => file.quotationId === quotation.id);
+          const receivedFiles = quotationFiles.filter((file) => isReceivedFile(file));
+          const sentFiles = quotationFiles.filter((file) => isSentFile(file));
+          const latestReceivedFile = getLatestFile(receivedFiles);
+          const latestSentFile = getLatestFile(sentFiles);
           const environments = isContractor && contractorId
             ? (quotation.environmentProjects ?? []).filter((environment) => environment.assignedContractorId === contractorId)
             : quotation.environmentProjects ?? [];
@@ -388,7 +427,8 @@ export function FurnitureModule() {
               setSelectedQuotationId(quotation.id);
               setSelectedEnvironmentId(environments[0]?.id ?? '');
             }} className="cursor-pointer p-4 transition-all hover:border-foreground/20 hover:shadow-md">
-              <div className="flex items-center gap-4">
+              <div className="grid gap-4 lg:grid-cols-[minmax(260px,1.2fr)_minmax(190px,0.75fr)_minmax(190px,0.75fr)_auto] lg:items-center">
+                <div className="flex min-w-0 items-center gap-4">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
                   <Box className="h-5 w-5 text-muted-foreground" />
                 </div>
@@ -402,13 +442,81 @@ export function FurnitureModule() {
                     {quotation.clientName ?? 'Cliente'} · {environments.length || 1} ambiente{(environments.length || 1) === 1 ? '' : 's'} · {formatDate(quotation.createdDate)}
                   </p>
                 </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <DirectionColumn icon="received" title="Recibidos" count={receivedFiles.length} latestFile={latestReceivedFile} />
+                <DirectionColumn icon="sent" title="Enviados" count={sentFiles.length} latestFile={latestSentFile} />
+                <ChevronRight className="hidden h-4 w-4 text-muted-foreground lg:block" />
               </div>
             </Card>
           );
         })}
       </div>
     </div>
+  );
+}
+
+function DirectionColumn({
+  icon,
+  title,
+  count,
+  latestFile,
+}: {
+  icon: 'received' | 'sent';
+  title: string;
+  count: number;
+  latestFile: FurnitureFile | null;
+}) {
+  const Icon = icon === 'received' ? Inbox : Send;
+  return (
+    <div className="rounded-lg border border-border bg-muted/15 px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Icon className={`h-4 w-4 ${icon === 'received' ? 'text-sky-600' : 'text-emerald-600'}`} />
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
+        </div>
+        <Badge variant="outline">{count}</Badge>
+      </div>
+      <p className="mt-1 truncate text-sm font-medium">{latestFile ? latestFile.fileName : 'Sin archivos'}</p>
+      <p className="text-xs text-muted-foreground">{latestFile ? `v${latestFile.version} · ${formatDateTime(latestFile.createdAt)}` : 'Pendiente'}</p>
+    </div>
+  );
+}
+
+function FileDirectionCard({
+  icon,
+  title,
+  description,
+  files,
+  latestFile,
+}: {
+  icon: 'received' | 'sent';
+  title: string;
+  description: string;
+  files: FurnitureFile[];
+  latestFile: FurnitureFile | null;
+}) {
+  const Icon = icon === 'received' ? Inbox : Send;
+  return (
+    <Card className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${icon === 'received' ? 'bg-sky-100 text-sky-700' : 'bg-emerald-100 text-emerald-700'}`}>
+            <Icon className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">{title}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+          </div>
+        </div>
+        <Badge variant="outline">{files.length}</Badge>
+      </div>
+      <div className="mt-4 rounded-lg border border-border bg-muted/15 p-3">
+        <p className="truncate text-sm font-medium">{latestFile ? latestFile.fileName : 'Sin archivos registrados'}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {latestFile ? `Último: v${latestFile.version} · ${latestFile.uploadedBy} · ${formatDateTime(latestFile.createdAt)}` : 'Aún no hay movimiento en esta bandeja.'}
+        </p>
+      </div>
+    </Card>
   );
 }
 

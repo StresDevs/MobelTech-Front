@@ -151,6 +151,8 @@ type FurnitureFileRecord = {
   fileSize?: string | null;
   fileKind?: 'initial' | 'contractor_final' | string;
   version: number;
+  uploadedBy?: string | null;
+  createdAt?: string | Date | null;
   ambience?: string | null;
 };
 
@@ -458,21 +460,37 @@ export default function AssignedJobs() {
   }
 
   function getInitialSketchupFile(job: ProductionOrderRecord) {
+    return getInitialSketchupFiles(job)[0];
+  }
+
+  function sortFurnitureFilesByVersion(rows: FurnitureFileRecord[]) {
+    return [...rows].sort((left, right) => {
+      if (right.version !== left.version) return right.version - left.version;
+      return new Date(right.createdAt ?? 0).getTime() - new Date(left.createdAt ?? 0).getTime();
+    });
+  }
+
+  function getInitialSketchupFiles(job: ProductionOrderRecord) {
     const environment = getEnvironment(job);
-    return furnitureFiles.find((file) => (
+    return sortFurnitureFilesByVersion(furnitureFiles.filter((file) => (
       file.fileKind !== 'contractor_final' &&
       ((environment?.id && file.projectEnvironmentId === environment.id) ||
       (file.quotationId === job.quotationId && file.assignedContractorId === job.assignedContractorId))
-    ));
+    )));
   }
 
   function getFinalSketchupFile(job: ProductionOrderRecord) {
     const environment = getEnvironment(job);
-    return furnitureFiles.find((file) => (
+    return sortFurnitureFilesByVersion(furnitureFiles.filter((file) => (
       file.fileKind === 'contractor_final' &&
       ((environment?.id && file.projectEnvironmentId === environment.id) ||
       (file.quotationId === job.quotationId && file.assignedContractorId === job.assignedContractorId))
-    ));
+    )))[0];
+  }
+
+  function hasNewInitialSketchupVersion(job: ProductionOrderRecord) {
+    const versions = getInitialSketchupFiles(job);
+    return versions.length > 1 || Number(versions[0]?.version ?? 1) > 1;
   }
 
   function getPaymentPlan(job: ProductionOrderRecord) {
@@ -1494,6 +1512,7 @@ export default function AssignedJobs() {
                 const client = getClient(job);
                 const description = getLeadDescription(job);
                 const initialSketchupFile = getInitialSketchupFile(job);
+                const hasNewSketchupVersion = hasNewInitialSketchupVersion(job);
                 const finalSketchupFile = getFinalSketchupFile(job);
                 const environment = getEnvironment(job);
                 const plan = getPaymentPlan(job);
@@ -1505,17 +1524,25 @@ export default function AssignedJobs() {
                       <Button size="sm" variant="ghost" className="mt-1 h-7 px-2 text-xs" onClick={() => openJobDetail(job.id)}>
                         Ver detalle
                       </Button>
-                      <p className="font-medium">Sketch UP inicial</p>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!initialSketchupFile}
-                        onClick={() => initialSketchupFile ? void downloadSketchupFile(initialSketchupFile) : undefined}
-                        className="mt-1 max-w-[190px] gap-2"
-                      >
-                        <Download className="h-4 w-4 shrink-0" />
-                        <span className="truncate">{initialSketchupFile?.fileName ?? environment?.sketchupFileName ?? 'Sin archivo .skp'}</span>
-                      </Button>
+                      <div className={`mt-2 rounded-lg border p-2 ${hasNewSketchupVersion ? 'border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100' : 'border-transparent bg-transparent'}`}>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium">Sketch UP inicial</p>
+                          {hasNewSketchupVersion ? <Badge className="bg-amber-200 text-amber-900 hover:bg-amber-200 dark:bg-amber-500/25 dark:text-amber-100">Nueva versión</Badge> : null}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!initialSketchupFile}
+                          onClick={() => initialSketchupFile ? void downloadSketchupFile(initialSketchupFile) : undefined}
+                          className="mt-1 max-w-[210px] gap-2 bg-background/80"
+                        >
+                          <Download className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{initialSketchupFile?.fileName ?? environment?.sketchupFileName ?? 'Sin archivo .skp'}</span>
+                        </Button>
+                        {hasNewSketchupVersion && initialSketchupFile ? (
+                          <p className="mt-1 text-xs font-medium">Recibiste v{initialSketchupFile.version} de {initialSketchupFile.uploadedBy ?? 'administración'}</p>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <p className="max-w-[260px] truncate font-medium">{description}</p>
