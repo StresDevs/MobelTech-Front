@@ -277,6 +277,7 @@ export default function AssignedJobs() {
   const [laborItems, setLaborItems] = useState<LaborCatalogItem[]>([]);
   const [contractor, setContractor] = useState<ContractorRecord | null>(null);
   const [editingLaborJobId, setEditingLaborJobId] = useState<string | null>(null);
+  const [laborSchedulePromptJobId, setLaborSchedulePromptJobId] = useState<string | null>(null);
   const [selectedLaborLines, setSelectedLaborLines] = useState<LaborDraftLine[]>([]);
   const [laborScheduleRows, setLaborScheduleRows] = useState<LaborScheduleRow[]>([]);
   const [laborDraftSavedAt, setLaborDraftSavedAt] = useState<string | null>(null);
@@ -371,14 +372,7 @@ export default function AssignedJobs() {
   useEffect(() => {
     if (!editingLaborJobId) return;
     const timeout = window.setTimeout(() => {
-      const savedAt = new Date().toISOString();
-      const draft: LaborDraftSnapshot = {
-        lines: selectedLaborLines,
-        schedule: laborScheduleRows,
-        savedAt,
-      };
-      window.localStorage.setItem(getLaborDraftKey(editingLaborJobId), JSON.stringify(draft));
-      setLaborDraftSavedAt(savedAt);
+      persistLaborDraft(editingLaborJobId, selectedLaborLines, laborScheduleRows);
     }, 650);
 
     return () => window.clearTimeout(timeout);
@@ -538,6 +532,15 @@ export default function AssignedJobs() {
     }
   }
 
+  function persistLaborDraft(jobId: string, lines: LaborDraftLine[], schedule: LaborScheduleRow[]) {
+    if (typeof window === 'undefined') return null;
+    const savedAt = new Date().toISOString();
+    const draft: LaborDraftSnapshot = { lines, schedule, savedAt };
+    window.localStorage.setItem(getLaborDraftKey(jobId), JSON.stringify(draft));
+    setLaborDraftSavedAt(savedAt);
+    return draft;
+  }
+
   function clearLaborDraft(jobId: string) {
     if (typeof window === 'undefined') return;
     window.localStorage.removeItem(getLaborDraftKey(jobId));
@@ -585,12 +588,6 @@ export default function AssignedJobs() {
     setSelectedLaborLines((current) => current.filter((_, currentIndex) => currentIndex !== index));
   }
 
-  function updateLaborSchedule(index: number, field: 'startDate' | 'endDate', value: string) {
-    setLaborScheduleRows((current) =>
-      current.map((row, currentIndex) => (currentIndex === index ? { ...row, [field]: value } : row)),
-    );
-  }
-
   function openLaborForm(job: ProductionOrderRecord) {
     const plan = getPaymentPlan(job);
     const draft = readLaborDraft(job.id);
@@ -619,10 +616,6 @@ export default function AssignedJobs() {
     setSavingLabor(true);
     setError(null);
     try {
-      const invalidSchedule = laborScheduleRows.find((row) => !row.startDate || !row.endDate || new Date(row.endDate) < new Date(row.startDate));
-      if (invalidSchedule) {
-        throw new Error('Completa el cronograma estimado por etapas antes de enviar la solicitud.');
-      }
       const lines = selectedLaborLines.map((line, index) => {
         const measuredTotal = getDraftLineMeasuredTotal(line);
         const plannedAmount = measuredTotal * line.unitPrice;
@@ -645,26 +638,9 @@ export default function AssignedJobs() {
       if (totalAmount <= 0) {
         throw new Error('Agrega medidas válidas para calcular la mano de obra.');
       }
-      const response = await fetch(`${apiBase}/api/contractor-finance/plans`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contractorId: contractor.id,
-          productionOrderId: job.id,
-          totalAmount,
-          lines,
-          estimatedSchedule: laborScheduleRows,
-        }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(readApiError(data, 'No se pudo enviar el presupuesto de mano de obra.'));
-      const saved = data as ContractorPaymentPlan;
-      setPaymentPlans((current) => {
-        const withoutCurrent = current.filter((plan) => plan.productionOrderId !== job.id);
-        return saved ? [...withoutCurrent, saved] : current;
-      });
-      clearLaborDraft(job.id);
+      persistLaborDraft(job.id, selectedLaborLines, laborScheduleRows.length ? laborScheduleRows : createEmptyLaborSchedule());
       setEditingLaborJobId(null);
+      setLaborSchedulePromptJobId(job.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error guardando mano de obra.');
     } finally {
@@ -1003,6 +979,7 @@ export default function AssignedJobs() {
   }
 
   const laborJob = jobs.find((job) => job.id === editingLaborJobId) ?? null;
+  const laborSchedulePromptJob = jobs.find((job) => job.id === laborSchedulePromptJobId) ?? null;
   const advanceJob = jobs.find((job) => job.id === advanceJobId) ?? null;
   const advancePlan = advanceJob ? getPaymentPlan(advanceJob) : undefined;
   const activeAdvanceRequest = advanceJob ? getAdvanceRequest(advanceJob) : undefined;
@@ -1013,10 +990,7 @@ export default function AssignedJobs() {
     return !alreadyAdded && matchesSearch;
   });
   const laborTotal = selectedLaborLines.reduce((sum, line) => sum + getDraftLinePartial(line), 0);
-  const laborScheduleComplete = laborScheduleRows.length === PRODUCTION_PHASE_OPTIONS.length && laborScheduleRows.every((row) => (
-    row.startDate && row.endDate && new Date(row.endDate) >= new Date(row.startDate)
-  ));
-  const canSubmitLaborPlan = selectedLaborLines.length > 0 && laborTotal > 0 && laborScheduleComplete;
+  const canSaveLaborDraft = selectedLaborLines.length > 0 && laborTotal > 0;
   const selectedJob = selectedJobId ? jobs.find((job) => job.id === selectedJobId) ?? null : null;
   const selectedJobClient = selectedJob ? getClient(selectedJob) : null;
   const selectedJobEnvironment = selectedJob ? getEnvironment(selectedJob) : null;
@@ -1541,45 +1515,58 @@ export default function AssignedJobs() {
                     </tbody>
                   </table>
                 </div>
-
-                <div className="rounded-lg border border-border/70 bg-muted/20 p-4">
-                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold">Cronograma estimado por etapas</p>
-                      <p className="text-xs text-muted-foreground">Es obligatorio para enviar la solicitud a revisión.</p>
-                    </div>
-                    <Badge className={laborScheduleComplete ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100'}>
-                      {laborScheduleComplete ? 'Completo' : 'Pendiente'}
-                    </Badge>
-                  </div>
-                  <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                    {laborScheduleRows.map((row, index) => (
-                      <div key={row.phaseKey} className="rounded-md border border-border/70 bg-background p-3">
-                        <p className="text-sm font-medium">{row.phaseLabel}</p>
-                        <div className="mt-2 grid gap-2">
-                          <Input type="date" value={row.startDate} onChange={(event) => updateLaborSchedule(index, 'startDate', event.target.value)} />
-                          <Input type="date" value={row.endDate} onChange={(event) => updateLaborSchedule(index, 'endDate', event.target.value)} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
               </div>
 
               <div className="flex flex-col gap-3 border-t border-border/70 bg-background px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center justify-between rounded-lg bg-sky-50 px-3 py-2 text-sm dark:bg-sky-500/10 sm:min-w-80">
                   <div>
                     <span className="font-medium text-sky-800 dark:text-sky-100">Total mano de obra</span>
-                    {!laborScheduleComplete ? <p className="text-xs font-normal text-amber-700 dark:text-amber-200">Completa el cronograma para enviar.</p> : null}
+                    <p className="text-xs font-normal text-muted-foreground">El cronograma se completa en la página de cronograma.</p>
                   </div>
                   <span className="font-mono font-semibold text-sky-800 dark:text-sky-100">{formatCurrency(laborTotal)}</span>
                 </div>
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <Button variant="outline" onClick={() => setEditingLaborJobId(null)}>Cerrar</Button>
-                  <Button disabled={savingLabor || !canSubmitLaborPlan} onClick={() => void saveLaborPlan(laborJob)}>
-                    {savingLabor ? 'Enviando...' : 'Enviar a revisión'}
+                  <Button disabled={savingLabor || !canSaveLaborDraft} onClick={() => void saveLaborPlan(laborJob)}>
+                    {savingLabor ? 'Guardando...' : 'Continuar al cronograma'}
                   </Button>
                 </div>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!laborSchedulePromptJob} onOpenChange={(open) => { if (!open) setLaborSchedulePromptJobId(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Falta completar el cronograma</DialogTitle>
+            <DialogDescription>
+              La mano de obra quedó guardada como borrador. Para enviar la solicitud a revisión debes vincularla con el cronograma del trabajo.
+            </DialogDescription>
+          </DialogHeader>
+          {laborSchedulePromptJob ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border/70 bg-muted/20 p-4">
+                <p className="text-sm font-semibold">{getLeadDescription(laborSchedulePromptJob)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Trabajo {laborSchedulePromptJob.id.slice(0, 8)}</p>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  En cronograma verás este formulario pendiente y podrás terminar el proceso desde ahí.
+                </p>
+              </div>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button variant="outline" onClick={() => setLaborSchedulePromptJobId(null)}>Después</Button>
+                <Button
+                  onClick={() => {
+                    const jobId = laborSchedulePromptJob.id;
+                    setLaborSchedulePromptJobId(null);
+                    router.push(`/schedule?laborJobId=${encodeURIComponent(jobId)}`);
+                  }}
+                  className="gap-2"
+                >
+                  <CalendarRange className="h-4 w-4" />
+                  Llenar cronograma
+                </Button>
               </div>
             </div>
           ) : null}

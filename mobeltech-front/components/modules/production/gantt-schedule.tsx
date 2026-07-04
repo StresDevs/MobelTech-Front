@@ -20,8 +20,10 @@ import {
   Loader2,
   PencilLine,
   Save,
+  WalletCards,
   X,
 } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 
 type PhaseName = 'cortado' | 'canteado' | 'ensamblado' | 'instalacion' | 'entregado';
 type ScheduleViewMode = 'mine' | 'global';
@@ -98,6 +100,36 @@ type MachineReservation = {
   endDate: string;
 };
 
+type LaborDraftLine = {
+  id?: string;
+  itemKey: string;
+  label: string;
+  unit: string;
+  width: string;
+  heightQuantity: string;
+  unitPrice: number;
+  enableHeight: boolean;
+  enableWidthQuantity: boolean;
+};
+
+type LaborScheduleRow = {
+  phaseKey: PhaseName;
+  phaseLabel: string;
+  startDate: string;
+  endDate: string;
+};
+
+type LaborDraftSnapshot = {
+  lines: LaborDraftLine[];
+  schedule: LaborScheduleRow[];
+  savedAt: string;
+};
+
+type PendingLaborDraft = {
+  jobId: string;
+  draft: LaborDraftSnapshot;
+};
+
 const PHASES: Array<{ key: PhaseName; label: string; color: string }> = [
   { key: 'cortado', label: 'Corte', color: '#3b82f6' },
   { key: 'canteado', label: 'Canteado', color: '#f59e0b' },
@@ -154,6 +186,26 @@ function formatDisplayDate(value?: string | Date | null) {
 function formatRangeLabel(startDate?: string | null, endDate?: string | null) {
   if (!startDate || !endDate) return 'Sin rango';
   return `${formatShortDate(startDate)} - ${formatShortDate(endDate)}`;
+}
+
+function formatCurrency(amount: number) {
+  return `Bs. ${Number(amount || 0).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function parseMeasure(value: string | number | undefined) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getDraftLineMeasuredTotal(line: LaborDraftLine) {
+  const height = line.enableHeight ? parseMeasure(line.width) : 1;
+  const widthQuantity = line.enableWidthQuantity ? parseMeasure(line.heightQuantity) : 1;
+  const calculated = height * widthQuantity;
+  return calculated > 0 ? calculated : 0;
+}
+
+function getDraftTotal(lines: LaborDraftLine[]) {
+  return lines.reduce((sum, line) => sum + (getDraftLineMeasuredTotal(line) * Number(line.unitPrice || 0)), 0);
 }
 
 function getDefaultActualPlan(startDate?: string | null) {
@@ -370,10 +422,13 @@ function assignPhaseLanes(rows: SchedulePhase[]) {
 export function GanttSchedule() {
   const { user } = useAuth();
   const { currentRole } = useRole();
+  const searchParams = useSearchParams();
+  const laborJobIdParam = searchParams.get('laborJobId');
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [orders, setOrders] = useState<ProductionOrder[]>([]);
   const [contractors, setContractors] = useState<Contractor[]>([]);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
@@ -387,6 +442,8 @@ export function GanttSchedule() {
     order: ProductionOrder;
     phases: EditablePhase[];
   } | null>(null);
+  const [pendingLaborDrafts, setPendingLaborDrafts] = useState<PendingLaborDraft[]>([]);
+  const [openedLaborJobIdParam, setOpenedLaborJobIdParam] = useState<string | null>(null);
 
   const isContractor = currentRole === 'contractor';
 
@@ -434,6 +491,54 @@ export function GanttSchedule() {
     if (!user) return null;
     return contractors.find((contractor) => contractor.userId === user.id || contractor.id === user.id) ?? null;
   }, [contractors, user]);
+
+  function getLaborDraftPrefix() {
+    if (!user || !myContractor) return null;
+    return `mobeltech:labor-payment-draft:${user.id}:${myContractor.id}:`;
+  }
+
+  function getLaborDraftKey(jobId: string) {
+    const prefix = getLaborDraftPrefix();
+    return prefix ? `${prefix}${jobId}` : null;
+  }
+
+  function readPendingLaborDrafts() {
+    if (typeof window === 'undefined') return [];
+    const prefix = getLaborDraftPrefix();
+    if (!prefix) return [];
+
+    return Object.keys(window.localStorage)
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => {
+        try {
+          const draft = JSON.parse(window.localStorage.getItem(key) ?? '') as LaborDraftSnapshot;
+          if (!Array.isArray(draft.lines) || draft.lines.length === 0 || getDraftTotal(draft.lines) <= 0) return null;
+          return { jobId: key.slice(prefix.length), draft };
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry): entry is PendingLaborDraft => Boolean(entry));
+  }
+
+  function refreshPendingLaborDrafts() {
+    setPendingLaborDrafts(readPendingLaborDrafts());
+  }
+
+  function getPendingLaborDraft(jobId: string) {
+    return pendingLaborDrafts.find((entry) => entry.jobId === jobId)?.draft ?? null;
+  }
+
+  function clearPendingLaborDraft(jobId: string) {
+    if (typeof window === 'undefined') return;
+    const key = getLaborDraftKey(jobId);
+    if (key) window.localStorage.removeItem(key);
+    refreshPendingLaborDrafts();
+  }
+
+  useEffect(() => {
+    refreshPendingLaborDrafts();
+  }, [user?.id, myContractor?.id, orders.length]);
 
   const visibleOrders = useMemo(() => {
     if (!isContractor) return orders;
@@ -552,11 +657,23 @@ export function GanttSchedule() {
 
   function startEditing(order: ProductionOrder) {
     setError(null);
+    setSuccessMessage(null);
     setEditing({
       order,
       phases: normalizeActualPhases(order.schedulePhases, order.startDate),
     });
   }
+
+  useEffect(() => {
+    if (!laborJobIdParam || !myContractor || editing) return;
+    if (openedLaborJobIdParam === laborJobIdParam) return;
+    const order = orders.find((entry) => entry.id === laborJobIdParam && entry.assignedContractorId === myContractor.id);
+    const draft = pendingLaborDrafts.find((entry) => entry.jobId === laborJobIdParam);
+    if (!order || !draft) return;
+    setScheduleViewMode('mine');
+    setOpenedLaborJobIdParam(laborJobIdParam);
+    startEditing(order);
+  }, [laborJobIdParam, myContractor?.id, orders, pendingLaborDrafts, editing, openedLaborJobIdParam]);
 
   function closeEditing() {
     if (saving) return;
@@ -587,6 +704,61 @@ export function GanttSchedule() {
         )),
       };
     });
+  }
+
+  function getEstimatedScheduleFromPhases(phases: EditablePhase[]): LaborScheduleRow[] {
+    return phases.map((phase) => ({
+      phaseKey: phase.phase,
+      phaseLabel: PHASES.find((item) => item.key === phase.phase)?.label ?? phase.phase,
+      startDate: phase.startDate,
+      endDate: phase.endDate,
+    }));
+  }
+
+  async function submitLaborPaymentRequest(order: ProductionOrder, phases: EditablePhase[]) {
+    if (!apiBase || !myContractor) return;
+    const draft = getPendingLaborDraft(order.id);
+    if (!draft) return;
+
+    const lines = draft.lines.map((line, index) => {
+      const measuredTotal = getDraftLineMeasuredTotal(line);
+      const plannedAmount = measuredTotal * Number(line.unitPrice || 0);
+      return {
+        id: line.id,
+        phaseKey: line.itemKey,
+        phaseLabel: line.label,
+        unit: line.unit,
+        width: line.enableHeight ? parseMeasure(line.width) : 0,
+        heightQuantity: line.enableWidthQuantity ? parseMeasure(line.heightQuantity) : 0,
+        enableHeight: line.enableHeight,
+        enableWidthQuantity: line.enableWidthQuantity,
+        measuredTotal,
+        unitPrice: line.unitPrice,
+        plannedAmount,
+        sortOrder: index,
+      };
+    });
+    const totalAmount = lines.reduce((sum, line) => sum + line.plannedAmount, 0);
+    if (totalAmount <= 0) {
+      throw new Error('La mano de obra pendiente no tiene un total válido.');
+    }
+
+    const response = await fetch(`${apiBase}/api/contractor-finance/plans`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contractorId: myContractor.id,
+        productionOrderId: order.id,
+        totalAmount,
+        lines,
+        estimatedSchedule: getEstimatedScheduleFromPhases(phases),
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(data?.detail || data?.error || data?.message || 'No se pudo enviar la solicitud de pago de mano de obra.');
+    }
+    clearPendingLaborDraft(order.id);
   }
 
   const machineReservations = useMemo<MachineReservation[]>(() => {
@@ -630,6 +802,7 @@ export function GanttSchedule() {
 
     setSaving(true);
     setError(null);
+    setSuccessMessage(null);
     try {
       const response = await fetch(`${apiBase}/api/production-orders/${editing.order.id}/schedule`, {
         method: 'PUT',
@@ -647,6 +820,13 @@ export function GanttSchedule() {
       }
 
       setOrders((current) => current.map((order) => (order.id === body.id ? body : order)));
+      const hadPendingLaborDraft = Boolean(getPendingLaborDraft(editing.order.id));
+      if (hadPendingLaborDraft) {
+        await submitLaborPaymentRequest(editing.order, editing.phases);
+        setSuccessMessage('Cronograma guardado y solicitud de pago enviada a revisión.');
+      } else {
+        setSuccessMessage('Cronograma guardado correctamente.');
+      }
       setEditing(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error guardando cronograma.');
@@ -769,6 +949,60 @@ export function GanttSchedule() {
       {error ? (
         <Card className="border-red-200 bg-red-50/90 p-4 text-sm text-red-700">
           {error}
+        </Card>
+      ) : null}
+
+      {successMessage ? (
+        <Card className="border-emerald-200 bg-emerald-50/90 p-4 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+          {successMessage}
+        </Card>
+      ) : null}
+
+      {isContractor && pendingLaborDrafts.length > 0 ? (
+        <Card className="overflow-hidden border-amber-200 bg-amber-50/70 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <div className="border-b border-amber-200/70 px-4 py-3 dark:border-amber-500/20">
+            <div className="flex items-center gap-2">
+              <WalletCards className="h-4 w-4 text-amber-700 dark:text-amber-200" />
+              <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">Mano de obra pendiente de cronograma</p>
+            </div>
+            <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-100/75">
+              Estos formularios ya tienen mano de obra cargada. Guarda sus fases aquí para enviar la solicitud a revisión.
+            </p>
+          </div>
+          <div className="grid gap-3 p-4 lg:grid-cols-2">
+            {pendingLaborDrafts.map(({ jobId, draft }) => {
+              const order = orders.find((entry) => entry.id === jobId);
+              const total = getDraftTotal(draft.lines);
+              return (
+                <div key={jobId} className="rounded-lg border border-amber-200/70 bg-background p-4 dark:border-amber-500/20">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{order ? getFurnitureName(order) : `Trabajo ${jobId.slice(0, 8)}`}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {draft.lines.length} actividades · {formatCurrency(total)}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Borrador guardado {new Date(draft.savedAt).toLocaleString('es-BO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      disabled={!order}
+                      onClick={() => {
+                        if (!order) return;
+                        setScheduleViewMode('mine');
+                        startEditing(order);
+                      }}
+                      className="gap-2"
+                    >
+                      <CalendarRange className="h-4 w-4" />
+                      Completar
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </Card>
       ) : null}
 
@@ -993,6 +1227,15 @@ export function GanttSchedule() {
               Puedes planificar fases en el mismo dia o en rangos superpuestos. La disponibilidad de cortadoras se muestra como referencia para elegir mejor tus fechas.
             </div>
 
+            {getPendingLaborDraft(editing.order.id) ? (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                <p className="font-semibold">Este cronograma cerrará una solicitud de pago pendiente.</p>
+                <p className="mt-1">
+                  Al guardar, el sistema enviará a revisión la mano de obra cargada para este trabajo junto con estas fechas.
+                </p>
+              </div>
+            ) : null}
+
             <div className="mt-5 grid gap-3">
               {editing.phases.map((phase, index) => {
                 const phaseConfig = PHASES.find((item) => item.key === phase.phase);
@@ -1136,7 +1379,7 @@ export function GanttSchedule() {
               <Button variant="outline" onClick={closeEditing} disabled={saving}>Cancelar</Button>
               <Button onClick={() => void saveSchedule()} disabled={saving} className="gap-2">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Guardar cronograma
+                {getPendingLaborDraft(editing.order.id) ? 'Guardar y enviar solicitud' : 'Guardar cronograma'}
               </Button>
             </div>
           </Card>
