@@ -18,8 +18,10 @@ import {
   Clock3,
   Eye,
   Loader2,
+  Plus,
   PencilLine,
   Save,
+  Settings2,
   WalletCards,
   X,
 } from 'lucide-react';
@@ -27,7 +29,6 @@ import { useSearchParams } from 'next/navigation';
 
 type PhaseName = 'cortado' | 'canteado' | 'ensamblado' | 'instalacion' | 'entregado';
 type ScheduleViewMode = 'mine' | 'global';
-type CuttingMachine = 'cortadora-1' | 'cortadora-2';
 
 type ProductionOrder = {
   id: string;
@@ -52,14 +53,14 @@ type SchedulePhase = {
   phase: PhaseName;
   startDate: string;
   endDate: string;
-  cuttingMachine?: CuttingMachine | null;
+  cuttingMachine?: string | null;
 };
 
 type EditablePhase = {
   phase: PhaseName;
   startDate: string;
   endDate: string;
-  cuttingMachine: CuttingMachine | null;
+  cuttingMachine: string | null;
 };
 
 type Contractor = {
@@ -100,6 +101,14 @@ type MachineReservation = {
   endDate: string;
 };
 
+type PhaseMachine = {
+  id: string;
+  phase: PhaseName;
+  name: string;
+  active: boolean;
+  sortOrder: number;
+};
+
 type LaborDraftLine = {
   id?: string;
   itemKey: string;
@@ -136,11 +145,6 @@ const PHASES: Array<{ key: PhaseName; label: string; color: string }> = [
   { key: 'ensamblado', label: 'Ensamblado', color: '#10b981' },
   { key: 'instalacion', label: 'Instalacion', color: '#8b5cf6' },
   { key: 'entregado', label: 'Entrega', color: '#14b8a6' },
-];
-
-const CUTTING_MACHINES: Array<{ value: CuttingMachine; label: string }> = [
-  { value: 'cortadora-1', label: 'Cortadora 1' },
-  { value: 'cortadora-2', label: 'Cortadora 2' },
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -208,38 +212,45 @@ function getDraftTotal(lines: LaborDraftLine[]) {
   return lines.reduce((sum, line) => sum + (getDraftLineMeasuredTotal(line) * Number(line.unitPrice || 0)), 0);
 }
 
-function getDefaultActualPlan(startDate?: string | null) {
-  let cursor = startDate ? String(startDate).slice(0, 10) : toInputDate(new Date());
-  return PHASES.map((phase) => {
-    const start = cursor;
-    const end = addDays(start, phase.key === 'entregado' ? 0 : 2);
-    cursor = addDays(end, 1);
+function getDefaultActualPlan(startDate?: string | null, endDate?: string | null) {
+  const start = parseDate(startDate) ?? new Date();
+  const end = parseDate(endDate) ?? new Date(start.getTime() + (PHASES.length * DAY_MS));
+  const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / DAY_MS) + 1);
+
+  return PHASES.map((phase, index) => {
+    const phaseStartOffset = Math.floor((index * totalDays) / PHASES.length);
+    const phaseEndOffset = index === PHASES.length - 1
+      ? totalDays - 1
+      : Math.max(phaseStartOffset, Math.floor(((index + 1) * totalDays) / PHASES.length) - 1);
+    const phaseStart = new Date(start.getTime() + (phaseStartOffset * DAY_MS));
+    const phaseEnd = new Date(start.getTime() + (phaseEndOffset * DAY_MS));
     return {
       phase: phase.key,
-      startDate: start,
-      endDate: end,
-      cuttingMachine: phase.key === 'cortado' ? 'cortadora-1' as CuttingMachine : null,
+      startDate: toLocalDateString(phaseStart),
+      endDate: toLocalDateString(phaseEnd),
+      cuttingMachine: null,
     };
   });
 }
 
-function normalizeActualPhases(rows: SchedulePhase[] | undefined, fallbackStart?: string | null) {
+function normalizeActualPhases(rows: SchedulePhase[] | undefined, fallbackStart?: string | null, fallbackEnd?: string | null, machines: PhaseMachine[] = []) {
   const existing = rows?.filter((row) => row.type === 'actual') ?? [];
-  const fallback = getDefaultActualPlan(fallbackStart);
+  const fallback = getDefaultActualPlan(fallbackStart, fallbackEnd);
   return PHASES.map((phase, index) => {
     const found = existing.find((row) => row.phase === phase.key);
+    const defaultMachine = machines.find((machine) => machine.phase === phase.key && machine.active);
     return {
       phase: phase.key,
       startDate: found?.startDate?.slice(0, 10) ?? fallback[index].startDate,
       endDate: found?.endDate?.slice(0, 10) ?? fallback[index].endDate,
-      cuttingMachine: phase.key === 'cortado'
-        ? (found?.cuttingMachine as CuttingMachine | null | undefined) ?? 'cortadora-1'
-        : null,
+      cuttingMachine: found?.cuttingMachine ?? defaultMachine?.id ?? null,
     };
   });
 }
 
-function validatePhaseRanges(phases: EditablePhase[]) {
+function validatePhaseRanges(phases: EditablePhase[], order: ProductionOrder, machines: PhaseMachine[]) {
+  const tentativeStart = parseDate(order.startDate);
+  const tentativeEnd = parseDate(order.estimatedDeliveryDate);
   for (const phase of phases) {
     const start = parseDate(phase.startDate);
     const end = parseDate(phase.endDate);
@@ -251,11 +262,16 @@ function validatePhaseRanges(phases: EditablePhase[]) {
     if (end < start) {
       return 'La fecha final de cada fase debe ser igual o posterior a su inicio.';
     }
-  }
 
-  const cuttingPhase = phases.find((phase) => phase.phase === 'cortado');
-  if (!cuttingPhase?.cuttingMachine) {
-    return 'Selecciona la cortadora de la fase de corte.';
+    if (tentativeStart && tentativeEnd && (start < tentativeStart || end > tentativeEnd)) {
+      return `Las fases deben estar dentro del cronograma tentativo (${formatDisplayDate(order.startDate)} - ${formatDisplayDate(order.estimatedDeliveryDate)}).`;
+    }
+
+    const phaseMachines = machines.filter((machine) => machine.phase === phase.phase && machine.active);
+    if (phaseMachines.length > 0 && !phase.cuttingMachine) {
+      const label = PHASES.find((item) => item.key === phase.phase)?.label ?? phase.phase;
+      return `Selecciona una máquina para la fase ${label}.`;
+    }
   }
 
   return null;
@@ -434,9 +450,15 @@ export function GanttSchedule() {
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [phaseMachines, setPhaseMachines] = useState<PhaseMachine[]>([]);
   const [selectedContractorFilter, setSelectedContractorFilter] = useState('all');
   const [selectedClientFilter, setSelectedClientFilter] = useState('all');
   const [scheduleViewMode, setScheduleViewMode] = useState<ScheduleViewMode>('mine');
+  const [machineManagerOpen, setMachineManagerOpen] = useState(false);
+  const [editingMachineId, setEditingMachineId] = useState<string | null>(null);
+  const [machinePhase, setMachinePhase] = useState<PhaseName>('cortado');
+  const [machineName, setMachineName] = useState('');
+  const [savingMachine, setSavingMachine] = useState(false);
   const [visibleMonthIndex, setVisibleMonthIndex] = useState(0);
   const [editing, setEditing] = useState<{
     order: ProductionOrder;
@@ -446,6 +468,7 @@ export function GanttSchedule() {
   const [openedLaborJobIdParam, setOpenedLaborJobIdParam] = useState<string | null>(null);
 
   const isContractor = currentRole === 'contractor';
+  const canManageMachines = currentRole === 'admin' || currentRole === 'architect';
 
   async function loadData() {
     if (!apiBase) {
@@ -457,12 +480,13 @@ export function GanttSchedule() {
     setLoading(true);
     setError(null);
     try {
-      const [ordersResponse, contractorsResponse, quotationsResponse, clientsResponse, projectsResponse] = await Promise.all([
+      const [ordersResponse, contractorsResponse, quotationsResponse, clientsResponse, projectsResponse, machinesResponse] = await Promise.all([
         fetch(`${apiBase}/api/production-orders`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/contractors`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/quotations`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/clients`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/projects`, { cache: 'no-store' }),
+        fetch(`${apiBase}/api/production-orders/phase-machines?activeOnly=false`, { cache: 'no-store' }),
       ]);
 
       if (!ordersResponse.ok) throw new Error('No se pudieron cargar las ordenes de produccion.');
@@ -470,12 +494,14 @@ export function GanttSchedule() {
       if (!quotationsResponse.ok) throw new Error('No se pudieron cargar las cotizaciones.');
       if (!clientsResponse.ok) throw new Error('No se pudieron cargar los clientes.');
       if (!projectsResponse.ok) throw new Error('No se pudieron cargar los proyectos.');
+      if (!machinesResponse.ok) throw new Error('No se pudieron cargar las maquinas de producción.');
 
       setOrders(await ordersResponse.json());
       setContractors(await contractorsResponse.json());
       setQuotations(await quotationsResponse.json());
       setClients(await clientsResponse.json());
       setProjects(await projectsResponse.json());
+      setPhaseMachines(await machinesResponse.json());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error cargando cronograma.');
     } finally {
@@ -565,6 +591,86 @@ export function GanttSchedule() {
 
   function getContractor(order: ProductionOrder) {
     return contractors.find((contractor) => contractor.id === order.assignedContractorId);
+  }
+
+  function getMachinesForPhase(phase: PhaseName, options?: { includeInactive?: boolean }) {
+    return phaseMachines
+      .filter((machine) => machine.phase === phase && (options?.includeInactive || machine.active))
+      .sort((left, right) => (left.sortOrder - right.sortOrder) || left.name.localeCompare(right.name));
+  }
+
+  function getMachineLabel(machineId?: string | null) {
+    if (!machineId) return 'Sin máquina';
+    return phaseMachines.find((machine) => machine.id === machineId)?.name ?? machineId;
+  }
+
+  function resetMachineForm() {
+    setEditingMachineId(null);
+    setMachinePhase('cortado');
+    setMachineName('');
+  }
+
+  function editMachine(machine: PhaseMachine) {
+    setEditingMachineId(machine.id);
+    setMachinePhase(machine.phase);
+    setMachineName(machine.name);
+  }
+
+  async function saveMachine() {
+    if (!apiBase || !machineName.trim()) {
+      setError('Escribe el nombre de la máquina.');
+      return;
+    }
+
+    setSavingMachine(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/production-orders/phase-machines${editingMachineId ? `/${editingMachineId}` : ''}`, {
+        method: editingMachineId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phase: machinePhase,
+          name: machineName.trim(),
+          active: 'true',
+          sortOrder: editingMachineId
+            ? phaseMachines.find((machine) => machine.id === editingMachineId)?.sortOrder ?? 0
+            : getMachinesForPhase(machinePhase, { includeInactive: true }).length + 1,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || data?.detail || 'No se pudo guardar la máquina.');
+      setPhaseMachines((current) => {
+        const withoutCurrent = current.filter((machine) => machine.id !== data.id);
+        return [...withoutCurrent, data as PhaseMachine].sort((left, right) => (
+          left.phase.localeCompare(right.phase) || (left.sortOrder - right.sortOrder) || left.name.localeCompare(right.name)
+        ));
+      });
+      resetMachineForm();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo guardar la máquina.');
+    } finally {
+      setSavingMachine(false);
+    }
+  }
+
+  async function toggleMachine(machine: PhaseMachine) {
+    if (!apiBase) return;
+    setSavingMachine(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/production-orders/phase-machines/${machine.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: machine.active ? 'false' : 'true' }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || data?.detail || 'No se pudo actualizar la máquina.');
+      setPhaseMachines((current) => current.map((entry) => (entry.id === machine.id ? data as PhaseMachine : entry)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo actualizar la máquina.');
+    } finally {
+      setSavingMachine(false);
+    }
   }
 
   function getFurnitureName(order: ProductionOrder) {
@@ -660,7 +766,7 @@ export function GanttSchedule() {
     setSuccessMessage(null);
     setEditing({
       order,
-      phases: normalizeActualPhases(order.schedulePhases, order.startDate),
+      phases: normalizeActualPhases(order.schedulePhases, order.startDate, order.estimatedDeliveryDate, phaseMachines),
     });
   }
 
@@ -694,13 +800,13 @@ export function GanttSchedule() {
     });
   }
 
-  function updateCuttingMachine(value: CuttingMachine) {
+  function updatePhaseMachine(phaseName: PhaseName, value: string) {
     setEditing((current) => {
       if (!current) return current;
       return {
         ...current,
         phases: current.phases.map((phase) => (
-          phase.phase === 'cortado' ? { ...phase, cuttingMachine: value } : phase
+          phase.phase === phaseName ? { ...phase, cuttingMachine: value } : phase
         )),
       };
     });
@@ -761,11 +867,8 @@ export function GanttSchedule() {
     clearPendingLaborDraft(order.id);
   }
 
-  const machineReservations = useMemo<MachineReservation[]>(() => {
-    if (!editing) return [];
-    const cuttingPhase = editing.phases.find((phase) => phase.phase === 'cortado');
-    if (!cuttingPhase?.cuttingMachine) return [];
-
+  function getMachineReservations(phaseDraft: EditablePhase): MachineReservation[] {
+    if (!editing || !phaseDraft.cuttingMachine) return [];
     return orders
       .flatMap((order) => {
         if (order.id === editing.order.id) return [];
@@ -773,8 +876,8 @@ export function GanttSchedule() {
         return (order.schedulePhases ?? [])
           .filter((phase) => (
             phase.type === 'actual' &&
-            phase.phase === 'cortado' &&
-            phase.cuttingMachine === cuttingPhase.cuttingMachine
+            phase.phase === phaseDraft.phase &&
+            phase.cuttingMachine === phaseDraft.cuttingMachine
           ))
           .map((phase) => ({
             orderId: order.id,
@@ -789,12 +892,12 @@ export function GanttSchedule() {
         const rightStart = parseDate(right.startDate)?.getTime() ?? 0;
         return leftStart - rightStart;
       });
-  }, [editing, orders]);
+  }
 
   async function saveSchedule() {
     if (!editing || !apiBase) return;
 
-    const validation = validatePhaseRanges(editing.phases);
+    const validation = validatePhaseRanges(editing.phases, editing.order, phaseMachines);
     if (validation) {
       setError(validation);
       return;
@@ -899,9 +1002,7 @@ export function GanttSchedule() {
           const placement = getTimelinePlacement(row.startDate, row.endDate);
           if (!placement) return null;
 
-          const machineLabel = row.phase === 'cortado'
-            ? CUTTING_MACHINES.find((machine) => machine.value === row.cuttingMachine)?.label
-            : null;
+          const machineLabel = row.cuttingMachine ? getMachineLabel(row.cuttingMachine) : null;
 
           return (
             <div
@@ -917,7 +1018,7 @@ export function GanttSchedule() {
             >
               <span className="block truncate">
                 {phaseConfig?.label}
-                {machineLabel ? ` · ${machineLabel.replace('Cortadora ', 'C')}` : ''}
+                {machineLabel ? ` · ${machineLabel}` : ''}
               </span>
             </div>
           );
@@ -944,6 +1045,12 @@ export function GanttSchedule() {
             El tiempo tentativo viene del proyecto y el contratista registra su cronograma por fases sobre ese marco.
           </p>
         </div>
+        {canManageMachines ? (
+          <Button type="button" variant="outline" className="gap-2 self-start lg:self-auto" onClick={() => setMachineManagerOpen(true)}>
+            <Settings2 className="h-4 w-4" />
+            Máquinas por fase
+          </Button>
+        ) : null}
       </div>
 
       {error ? (
@@ -1208,6 +1315,97 @@ export function GanttSchedule() {
         </div>
       </Card>
 
+      {machineManagerOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
+          <Card className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden">
+            <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+              <div>
+                <p className="text-lg font-semibold">Máquinas por fase</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Administra las máquinas que el contratista debe seleccionar al planificar su cronograma.
+                </p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => { setMachineManagerOpen(false); resetMachineForm(); }} disabled={savingMachine}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="grid min-h-0 gap-4 overflow-y-auto p-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+              <div className="rounded-lg border border-border bg-muted/20 p-4">
+                <p className="text-sm font-semibold">{editingMachineId ? 'Editar máquina' : 'Nueva máquina'}</p>
+                <div className="mt-4 space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Fase</label>
+                    <select
+                      value={machinePhase}
+                      onChange={(event) => setMachinePhase(event.target.value as PhaseName)}
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      {PHASES.map((phase) => (
+                        <option key={phase.key} value={phase.key}>{phase.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Nombre</label>
+                    <input
+                      value={machineName}
+                      onChange={(event) => setMachineName(event.target.value)}
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                      placeholder="Ej. Máquina 1"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" onClick={resetMachineForm} disabled={savingMachine}>Limpiar</Button>
+                    <Button type="button" onClick={() => void saveMachine()} disabled={savingMachine || !machineName.trim()} className="gap-2">
+                      {savingMachine ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                      {editingMachineId ? 'Actualizar' : 'Agregar'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                {PHASES.map((phase) => {
+                  const machines = getMachinesForPhase(phase.key, { includeInactive: true });
+                  return (
+                    <div key={phase.key} className="rounded-lg border border-border bg-background p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: phase.color }} />
+                          <p className="font-semibold">{phase.label}</p>
+                        </div>
+                        <Badge variant="outline">{machines.length} máquinas</Badge>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {machines.length === 0 ? (
+                          <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
+                            Sin máquinas configuradas.
+                          </p>
+                        ) : machines.map((machine) => (
+                          <div key={machine.id} className="flex items-center justify-between gap-3 rounded-md border border-border/70 p-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium">{machine.name}</p>
+                              <p className="text-xs text-muted-foreground">{machine.active ? 'Activa' : 'Inactiva'}</p>
+                            </div>
+                            <div className="flex shrink-0 gap-2">
+                              <Button type="button" variant="outline" size="sm" onClick={() => editMachine(machine)}>Editar</Button>
+                              <Button type="button" variant="ghost" size="sm" disabled={savingMachine} onClick={() => void toggleMachine(machine)}>
+                                {machine.active ? 'Desactivar' : 'Activar'}
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </Card>
+        </div>
+      ) : null}
+
       {editing ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
           <Card className="w-full max-w-4xl p-5">
@@ -1224,7 +1422,7 @@ export function GanttSchedule() {
             </div>
 
             <div className="mt-4 rounded-lg border border-border bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
-              Puedes planificar fases en el mismo dia o en rangos superpuestos. La disponibilidad de cortadoras se muestra como referencia para elegir mejor tus fechas.
+              Las fases deben quedar dentro del rango tentativo definido por arquitectura: {formatDisplayDate(editing.order.startDate)} - {formatDisplayDate(editing.order.estimatedDeliveryDate)}. La disponibilidad de máquinas se muestra como referencia para elegir mejor tus fechas.
             </div>
 
             {getPendingLaborDraft(editing.order.id) ? (
@@ -1239,7 +1437,11 @@ export function GanttSchedule() {
             <div className="mt-5 grid gap-3">
               {editing.phases.map((phase, index) => {
                 const phaseConfig = PHASES.find((item) => item.key === phase.phase);
-                const selectedMachineLabel = CUTTING_MACHINES.find((machine) => machine.value === phase.cuttingMachine)?.label ?? 'Cortadora';
+                const phaseMachinesForPhase = getMachinesForPhase(phase.phase);
+                const selectedMachineLabel = getMachineLabel(phase.cuttingMachine);
+                const reservations = getMachineReservations(phase);
+                const tentativeStart = parseDate(editing.order.startDate);
+                const tentativeEnd = parseDate(editing.order.estimatedDeliveryDate);
 
                 return (
                   <div key={phase.phase} className="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-[150px_1fr] md:items-center">
@@ -1251,7 +1453,79 @@ export function GanttSchedule() {
                       </div>
                     </div>
 
-                    <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_260px]">
+                    <div className="grid gap-2 lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)]">
+                      {phaseMachinesForPhase.length > 0 ? (
+                        <div className="flex gap-2">
+                          <select
+                            value={phase.cuttingMachine ?? phaseMachinesForPhase[0]?.id ?? ''}
+                            onChange={(event) => updatePhaseMachine(phase.phase, event.target.value)}
+                            className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                          >
+                            {phaseMachinesForPhase.map((machine) => (
+                              <option key={machine.id} value={machine.id}>
+                                {machine.name}
+                              </option>
+                            ))}
+                          </select>
+
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button type="button" variant="outline" size="icon" aria-label={`Ver disponibilidad de ${selectedMachineLabel}`}>
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent side="bottom" align="start" className="max-h-[72vh] w-[min(92vw,620px)] overflow-y-auto p-0">
+                              <div className="border-b border-border px-4 py-3">
+                                <p className="font-semibold">Disponibilidad de {selectedMachineLabel}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Bloques ya ocupados por otros trabajos en {phaseConfig?.label ?? 'esta fase'}.
+                                </p>
+                              </div>
+                              <div className="space-y-3 p-4">
+                                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Rango que estas planificando</p>
+                                  <p className="mt-1 text-sm font-medium text-foreground">{formatRangeLabel(phase.startDate, phase.endDate)}</p>
+                                </div>
+
+                                <MachineAvailabilityMiniCalendar
+                                  reservations={reservations}
+                                  selectedStart={phase.startDate}
+                                  selectedEnd={phase.endDate}
+                                />
+
+                                {reservations.length === 0 ? (
+                                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+                                    No hay reservas registradas para esta máquina en otros trabajos.
+                                  </div>
+                                ) : (
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Mini cronograma</p>
+                                      <Badge variant="outline">{reservations.length} bloques</Badge>
+                                    </div>
+                                    <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                                      {reservations.map((reservation) => (
+                                        <div key={`${reservation.orderId}-${reservation.startDate}-${reservation.endDate}`} className="rounded-lg border border-border/70 bg-background p-3">
+                                          <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                              <p className="truncate text-sm font-semibold text-foreground">{reservation.furnitureName}</p>
+                                              <p className="mt-1 text-xs text-muted-foreground">{reservation.contractorName}</p>
+                                            </div>
+                                            <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800">
+                                              {formatRangeLabel(reservation.startDate, reservation.endDate)}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      ) : <div className="hidden lg:block" />}
+
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
@@ -1276,7 +1550,8 @@ export function GanttSchedule() {
                           <DateRangeCalendar
                             mode="range"
                             numberOfMonths={1}
-                            defaultMonth={parseDate(phase.startDate) ?? new Date()}
+                            defaultMonth={parseDate(phase.startDate) ?? tentativeStart ?? new Date()}
+                            disabled={(date) => Boolean((tentativeStart && date < tentativeStart) || (tentativeEnd && date > tentativeEnd))}
                             selected={{
                               from: parseDate(phase.startDate) ?? undefined,
                               to: parseDate(phase.endDate) ?? undefined,
@@ -1297,78 +1572,6 @@ export function GanttSchedule() {
                           />
                         </PopoverContent>
                       </Popover>
-
-                      {phase.phase === 'cortado' ? (
-                        <div className="flex gap-2">
-                          <select
-                            value={phase.cuttingMachine ?? 'cortadora-1'}
-                            onChange={(event) => updateCuttingMachine(event.target.value as CuttingMachine)}
-                            className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-                          >
-                            {CUTTING_MACHINES.map((machine) => (
-                              <option key={machine.value} value={machine.value}>
-                                {machine.label}
-                              </option>
-                            ))}
-                          </select>
-
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button type="button" variant="outline" size="icon" aria-label={`Ver disponibilidad de ${selectedMachineLabel}`}>
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent align="end" className="w-[360px] p-0">
-                              <div className="border-b border-border px-4 py-3">
-                                <p className="font-semibold">Disponibilidad de {selectedMachineLabel}</p>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  Bloques ya ocupados por otros trabajos en la etapa de corte.
-                                </p>
-                              </div>
-                              <div className="space-y-3 p-4">
-                                <div className="rounded-lg border border-border bg-muted/20 p-3">
-                                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Rango que estas planificando</p>
-                                  <p className="mt-1 text-sm font-medium text-foreground">{formatRangeLabel(phase.startDate, phase.endDate)}</p>
-                                </div>
-
-                                <MachineAvailabilityMiniCalendar
-                                  reservations={machineReservations}
-                                  selectedStart={phase.startDate}
-                                  selectedEnd={phase.endDate}
-                                />
-
-                                {machineReservations.length === 0 ? (
-                                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
-                                    No hay reservas registradas para esta cortadora en otros trabajos.
-                                  </div>
-                                ) : (
-                                  <div className="space-y-2">
-                                    <div className="flex items-center justify-between">
-                                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Mini cronograma</p>
-                                      <Badge variant="outline">{machineReservations.length} bloques</Badge>
-                                    </div>
-                                    <div className="max-h-72 space-y-2 overflow-auto pr-1">
-                                      {machineReservations.map((reservation) => (
-                                        <div key={`${reservation.orderId}-${reservation.startDate}-${reservation.endDate}`} className="rounded-lg border border-border/70 bg-background p-3">
-                                          <div className="flex items-start justify-between gap-3">
-                                            <div className="min-w-0">
-                                              <p className="truncate text-sm font-semibold text-foreground">{reservation.furnitureName}</p>
-                                              <p className="mt-1 text-xs text-muted-foreground">{reservation.contractorName}</p>
-                                            </div>
-                                            <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800">
-                                              {formatRangeLabel(reservation.startDate, reservation.endDate)}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-                      ) : null}
                     </div>
                   </div>
                 );
