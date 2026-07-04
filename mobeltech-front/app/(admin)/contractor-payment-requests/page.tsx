@@ -47,6 +47,15 @@ type EstimatedScheduleRow = {
   endDate: string;
 };
 
+type SchedulePhaseView = EstimatedScheduleRow & {
+  color: string;
+  label: string;
+  left: number;
+  width: number;
+  start: Date;
+  end: Date;
+};
+
 type LaborCatalogItem = {
   id: string;
   itemKey: string;
@@ -69,6 +78,18 @@ const tableMeasureHeaderClass = 'bg-emerald-100 text-emerald-950 dark:bg-emerald
 const tableMeasureCellClass = 'bg-emerald-50 text-zinc-900 dark:bg-emerald-500/10 dark:text-zinc-100';
 const tableMoneyHeaderClass = 'bg-sky-100 text-sky-950 dark:bg-sky-500/20 dark:text-sky-100';
 const tableMoneyCellClass = 'bg-sky-50 text-sky-950 dark:bg-sky-500/10 dark:text-sky-100';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const schedulePhaseColors: Record<string, string> = {
+  cortado: '#3b82f6',
+  corte: '#3b82f6',
+  canteado: '#f59e0b',
+  ensamblado: '#10b981',
+  instalacion: '#8b5cf6',
+  instalación: '#8b5cf6',
+  entregado: '#14b8a6',
+  entrega: '#14b8a6',
+};
 
 function numberValue(value: string) {
   const parsed = Number(value);
@@ -101,6 +122,54 @@ function formatDate(value?: string | null) {
   return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleDateString('es-BO');
 }
 
+function parseScheduleDate(value?: string | null) {
+  if (!value) return null;
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getPhaseColor(phase: EstimatedScheduleRow, index: number) {
+  const key = `${phase.phaseKey} ${phase.phaseLabel}`.toLowerCase();
+  const match = Object.entries(schedulePhaseColors).find(([phaseKey]) => key.includes(phaseKey));
+  const fallbackColors = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#14b8a6'];
+  return match?.[1] ?? fallbackColors[index % fallbackColors.length];
+}
+
+function getScheduleView(phases?: EstimatedScheduleRow[]) {
+  const rows = (phases ?? [])
+    .map((phase, index) => {
+      const start = parseScheduleDate(phase.startDate);
+      const end = parseScheduleDate(phase.endDate);
+      if (!start || !end) return null;
+      return {
+        ...phase,
+        label: phase.phaseLabel || `Etapa ${index + 1}`,
+        color: getPhaseColor(phase, index),
+        start,
+        end,
+      };
+    })
+    .filter((phase): phase is Omit<SchedulePhaseView, 'left' | 'width'> => Boolean(phase));
+
+  if (rows.length === 0) return { phases: [], days: [], start: null, end: null, totalDays: 0 };
+
+  const start = new Date(Math.min(...rows.map((phase) => phase.start.getTime())));
+  const end = new Date(Math.max(...rows.map((phase) => phase.end.getTime())));
+  const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / DAY_MS) + 1);
+  const days = Array.from({ length: totalDays }, (_, index) => new Date(start.getTime() + (index * DAY_MS)));
+  const phasesWithPlacement = rows.map((phase) => {
+    const offsetDays = Math.max(0, Math.round((phase.start.getTime() - start.getTime()) / DAY_MS));
+    const durationDays = Math.max(1, Math.round((phase.end.getTime() - phase.start.getTime()) / DAY_MS) + 1);
+    return {
+      ...phase,
+      left: (offsetDays / totalDays) * 100,
+      width: Math.max(8, (durationDays / totalDays) * 100),
+    };
+  });
+
+  return { phases: phasesWithPlacement, days, start, end, totalDays };
+}
+
 function slugifyLaborKey(value: string) {
   const normalized = value
     .normalize('NFD')
@@ -109,6 +178,96 @@ function slugifyLaborKey(value: string) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return normalized || `actividad-${Date.now()}`;
+}
+
+function ScheduleTimelinePreview({ plan }: { plan: PaymentPlan | null }) {
+  const view = getScheduleView(plan?.estimatedSchedule);
+  const timelineWidth = `${Math.max(view.totalDays * 58, 620)}px`;
+
+  if (view.phases.length === 0) return null;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-lg border border-border/70 bg-muted/25 p-3">
+          <p className="text-xs text-muted-foreground">Inicio estimado</p>
+          <p className="mt-1 font-semibold">{formatDate(view.start?.toISOString().slice(0, 10))}</p>
+        </div>
+        <div className="rounded-lg border border-border/70 bg-muted/25 p-3">
+          <p className="text-xs text-muted-foreground">Fin estimado</p>
+          <p className="mt-1 font-semibold">{formatDate(view.end?.toISOString().slice(0, 10))}</p>
+        </div>
+        <div className="rounded-lg border border-border/70 bg-muted/25 p-3">
+          <p className="text-xs text-muted-foreground">Duración</p>
+          <p className="mt-1 font-semibold">{view.totalDays} días</p>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-border/70 bg-[#f8fafc] dark:bg-zinc-950">
+        <div className="min-w-full p-4" style={{ width: timelineWidth }}>
+          <div
+            className="grid border-b border-border/60 text-center text-[11px] font-semibold text-muted-foreground"
+            style={{ gridTemplateColumns: `repeat(${view.days.length}, minmax(48px, 1fr))` }}
+          >
+            {view.days.map((day) => (
+              <div key={day.toISOString()} className="border-r border-border/40 px-1 pb-2 last:border-r-0">
+                <p className="text-foreground">{day.toLocaleDateString('es-BO', { day: '2-digit' })}</p>
+                <p className="uppercase">{day.toLocaleDateString('es-BO', { month: 'short' })}</p>
+              </div>
+            ))}
+          </div>
+
+          <div
+            className="relative mt-4 min-h-[155px] rounded-lg bg-[linear-gradient(to_right,rgba(148,163,184,0.22)_1px,transparent_1px)] dark:bg-[linear-gradient(to_right,rgba(148,163,184,0.18)_1px,transparent_1px)]"
+            style={{ backgroundSize: `${100 / Math.max(view.days.length, 1)}% 100%` }}
+          >
+            <div className="absolute left-0 right-0 top-3 h-7 rounded-md bg-zinc-300 px-3 text-[11px] font-semibold leading-7 text-zinc-700 shadow-sm dark:bg-zinc-700 dark:text-zinc-100">
+              Tiempo estimado del contratista
+            </div>
+            {view.phases.map((phase, index) => (
+              <div
+                key={`${phase.phaseKey}-${index}`}
+                className="absolute h-7 rounded-md px-2 text-[11px] font-semibold leading-7 text-white shadow-sm ring-1 ring-black/10"
+                style={{
+                  left: `${phase.left}%`,
+                  top: `${54 + ((index % 3) * 32)}px`,
+                  width: `${Math.min(phase.width, 100 - phase.left)}%`,
+                  backgroundColor: phase.color,
+                }}
+                title={`${phase.label}: ${formatDate(phase.startDate)} - ${formatDate(phase.endDate)}`}
+              >
+                <span className="block truncate">{phase.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {view.phases.map((phase, index) => (
+          <div key={`summary-${phase.phaseKey}-${index}`} className="rounded-lg border border-border/70 bg-background p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: phase.color }} />
+                <p className="truncate text-sm font-semibold">{phase.label}</p>
+              </div>
+              <Badge variant="outline">Etapa {index + 1}</Badge>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground">Inicio</p>
+                <p className="font-medium">{formatDate(phase.startDate)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Fin</p>
+                <p className="font-medium">{formatDate(phase.endDate)}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function ContractorPaymentRequestsPage() {
@@ -582,37 +741,20 @@ export default function ContractorPaymentRequestsPage() {
         </Dialog>
 
         <Dialog open={!!schedulePlan} onOpenChange={(open) => { if (!open) setSchedulePlan(null); }}>
-          <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl">
+          <DialogContent className="max-h-[88vh] w-[calc(100vw-2rem)] max-w-5xl overflow-hidden p-0">
             <DialogHeader>
-              <DialogTitle>Cronograma estimado</DialogTitle>
-              <DialogDescription>{schedulePlan?.contractorName} · {schedulePlan?.jobName}</DialogDescription>
+              <div className="border-b border-border/70 px-5 py-4">
+                <DialogTitle>Cronograma estimado del contratista</DialogTitle>
+                <DialogDescription>{schedulePlan?.contractorName} · {schedulePlan?.jobName}</DialogDescription>
+              </div>
             </DialogHeader>
-            <div className="space-y-3">
+            <div className="max-h-[74vh] overflow-y-auto px-5 py-4">
               {(schedulePlan?.estimatedSchedule?.length ?? 0) === 0 ? (
                 <Card className="border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
                   Esta solicitud no tiene cronograma estimado registrado.
                 </Card>
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {schedulePlan?.estimatedSchedule?.map((phase, index) => (
-                    <div key={`${phase.phaseKey}-${index}`} className="rounded-lg border border-border/70 bg-muted/20 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-semibold">{phase.phaseLabel}</p>
-                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100">Etapa {index + 1}</Badge>
-                      </div>
-                      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-                        <div>
-                          <p className="text-xs text-muted-foreground">Inicio</p>
-                          <p className="font-medium">{formatDate(phase.startDate)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">Fin</p>
-                          <p className="font-medium">{formatDate(phase.endDate)}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <ScheduleTimelinePreview plan={schedulePlan} />
               )}
             </div>
           </DialogContent>
