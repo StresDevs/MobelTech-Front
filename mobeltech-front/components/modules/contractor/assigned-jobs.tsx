@@ -84,7 +84,16 @@ type ProductionOrderRecord = {
     phases?: Array<{
       phase: ProductionPhase;
       completed: string;
+      completedDate?: string | Date | null;
     }>;
+  }>;
+  schedulePhases?: Array<{
+    id?: string;
+    type: 'tentative' | 'actual' | 'real';
+    phase: ProductionPhase;
+    startDate: string;
+    endDate: string;
+    cuttingMachine?: string | null;
   }>;
 };
 
@@ -284,6 +293,7 @@ export default function AssignedJobs() {
   const [laborSearch, setLaborSearch] = useState('');
   const [savingLabor, setSavingLabor] = useState(false);
   const [uploadingFinalJobId, setUploadingFinalJobId] = useState<string | null>(null);
+  const [updatingRealPhaseKey, setUpdatingRealPhaseKey] = useState<string | null>(null);
   const [advanceJobId, setAdvanceJobId] = useState<string | null>(null);
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [advanceNotes, setAdvanceNotes] = useState('');
@@ -748,31 +758,190 @@ export default function AssignedJobs() {
     }
   }
 
-  function getJobProgress(job: ProductionOrderRecord) {
-    return Math.round(job.items.reduce((sum, item) => sum + (item.progress || 0), 0) / (job.items.length || 1));
+  function getRealPhase(job: ProductionOrderRecord, phase: ProductionPhase) {
+    return job.schedulePhases?.find((entry) => entry.type === 'real' && entry.phase === phase);
   }
 
-  function getCurrentPhase(job: ProductionOrderRecord): ProductionPhase {
-    const progress = getJobProgress(job);
-    const matching = [...PRODUCTION_PHASE_OPTIONS].reverse().find((phase) => progress >= phase.progress);
-    return matching?.value ?? 'cortado';
+  function isPhaseStarted(job: ProductionOrderRecord, phase: ProductionPhase) {
+    return Boolean(getRealPhase(job, phase));
   }
 
-  async function updateJobPhase(jobId: string, phase: ProductionPhase) {
+  function isPhaseFinished(job: ProductionOrderRecord, phase: ProductionPhase) {
+    if (job.items.length === 0) return false;
+    return job.items.every((item) => item.phases?.some((entry) => entry.phase === phase && entry.completed === 'true'));
+  }
+
+  function getFinishedRealPhaseCount(job: ProductionOrderRecord) {
+    return PRODUCTION_PHASE_OPTIONS.filter((phase) => isPhaseFinished(job, phase.value)).length;
+  }
+
+  function getItemFinishedPhaseCount(item: ProductionOrderRecord['items'][number]) {
+    return item.phases?.filter((phase) => phase.completed === 'true').length ?? 0;
+  }
+
+  function getNextRealPhaseStep(job: ProductionOrderRecord) {
+    const nextPhase = PRODUCTION_PHASE_OPTIONS.find((phase) => !isPhaseFinished(job, phase.value));
+    if (!nextPhase) return null;
+    return {
+      phase: nextPhase.value,
+      label: nextPhase.label,
+      action: isPhaseStarted(job, nextPhase.value) ? 'finish' as const : 'start' as const,
+    };
+  }
+
+  function todayDateString() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  async function updateJobRealPhase(jobId: string, phase: ProductionPhase, action: 'start' | 'finish') {
     if (!apiBase) return;
+    const updateKey = `${jobId}-${phase}-${action}`;
+    setUpdatingRealPhaseKey(updateKey);
     setError(null);
     try {
-      const response = await fetch(`${apiBase}/api/production-orders/${jobId}/progress`, {
+      const response = await fetch(`${apiBase}/api/production-orders/${jobId}/real-progress`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phase }),
+        body: JSON.stringify({
+          phase,
+          action,
+          date: todayDateString(),
+          createdBy: user?.id ?? null,
+        }),
       });
-      if (!response.ok) throw new Error('No se pudo actualizar la etapa.');
-      const updated = await response.json() as ProductionOrderRecord;
-      setJobs((current) => current.map((job) => (job.id === jobId ? updated : job)));
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(readApiError(data, 'No se pudo actualizar el avance real.'));
+      setJobs((current) => current.map((job) => (job.id === jobId ? data as ProductionOrderRecord : job)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error actualizando etapa.');
+      setError(err instanceof Error ? err.message : 'Error actualizando avance real.');
+    } finally {
+      setUpdatingRealPhaseKey(null);
     }
+  }
+
+  function renderCompactRealProgress(job: ProductionOrderRecord, plan?: ContractorPaymentPlan) {
+    if (plan?.reviewStatus !== 'approved') {
+      return <span className="text-xs text-muted-foreground">Disponible al aprobar</span>;
+    }
+
+    const nextStep = getNextRealPhaseStep(job);
+    const finishedCount = getFinishedRealPhaseCount(job);
+
+    return (
+      <div className="min-w-[250px] space-y-2">
+        <div className="flex items-center gap-1.5">
+          {PRODUCTION_PHASE_OPTIONS.map((phase) => {
+            const started = isPhaseStarted(job, phase.value);
+            const finished = isPhaseFinished(job, phase.value);
+            return (
+              <span
+                key={phase.value}
+                className={`h-2.5 w-8 rounded-full ${
+                  finished ? 'bg-emerald-500' : started ? 'bg-emerald-300' : 'bg-muted'
+                }`}
+                title={`${phase.label}: ${finished ? 'finalizado' : started ? 'en curso' : 'pendiente'}`}
+              />
+            );
+          })}
+        </div>
+        {nextStep ? (
+          <Button
+            type="button"
+            size="sm"
+            variant={nextStep.action === 'start' ? 'outline' : 'default'}
+            className="h-8 gap-1.5 px-2 text-xs"
+            disabled={updatingRealPhaseKey === `${job.id}-${nextStep.phase}-${nextStep.action}`}
+            onClick={() => void updateJobRealPhase(job.id, nextStep.phase, nextStep.action)}
+          >
+            {updatingRealPhaseKey === `${job.id}-${nextStep.phase}-${nextStep.action}` ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            )}
+            {nextStep.action === 'start' ? 'Iniciar' : 'Finalizar'} {nextStep.label}
+          </Button>
+        ) : (
+          <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Trabajo finalizado</Badge>
+        )}
+        <p className="text-xs text-muted-foreground">{finishedCount} de {PRODUCTION_PHASE_OPTIONS.length} fases finalizadas</p>
+      </div>
+    );
+  }
+
+  function renderRealProgressPanel(job: ProductionOrderRecord, plan?: ContractorPaymentPlan) {
+    if (plan?.reviewStatus !== 'approved') {
+      return (
+        <div className="rounded-xl border border-border p-4">
+          <p className="text-sm font-semibold">Avance real</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            El avance real se habilita cuando administración aprueba la mano de obra.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded-xl border border-border p-4">
+        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold">Avance real</p>
+            <p className="text-xs text-muted-foreground">Marca inicio y fin cuando realmente empieza o termina cada fase.</p>
+          </div>
+          <Badge variant="outline">{getFinishedRealPhaseCount(job)} / {PRODUCTION_PHASE_OPTIONS.length} fases</Badge>
+        </div>
+        <div className="space-y-3">
+          {PRODUCTION_PHASE_OPTIONS.map((phase) => {
+            const realPhase = getRealPhase(job, phase.value);
+            const started = Boolean(realPhase);
+            const finished = isPhaseFinished(job, phase.value);
+            const startKey = `${job.id}-${phase.value}-start`;
+            const finishKey = `${job.id}-${phase.value}-finish`;
+
+            return (
+              <div key={phase.value} className="rounded-lg border border-border bg-muted/20 p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`h-2.5 w-2.5 rounded-full ${finished ? 'bg-emerald-500' : started ? 'bg-emerald-300' : 'bg-muted-foreground/30'}`} />
+                      <p className="text-sm font-semibold">{phase.label}</p>
+                      <Badge variant="outline" className="text-[10px]">
+                        {finished ? 'Finalizado' : started ? 'En curso' : 'Pendiente'}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Inicio real: {realPhase ? formatDate(realPhase.startDate) : 'Sin marcar'} · Fin real: {finished && realPhase ? formatDate(realPhase.endDate) : 'Sin marcar'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 gap-1.5"
+                      disabled={started || updatingRealPhaseKey === startKey}
+                      onClick={() => void updateJobRealPhase(job.id, phase.value, 'start')}
+                    >
+                      {updatingRealPhaseKey === startKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarRange className="h-3.5 w-3.5" />}
+                      Iniciar hoy
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 gap-1.5"
+                      disabled={!started || finished || updatingRealPhaseKey === finishKey}
+                      onClick={() => void updateJobRealPhase(job.id, phase.value, 'finish')}
+                    >
+                      {updatingRealPhaseKey === finishKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                      Finalizar hoy
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
   }
 
   async function downloadSketchupFile(file: FurnitureFileRecord) {
@@ -998,7 +1167,7 @@ export default function AssignedJobs() {
   const selectedJobAdvanceRequest = selectedJob ? getAdvanceRequest(selectedJob) : undefined;
   const selectedJobInitialSketchup = selectedJob ? getInitialSketchupFile(selectedJob) : undefined;
   const selectedJobFinalSketchup = selectedJob ? getFinalSketchupFile(selectedJob) : undefined;
-  const selectedJobProgress = selectedJob ? getJobProgress(selectedJob) : 0;
+  const selectedJobFinishedPhaseCount = selectedJob ? getFinishedRealPhaseCount(selectedJob) : 0;
 
   return (
     <div className="space-y-4">
@@ -1102,11 +1271,14 @@ export default function AssignedJobs() {
                   </div>
                   <div className="min-w-[220px] rounded-lg border border-border bg-background p-3">
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Avance general</span>
-                      <span className="font-mono font-semibold">{selectedJobProgress}%</span>
+                      <span>Avance real</span>
+                      <span className="font-mono font-semibold">{selectedJobFinishedPhaseCount}/{PRODUCTION_PHASE_OPTIONS.length}</span>
                     </div>
                     <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-[#eab676]" style={{ width: `${selectedJobProgress}%` }} />
+                      <div
+                        className="h-full rounded-full bg-emerald-500"
+                        style={{ width: `${(selectedJobFinishedPhaseCount / PRODUCTION_PHASE_OPTIONS.length) * 100}%` }}
+                      />
                     </div>
                   </div>
                 </div>
@@ -1135,7 +1307,7 @@ export default function AssignedJobs() {
                           </div>
                           <div className="text-left sm:text-right">
                             <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
-                              {item.progress ?? selectedJobProgress}% avance
+                              {getItemFinishedPhaseCount(item as ProductionOrderRecord['items'][number])}/{PRODUCTION_PHASE_OPTIONS.length} fases reales
                             </span>
                           </div>
                         </div>
@@ -1213,22 +1385,7 @@ export default function AssignedJobs() {
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-border p-4">
-                    <p className="text-sm font-semibold">Etapa actual</p>
-                    {selectedJobPlan?.reviewStatus === 'approved' ? (
-                      <select
-                        value={getCurrentPhase(selectedJob)}
-                        onChange={(event) => void updateJobPhase(selectedJob.id, event.target.value as ProductionPhase)}
-                        className="mt-3 h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none"
-                      >
-                        {PRODUCTION_PHASE_OPTIONS.map((phase) => (
-                          <option key={phase.value} value={phase.value}>{phase.label} · {phase.progress}%</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <p className="mt-2 text-sm text-muted-foreground">La etapa se habilita cuando administración aprueba la mano de obra.</p>
-                    )}
-                  </div>
+                  {renderRealProgressPanel(selectedJob, selectedJobPlan)}
                 </div>
               </div>
             </Card>
@@ -1262,7 +1419,7 @@ export default function AssignedJobs() {
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Inicio y fin estimado</th>
                 <th className="px-4 py-3 text-right font-medium text-muted-foreground">SketchUp</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Estado</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Etapa</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Avance real</th>
                 <th className="px-4 py-3 text-right font-medium text-muted-foreground">Solicitud de anticipo</th>
               </tr>
             </thead>
@@ -1279,7 +1436,6 @@ export default function AssignedJobs() {
                 const environment = getEnvironment(job);
                 const plan = getPaymentPlan(job);
                 const advanceRequest = getAdvanceRequest(job);
-                const progress = getJobProgress(job);
                 return (
                   <tr key={job.id} className="border-b border-border/70 last:border-b-0">
                     <td className="px-4 py-3">
@@ -1301,7 +1457,9 @@ export default function AssignedJobs() {
                     </td>
                     <td className="px-4 py-3">
                       <p className="max-w-[260px] truncate font-medium">{description}</p>
-                      <p className="text-xs text-muted-foreground">{environment?.description || `${job.items.length} tareas · avance ${progress}%`}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {environment?.description || `${job.items.length} tareas · ${getFinishedRealPhaseCount(job)}/${PRODUCTION_PHASE_OPTIONS.length} fases reales`}
+                      </p>
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-medium">{client?.name ?? 'N/A'}</p>
@@ -1361,19 +1519,7 @@ export default function AssignedJobs() {
                       ) : null}
                     </td>
                     <td className="px-4 py-3">
-                      {plan?.reviewStatus === 'approved' ? (
-                        <select
-                          value={getCurrentPhase(job)}
-                          onChange={(event) => void updateJobPhase(job.id, event.target.value as ProductionPhase)}
-                          className="h-9 rounded-md border border-input bg-background px-2 text-sm outline-none"
-                        >
-                          {PRODUCTION_PHASE_OPTIONS.map((phase) => (
-                            <option key={phase.value} value={phase.value}>{phase.label} · {phase.progress}%</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Disponible al aprobar</span>
-                      )}
+                      {renderCompactRealProgress(job, plan)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Button size="sm" variant="outline" disabled={!plan || plan.reviewStatus !== 'approved'} onClick={() => openAdvanceModal(job)}>

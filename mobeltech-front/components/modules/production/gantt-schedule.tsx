@@ -49,7 +49,7 @@ type ProductionOrder = {
 type SchedulePhase = {
   id?: string;
   productionOrderId?: string;
-  type: 'tentative' | 'actual';
+  type: 'tentative' | 'actual' | 'real';
   phase: PhaseName;
   startDate: string;
   endDate: string;
@@ -503,15 +503,17 @@ export function GanttSchedule() {
   const isContractor = currentRole === 'contractor';
   const canManageMachines = currentRole === 'admin' || currentRole === 'architect';
 
-  async function loadData() {
+  async function loadData(options?: { silent?: boolean }) {
     if (!apiBase) {
       setError('Falta configurar NEXT_PUBLIC_API_URL en el front.');
       setLoading(false);
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    if (!options?.silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const [ordersResponse, contractorsResponse, quotationsResponse, clientsResponse, projectsResponse, machinesResponse] = await Promise.all([
         fetch(`${apiBase}/api/production-orders`, { cache: 'no-store' }),
@@ -536,15 +538,27 @@ export function GanttSchedule() {
       setProjects(await projectsResponse.json());
       setPhaseMachines(await machinesResponse.json());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error cargando cronograma.');
+      if (!options?.silent) {
+        setError(err instanceof Error ? err.message : 'Error cargando cronograma.');
+      }
     } finally {
-      setLoading(false);
+      if (!options?.silent) {
+        setLoading(false);
+      }
     }
   }
 
   useEffect(() => {
     void loadData();
   }, []);
+
+  useEffect(() => {
+    if (!apiBase || editing) return undefined;
+    const refreshId = window.setInterval(() => {
+      void loadData({ silent: true });
+    }, 30000);
+    return () => window.clearInterval(refreshId);
+  }, [apiBase, editing]);
 
   const myContractor = useMemo(() => {
     if (!user) return null;
@@ -1012,13 +1026,13 @@ export function GanttSchedule() {
     );
   }
 
-  function renderActualBars(order: ProductionOrder, canEdit: boolean) {
+  function renderEstimatedBars(order: ProductionOrder, canEdit: boolean) {
     const rows = (order.schedulePhases ?? []).filter((phase) => phase.type === 'actual');
 
     if (rows.length === 0) {
       return (
         <div className="flex h-10 items-center justify-between gap-3 rounded-md border border-dashed border-border bg-muted/20 px-3 text-xs text-muted-foreground">
-          <span>Sin cronograma por fases registrado.</span>
+          <span>Sin cronograma estimado por fases.</span>
           {canEdit ? <span className="font-medium text-foreground/70">Usa "Editar fases".</span> : null}
         </div>
       );
@@ -1053,6 +1067,47 @@ export function GanttSchedule() {
                 {phaseConfig?.label}
                 {machineLabel ? ` · ${machineLabel}` : ''}
               </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderRealBars(order: ProductionOrder) {
+    const rows = (order.schedulePhases ?? []).filter((phase) => phase.type === 'real');
+
+    if (rows.length === 0) {
+      return (
+        <div className="flex h-10 items-center rounded-md border border-dashed border-emerald-500/25 bg-emerald-500/5 px-3 text-xs text-emerald-700 dark:text-emerald-300">
+          Sin avance real marcado.
+        </div>
+      );
+    }
+
+    const laneRows = assignPhaseLanes(rows);
+    const laneCount = Math.max(...laneRows.map((entry) => entry.lane)) + 1;
+    const contentHeight = Math.max(38, laneCount * 30 + 8);
+
+    return (
+      <div className="relative rounded-md bg-emerald-500/10" style={{ height: `${contentHeight}px` }}>
+        {laneRows.map(({ row, lane }) => {
+          const phaseConfig = PHASES.find((phase) => phase.key === row.phase);
+          const placement = getTimelinePlacement(row.startDate, row.endDate);
+          if (!placement) return null;
+
+          return (
+            <div
+              key={`real-${row.phase}-${row.id ?? `${row.startDate}-${row.endDate}`}`}
+              className="absolute h-6 rounded-md bg-emerald-600 px-2 text-[11px] font-semibold leading-6 text-white shadow-sm ring-1 ring-emerald-300/30"
+              style={{
+                left: `${placement.left}%`,
+                width: `${Math.min(placement.width, 100 - placement.left)}%`,
+                top: `${lane * 30 + 4}px`,
+              }}
+              title={`Avance real ${phaseConfig?.label}: ${formatRangeLabel(row.startDate, row.endDate)}`}
+            >
+              <span className="block truncate">Real · {phaseConfig?.label}</span>
             </div>
           );
         })}
@@ -1178,8 +1233,8 @@ export function GanttSchedule() {
       <div className="grid gap-3 md:grid-cols-4">
         <ScheduleMetric icon={<ClipboardList className="h-4 w-4" />} label="Trabajos" value={String(filteredOrders.length)} />
         <ScheduleMetric icon={<Clock3 className="h-4 w-4" />} label="Tentativos" value={String(filteredOrders.filter((order) => order.startDate && order.estimatedDeliveryDate).length)} />
-        <ScheduleMetric icon={<CalendarRange className="h-4 w-4" />} label="Con fases" value={String(filteredOrders.filter((order) => order.schedulePhases?.some((phase) => phase.type === 'actual')).length)} />
-        <ScheduleMetric icon={<CheckCircle2 className="h-4 w-4" />} label="Completos" value={String(filteredOrders.filter((order) => order.status === 'completed').length)} />
+        <ScheduleMetric icon={<CalendarRange className="h-4 w-4" />} label="Estimados" value={String(filteredOrders.filter((order) => order.schedulePhases?.some((phase) => phase.type === 'actual')).length)} />
+        <ScheduleMetric icon={<CheckCircle2 className="h-4 w-4" />} label="Con avance real" value={String(filteredOrders.filter((order) => order.schedulePhases?.some((phase) => phase.type === 'real')).length)} />
       </div>
 
       <Card className="overflow-hidden">
@@ -1197,10 +1252,14 @@ export function GanttSchedule() {
                   <span className="h-3 w-6 rounded bg-zinc-400" />
                   Tiempo tentativo
                 </span>
+                <span className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/70 px-3 py-1.5">
+                  <span className="h-3 w-6 rounded bg-emerald-600" />
+                  Avance real
+                </span>
                 {PHASES.map((phase) => (
                   <span key={phase.key} className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/70 px-3 py-1.5">
                     <span className="h-3 w-6 rounded" style={{ backgroundColor: phase.color }} />
-                    {phase.label}
+                    Estimado · {phase.label}
                   </span>
                 ))}
               </div>
@@ -1333,7 +1392,8 @@ export function GanttSchedule() {
                     }}
                   >
                     {renderTentativeBar(order)}
-                    {renderActualBars(order, canEditActual)}
+                    {renderEstimatedBars(order, canEditActual)}
+                    {renderRealBars(order)}
                   </div>
                 </div>
               );
