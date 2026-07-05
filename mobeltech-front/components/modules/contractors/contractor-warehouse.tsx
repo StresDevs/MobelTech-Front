@@ -4,15 +4,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { AlertCircle, CheckCircle2, Minus, PackageSearch, Plus, Search, ShoppingCart, Undo2, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Plus, Search, Undo2 } from 'lucide-react';
 
 type Material = {
   id: string;
@@ -63,6 +62,13 @@ const STATUS_STYLES = {
   rejected: 'bg-rose-100 text-rose-800',
 } as const;
 
+const tableItemHeaderClass = 'bg-amber-100 text-amber-950 dark:bg-amber-500/20 dark:text-amber-100';
+const tableItemCellClass = 'bg-amber-50/80 text-zinc-900 dark:bg-amber-500/10 dark:text-zinc-100';
+const tableMeasureHeaderClass = 'bg-emerald-100 text-emerald-950 dark:bg-emerald-500/20 dark:text-emerald-100';
+const tableMeasureCellClass = 'bg-emerald-50/80 text-zinc-900 dark:bg-emerald-500/10 dark:text-zinc-100';
+const tableMetaHeaderClass = 'bg-sky-100 text-sky-950 dark:bg-sky-500/20 dark:text-sky-100';
+const tableMetaCellClass = 'bg-sky-50/80 text-zinc-900 dark:bg-sky-500/10 dark:text-zinc-100';
+
 export function ContractorWarehouse({ contractorId }: { contractorId: string }) {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -71,8 +77,6 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
   const [submitting, setSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const [notes, setNotes] = useState<Record<string, string>>({});
   const [selectedJobId, setSelectedJobId] = useState('');
   const [materials, setMaterials] = useState<Material[]>([]);
   const [orders, setOrders] = useState<ProductionOrder[]>([]);
@@ -80,7 +84,6 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
   const [requests, setRequests] = useState<MaterialRequest[]>([]);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showCart, setShowCart] = useState(false);
   const [showRequests, setShowRequests] = useState(false);
 
   async function loadData() {
@@ -130,6 +133,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
         .some((value) => value.toLowerCase().includes(normalized)),
     );
   }, [materials, searchQuery]);
+  const availableMaterials = visibleMaterials.filter((material) => !cart.some((item) => item.materialId === material.id));
 
   const pendingRequests = requests.filter((request) => request.status === 'pending');
   const approvedRequests = requests.filter((request) => request.status === 'approved');
@@ -147,7 +151,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
   }
 
   function addToCart(materialId: string) {
-    const quantity = quantities[materialId] ?? 0;
+    const quantity = 1;
     if (!selectedJobId) {
       toast({
         title: 'Selecciona el trabajo primero',
@@ -157,18 +161,13 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
       });
       return;
     }
-    if (quantity <= 0) {
-      setError('Ingresa una cantidad valida antes de agregar un material.');
-      return;
-    }
-
     setError(null);
     setCart((current) => {
       const existing = current.find((item) => item.materialId === materialId);
       if (existing) {
         return current.map((item) =>
           item.materialId === materialId
-            ? { ...item, quantity: item.quantity + quantity, notes: notes[materialId] || item.notes }
+            ? { ...item, quantity: item.quantity + quantity }
             : item,
         );
       }
@@ -178,26 +177,22 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
         {
           materialId,
           quantity,
-          notes: notes[materialId] || '',
+          notes: '',
         },
       ];
     });
-    setQuantities((current) => ({ ...current, [materialId]: 0 }));
-    setNotes((current) => ({ ...current, [materialId]: '' }));
   }
 
   function removeFromCart(materialId: string) {
     setCart((current) => current.filter((item) => item.materialId !== materialId));
-    setQuantities((current) => ({ ...current, [materialId]: 0 }));
-    setNotes((current) => ({ ...current, [materialId]: '' }));
   }
 
-  function updateMaterialQuantity(materialId: string, delta: number) {
-    setQuantities((current) => {
-      const previous = current[materialId] ?? 0;
-      const nextValue = Math.max(0, previous + delta);
-      return { ...current, [materialId]: nextValue };
-    });
+  function updateCartItem(materialId: string, field: 'quantity' | 'notes', value: string) {
+    setCart((current) => current.map((item) => {
+      if (item.materialId !== materialId) return item;
+      if (field === 'quantity') return { ...item, quantity: Math.max(0, Number(value) || 0) };
+      return { ...item, notes: value };
+    }));
   }
 
   async function submitRequest() {
@@ -230,9 +225,6 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
 
       setFeedback('Solicitud enviada correctamente. El administrador ya puede revisarla.');
       setCart([]);
-      setQuantities({});
-      setNotes({});
-      setShowCart(false);
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error enviando la solicitud.');
@@ -244,18 +236,6 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
   function reloadRejectedRequest(request: MaterialRequest) {
     setSelectedJobId(request.productionOrderId ?? '');
     setSearchQuery('');
-    setQuantities(
-      request.items.reduce<Record<string, number>>((accumulator, item) => {
-        accumulator[item.materialId] = item.quantity;
-        return accumulator;
-      }, {}),
-    );
-    setNotes(
-      request.items.reduce<Record<string, string>>((accumulator, item) => {
-        accumulator[item.materialId] = item.notes ?? '';
-        return accumulator;
-      }, {}),
-    );
     setCart(
       request.items.map((item) => ({
         materialId: item.materialId,
@@ -288,7 +268,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
               <div>
                 <h3 className="text-lg font-semibold">Solicitud de materiales</h3>
                 <p className="text-sm text-muted-foreground">
-                  Usa la tabla para elegir materiales y la burbuja del carrito para revisar antes de enviar.
+                  Busca materiales, agrégalos y completa cantidades. La solicitud quedará en revisión por administración.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -300,45 +280,23 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
                 >
                   Estado de solicitudes
                 </Button>
-                <Button
-                  type="button"
-                  onClick={() => setShowCart(true)}
-                  className="rounded-full bg-[#d6a85a] px-4 text-white hover:bg-[#c3964b]"
-                >
-                  <ShoppingCart className="mr-2 h-4 w-4" />
-                  Carrito ({cart.length})
-                </Button>
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="text-sm font-medium">Trabajo asignado</label>
-                <select
-                  value={selectedJobId}
-                  onChange={(event) => setSelectedJobId(event.target.value)}
-                  className="mt-2 h-11 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none transition focus:border-[#d6a85a]"
-                >
-                  <option value="">Selecciona un trabajo</option>
-                  {orders.map((order) => (
-                    <option key={order.id} value={order.id}>
-                      {getOrderLabel(order.id)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-medium">Buscar material</label>
-                <div className="relative mt-2">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="Melamina, bisagra, tornillo..."
-                    className="rounded-xl pl-9"
-                  />
-                </div>
-              </div>
+            <div className="rounded-lg border border-border/70 bg-background/70 p-3">
+              <label className="text-sm font-medium">Trabajo asignado</label>
+              <select
+                value={selectedJobId}
+                onChange={(event) => setSelectedJobId(event.target.value)}
+                className="mt-2 h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none transition focus:border-[#d6a85a]"
+              >
+                <option value="">Selecciona un trabajo</option>
+                {orders.map((order) => (
+                  <option key={order.id} value={order.id}>
+                    {getOrderLabel(order.id)}
+                  </option>
+                ))}
+              </select>
             </div>
             {!selectedJobId ? (
               <p className="text-sm text-amber-700 dark:text-amber-300">
@@ -348,109 +306,127 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-[980px] w-full border-collapse">
-            <thead className="bg-muted/30 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
+        <div className="space-y-4 p-4 sm:p-5">
+          <div className="space-y-2">
+            <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Buscador</label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Buscar material por nombre o unidad..."
+                    className="pl-9"
+                  />
+                </div>
+              </div>
+              <div className="flex items-end">
+                <Button type="button" variant="outline" onClick={() => setSearchQuery('')}>Limpiar</Button>
+              </div>
+            </div>
+
+            {availableMaterials.length > 0 ? (
+              <div className="max-h-40 overflow-auto rounded-md border border-border/70">
+                {availableMaterials.slice(0, 10).map((material) => (
+                  <div key={material.id} className="flex items-center justify-between gap-3 border-b border-border/60 bg-emerald-50/60 px-3 py-2 text-zinc-900 transition hover:bg-emerald-100/70 last:border-b-0 dark:bg-emerald-500/10 dark:text-zinc-100 dark:hover:bg-emerald-500/15">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{material.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {material.unit} · Stock {material.stock}
+                      </p>
+                    </div>
+                    <Button type="button" size="sm" className="shrink-0 gap-1.5" onClick={() => addToCart(material.id)} disabled={!selectedJobId}>
+                      <Plus className="h-3.5 w-3.5" />
+                      Agregar
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : materials.length > 0 ? (
+              <p className="rounded-md border border-dashed border-border/70 px-3 py-4 text-center text-sm text-muted-foreground">
+                No hay materiales disponibles para ese filtro o todos ya fueron agregados.
+              </p>
+            ) : (
+              <Card className="border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                No hay materiales configurados en inventario.
+              </Card>
+            )}
+          </div>
+
+          <div className="overflow-x-auto rounded-md border border-border/70">
+            <table className="w-full min-w-[940px] table-fixed text-sm">
+              <thead>
               <tr>
-                <th className="px-4 py-2.5 font-semibold">Material</th>
-                <th className="px-4 py-2.5 font-semibold">Unidad</th>
-                <th className="px-4 py-2.5 font-semibold">Stock</th>
-                <th className="px-4 py-2.5 font-semibold">Cantidad</th>
-                <th className="px-4 py-2.5 font-semibold">Notas</th>
-                <th className="px-4 py-2.5 font-semibold">Acción</th>
+                <th className="w-12 px-2 py-2 text-center font-semibold text-muted-foreground">No</th>
+                <th className={`w-[36%] px-3 py-2 text-left font-semibold ${tableItemHeaderClass}`}>MATERIAL</th>
+                <th className={`w-[10%] px-3 py-2 text-center font-semibold ${tableItemHeaderClass}`}>UNIDAD</th>
+                <th className={`w-[10%] px-3 py-2 text-right font-semibold ${tableMeasureHeaderClass}`}>STOCK</th>
+                <th className={`w-[12%] px-3 py-2 text-right font-semibold ${tableMeasureHeaderClass}`}>CANTIDAD</th>
+                <th className={`w-[22%] px-3 py-2 text-left font-semibold ${tableMetaHeaderClass}`}>NOTAS</th>
+                <th className="w-[10%] px-3 py-2 text-right font-medium text-muted-foreground">Acción</th>
               </tr>
             </thead>
             <tbody>
-              {visibleMaterials.map((material, index) => {
-                const cartItem = cart.find((item) => item.materialId === material.id);
+              {cart.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">Agrega materiales desde el buscador.</td>
+                </tr>
+              ) : cart.map((item, index) => {
+                const material = materials.find((entry) => entry.id === item.materialId);
+                if (!material) return null;
                 return (
-                  <tr key={material.id} className={index % 2 === 0 ? 'bg-background' : 'bg-muted/10'}>
-                    <td className="border-t border-border/60 px-4 py-2.5 align-middle">
-                      <div className="space-y-1">
-                        <p className="font-semibold leading-5">{material.name}</p>
-                        {cartItem ? (
-                          <Badge className="mt-1 w-fit rounded-full bg-[#d6a85a] text-white">{cartItem.quantity} en carrito</Badge>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td className="border-t border-border/60 px-4 py-2.5 align-middle text-sm text-muted-foreground">
-                      {material.unit}
-                    </td>
-                    <td className="border-t border-border/60 px-4 py-2.5 align-middle">
-                      <Badge variant="outline" className="rounded-full bg-background/80 px-2.5 py-0.5">
-                        {material.stock}
-                      </Badge>
-                    </td>
-                    <td className="border-t border-border/60 px-4 py-2.5 align-middle">
-                      <div className="flex w-32 items-stretch overflow-hidden rounded-lg border border-input bg-background shadow-sm">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="h-9 w-9 rounded-none border-r border-input px-0"
-                          onClick={() => updateMaterialQuantity(material.id, -1)}
-                          disabled={(quantities[material.id] || 0) <= 0}
-                        >
-                          <Minus className="h-4 w-4" />
-                          <span className="sr-only">Disminuir cantidad</span>
-                        </Button>
-                        <Input
-                          type="number"
-                          min="0"
-                          inputMode="numeric"
-                          value={quantities[material.id] || ''}
-                          onChange={(event) =>
-                            setQuantities((current) => ({
-                              ...current,
-                              [material.id]: event.target.value === '' ? 0 : Number(event.target.value) || 0,
-                            }))
-                          }
-                          placeholder="0"
-                          className="h-9 w-full rounded-none border-0 text-center shadow-none [appearance:textfield] focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="h-9 w-9 rounded-none border-l border-input px-0"
-                          onClick={() => updateMaterialQuantity(material.id, 1)}
-                        >
-                          <Plus className="h-4 w-4" />
-                          <span className="sr-only">Aumentar cantidad</span>
-                        </Button>
-                      </div>
-                    </td>
-                    <td className="border-t border-border/60 px-4 py-2.5 align-middle">
+                  <tr key={item.materialId} className="border-b border-border/60 last:border-b-0">
+                    <td className="px-2 py-2 text-center font-mono text-xs text-muted-foreground">{index + 1}</td>
+                    <td className={`px-3 py-2 font-medium ${tableItemCellClass}`}><span className="block whitespace-normal leading-snug">{material.name}</span></td>
+                    <td className={`px-3 py-2 text-center font-mono text-xs font-semibold ${tableItemCellClass}`}>{material.unit}</td>
+                    <td className={`px-3 py-2 text-right font-mono font-semibold ${tableMeasureCellClass}`}>{material.stock}</td>
+                    <td className={`px-3 py-2 ${tableMeasureCellClass}`}>
                       <Input
-                        value={notes[material.id] || ''}
-                        onChange={(event) => setNotes((current) => ({ ...current, [material.id]: event.target.value }))}
-                        placeholder="Opcional"
-                        className="h-9 min-w-[220px]"
+                        type="number"
+                        min="0"
+                        step="0.001"
+                        value={item.quantity || ''}
+                        onChange={(event) => updateCartItem(item.materialId, 'quantity', event.target.value)}
+                        className="h-8 text-right font-mono dark:border-zinc-600 dark:bg-zinc-950/40 dark:text-zinc-100"
+                        placeholder="0"
                       />
                     </td>
-                    <td className="border-t border-border/60 px-4 py-2.5 align-middle">
-                      <Button
-                        onClick={() => addToCart(material.id)}
-                        disabled={Boolean(selectedJobId) && (quantities[material.id] || 0) <= 0}
-                        className="h-9 w-full rounded-lg bg-[#d6a85a] text-white hover:bg-[#c3964b]"
-                      >
-                        Agregar
-                      </Button>
+                    <td className={`px-3 py-2 ${tableMetaCellClass}`}>
+                      <Input
+                        value={item.notes}
+                        onChange={(event) => updateCartItem(item.materialId, 'notes', event.target.value)}
+                        placeholder="Opcional"
+                        className="h-8 dark:border-zinc-600 dark:bg-zinc-950/40 dark:text-zinc-100"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Button type="button" variant="ghost" size="sm" onClick={() => removeFromCart(item.materialId)}>Quitar</Button>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          </div>
         </div>
 
-        {visibleMaterials.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center text-muted-foreground">
-            <PackageSearch className="h-10 w-10 opacity-60" />
+        <div className="flex flex-col gap-3 border-t border-border/70 bg-background px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="flex items-center justify-between rounded-lg bg-sky-50 px-3 py-2 text-sm dark:bg-sky-500/10 sm:min-w-80">
             <div>
-              <p className="font-medium">No encontramos materiales con esa búsqueda.</p>
-              <p className="text-sm">Prueba con otro nombre o limpia el filtro para ver todo el catálogo.</p>
+              <span className="font-medium text-sky-800 dark:text-sky-100">Total solicitado</span>
+              <p className="text-xs font-normal text-muted-foreground">Revisa cantidades antes de enviar.</p>
             </div>
+            <span className="font-mono font-semibold text-sky-800 dark:text-sky-100">{cartUnits} unidades</span>
           </div>
-        ) : null}
+          <Button
+            onClick={submitRequest}
+            disabled={submitting || !selectedJobId || cart.length === 0 || cart.some((item) => item.quantity <= 0)}
+            className="bg-[#d6a85a] text-white hover:bg-[#c3964b]"
+          >
+            {submitting ? 'Enviando...' : 'Enviar solicitud'}
+          </Button>
+        </div>
       </Card>
 
       <Dialog open={showRequests} onOpenChange={setShowRequests}>
@@ -543,71 +519,6 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showCart} onOpenChange={setShowCart}>
-        <DialogContent className="h-[92vh] w-[min(96vw,42rem)] max-h-[92vh] overflow-hidden rounded-3xl">
-          <DialogHeader className="space-y-2">
-            <DialogTitle>Carrito de solicitud</DialogTitle>
-            <p className="text-sm text-muted-foreground">Confirma lo que vas a enviar. Aquí no se muestran precios.</p>
-          </DialogHeader>
-
-          {cart.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground">
-              <ShoppingCart className="mx-auto mb-3 h-10 w-10 opacity-60" />
-              <p>Aun no agregaste materiales al carrito.</p>
-            </div>
-          ) : (
-            <>
-              <div className="max-h-[420px] space-y-3 overflow-y-auto pr-2">
-                {cart.map((item) => {
-                  const material = materials.find((entry) => entry.id === item.materialId);
-                  if (!material) return null;
-                  return (
-                    <div key={item.materialId} className="flex items-start justify-between gap-4 rounded-xl border border-border p-4">
-                      <div className="space-y-1">
-                        <p className="font-semibold">{material.name}</p>
-                        <p className="text-sm text-muted-foreground">{item.quantity} {material.unit}</p>
-                        {item.notes ? <p className="text-xs italic text-muted-foreground">Notas: {item.notes}</p> : null}
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => removeFromCart(item.materialId)}>
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="rounded-xl border border-border bg-muted/20 p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Trabajo asociado</span>
-                  <span className="font-semibold">{getOrderLabel(selectedJobId)}</span>
-                </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Unidades totales</span>
-                  <span className="text-xl font-bold">{cartUnits}</span>
-                </div>
-              </div>
-
-              <DialogFooter className="gap-2">
-                <Button variant="outline" onClick={() => setShowCart(false)}>
-                  Cancelar
-                </Button>
-                <Button onClick={submitRequest} disabled={submitting} className="bg-[#d6a85a] text-white hover:bg-[#c3964b]">
-                  {submitting ? 'Enviando...' : 'Enviar solicitud'}
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-function SummaryCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-border/60 bg-background/75 px-4 py-3 shadow-sm">
-      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-bold">{value}</p>
     </div>
   );
 }
