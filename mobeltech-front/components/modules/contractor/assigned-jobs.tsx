@@ -1763,7 +1763,7 @@ export default function AssignedJobs() {
                 </div>
 
                 <div className="overflow-x-auto rounded-md border border-border/70">
-                  <table className="w-full min-w-[1120px] table-fixed text-sm">
+                  <table className="w-full min-w-[1180px] table-fixed text-sm">
                     <thead>
                       <tr className="border-b border-border/70">
                         <th className="w-12 px-2 py-2 text-center font-semibold text-muted-foreground">No</th>
@@ -1773,8 +1773,8 @@ export default function AssignedJobs() {
                         <th className={`w-[11%] px-3 py-2 text-right font-semibold ${tableMeasureHeaderClass}`}>Ancho/Cantidad</th>
                         <th className={`w-[11%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>TOTAL</th>
                         <th className={`w-[13%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>P.UNITARIO</th>
-                        <th className={`w-[12%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>P.PARCIAL</th>
-                        <th className="w-[8%] px-3 py-2 text-right font-medium text-muted-foreground">Acción</th>
+                        <th className={`w-[13%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>P.PARCIAL</th>
+                        <th className="w-[10%] px-3 py-2 text-right font-medium text-muted-foreground">Acción</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1819,21 +1819,21 @@ export default function AssignedJobs() {
                             {getDraftLineMeasuredTotal(line).toLocaleString('es-BO', { maximumFractionDigits: 3 })}
                           </td>
                           <td className={`px-3 py-2 text-right font-mono ${tableMoneyCellClass}`}>{formatCurrency(line.unitPrice)}</td>
-                          <td className={`px-3 py-2 text-right font-mono font-semibold ${tableMoneyCellClass}`}>{formatCurrency(getDraftLinePartial(line))}</td>
-                          <td className="px-3 py-2 text-right">
-                            <div className="flex justify-end gap-1">
+                          <td className={`px-4 py-2 text-right font-mono font-semibold ${tableMoneyCellClass}`}>{formatCurrency(getDraftLinePartial(line))}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center justify-end gap-1.5">
                               <Button
                                 type="button"
                                 variant={isLineConfirmed ? 'outline' : 'ghost'}
-                                size="sm"
-                                className={`gap-1.5 ${isLineConfirmed ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100' : ''}`}
+                                size="icon"
+                                className={`h-8 w-8 shrink-0 ${isLineConfirmed ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100' : 'text-muted-foreground hover:text-emerald-700'}`}
                                 onClick={() => confirmLaborLine(line.itemKey)}
                                 aria-label={isLineConfirmed ? `Item ${line.label} confirmado` : `Confirmar item ${line.label}`}
+                                title={isLineConfirmed ? 'Item confirmado' : 'Confirmar item'}
                               >
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                <span className="hidden xl:inline">{isLineConfirmed ? 'OK' : 'Confirmar'}</span>
+                                <CheckCircle2 className="h-4 w-4" />
                               </Button>
-                              <Button type="button" variant="ghost" size="sm" onClick={() => removeLaborLine(index)}>Quitar</Button>
+                              <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => removeLaborLine(index)}>Quitar</Button>
                             </div>
                           </td>
                         </tr>
