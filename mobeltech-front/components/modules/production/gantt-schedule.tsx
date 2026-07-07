@@ -242,17 +242,56 @@ function getDefaultActualPlan(startDate?: string | null, endDate?: string | null
   });
 }
 
+function normalizeMachineValue(value?: string | null) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function findPhaseMachine(value: string | null | undefined, phase: PhaseName, machines: PhaseMachine[]) {
+  const normalizedValue = normalizeMachineValue(value);
+  if (!normalizedValue) return null;
+
+  return machines.find((machine) => (
+    machine.phase === phase &&
+    (normalizeMachineValue(machine.id) === normalizedValue || normalizeMachineValue(machine.name) === normalizedValue)
+  )) ?? null;
+}
+
+function normalizePhaseMachineId(value: string | null | undefined, phase: PhaseName, machines: PhaseMachine[]) {
+  const machine = findPhaseMachine(value, phase, machines);
+  return machine?.id ?? (value?.trim() || null);
+}
+
+function phaseMachineValuesMatch(left: string | null | undefined, right: string | null | undefined, phase: PhaseName, machines: PhaseMachine[]) {
+  const normalizedLeft = normalizeMachineValue(left);
+  const normalizedRight = normalizeMachineValue(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+
+  const leftMachine = findPhaseMachine(left, phase, machines);
+  const rightMachine = findPhaseMachine(right, phase, machines);
+
+  if (leftMachine && rightMachine) return leftMachine.id === rightMachine.id;
+  if (leftMachine) {
+    return normalizeMachineValue(leftMachine.id) === normalizedRight || normalizeMachineValue(leftMachine.name) === normalizedRight;
+  }
+  if (rightMachine) {
+    return normalizedLeft === normalizeMachineValue(rightMachine.id) || normalizedLeft === normalizeMachineValue(rightMachine.name);
+  }
+
+  return normalizedLeft === normalizedRight;
+}
+
 function normalizeActualPhases(rows: SchedulePhase[] | undefined, fallbackStart?: string | null, fallbackEnd?: string | null, machines: PhaseMachine[] = []) {
   const existing = rows?.filter((row) => row.type === 'actual') ?? [];
   const fallback = getDefaultActualPlan(fallbackStart, fallbackEnd);
   return PHASES.map((phase, index) => {
     const found = existing.find((row) => row.phase === phase.key);
     const defaultMachine = machines.find((machine) => machine.phase === phase.key && machine.active);
+    const savedMachine = normalizePhaseMachineId(found?.cuttingMachine, phase.key, machines);
     return {
       phase: phase.key,
       startDate: found?.startDate?.slice(0, 10) ?? fallback[index].startDate,
       endDate: found?.endDate?.slice(0, 10) ?? fallback[index].endDate,
-      cuttingMachine: found?.cuttingMachine ?? defaultMachine?.id ?? null,
+      cuttingMachine: savedMachine ?? defaultMachine?.id ?? null,
     };
   });
 }
@@ -649,7 +688,10 @@ export function GanttSchedule() {
 
   function getMachineLabel(machineId?: string | null) {
     if (!machineId) return 'Sin máquina';
-    return phaseMachines.find((machine) => machine.id === machineId)?.name ?? machineId;
+    const normalizedValue = normalizeMachineValue(machineId);
+    return phaseMachines.find((machine) => (
+      normalizeMachineValue(machine.id) === normalizedValue || normalizeMachineValue(machine.name) === normalizedValue
+    ))?.name ?? machineId;
   }
 
   function resetMachineForm() {
@@ -917,6 +959,8 @@ export function GanttSchedule() {
 
   function getMachineReservations(phaseDraft: EditablePhase): MachineReservation[] {
     if (!editing || !phaseDraft.cuttingMachine) return [];
+    const selectedMachine = normalizePhaseMachineId(phaseDraft.cuttingMachine, phaseDraft.phase, phaseMachines);
+
     return orders
       .flatMap((order) => {
         if (order.id === editing.order.id) return [];
@@ -925,7 +969,7 @@ export function GanttSchedule() {
           .filter((phase) => (
             phase.type === 'actual' &&
             phase.phase === phaseDraft.phase &&
-            phase.cuttingMachine === phaseDraft.cuttingMachine
+            phaseMachineValuesMatch(phase.cuttingMachine, selectedMachine, phaseDraft.phase, phaseMachines)
           ))
           .map((phase) => ({
             orderId: order.id,
@@ -1747,12 +1791,15 @@ function MachineAvailabilityCalendar({
                   return start && end && dateRangesOverlap(day, day, start, end);
                 });
                 const selected = selectedStartDate && selectedEndDate && dateRangesOverlap(day, day, selectedStartDate, selectedEndDate);
+                const selectedOccupied = Boolean(selected && occupied);
 
                 return (
                   <div
                     key={day.toISOString()}
                     className={`flex h-8 items-center justify-center rounded-md border text-[11px] font-semibold sm:h-9 ${
-                      selected
+                      selectedOccupied
+                        ? 'border-rose-300 bg-rose-100 text-rose-800 ring-1 ring-rose-300 dark:border-rose-400/60 dark:bg-rose-500/20 dark:text-rose-100'
+                        : selected
                         ? 'border-sky-400 bg-sky-100 text-sky-800 dark:border-sky-400/70 dark:bg-sky-500/20 dark:text-sky-100'
                         : occupied
                           ? 'border-amber-200 bg-amber-100 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/20 dark:text-amber-100'
@@ -1780,6 +1827,10 @@ function MachineAvailabilityCalendar({
         <span className="inline-flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-sm bg-sky-100 ring-1 ring-sky-300" />
           Tu rango
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-rose-100 ring-1 ring-rose-300" />
+          Choque
         </span>
       </div>
     </div>
