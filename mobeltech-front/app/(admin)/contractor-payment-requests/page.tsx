@@ -67,10 +67,17 @@ type LaborCatalogItem = {
   sortOrder: number;
   enableHeight?: boolean;
   enableWidthQuantity?: boolean;
+  defaultHeight?: number;
+  defaultWidthQuantity?: number;
+  useDefaultHeight?: boolean;
+  useDefaultWidthQuantity?: boolean;
 };
 
 const money = (value: number) =>
   `Bs. ${Number(value || 0).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const measure = (value?: number) =>
+  Number(value || 0).toLocaleString('es-BO', { maximumFractionDigits: 3 });
 
 const tableItemHeaderClass = 'bg-amber-100 text-amber-950 dark:bg-amber-500/20 dark:text-amber-100';
 const tableItemCellClass = 'bg-amber-50/80 text-zinc-900 dark:bg-amber-500/10 dark:text-zinc-100';
@@ -293,6 +300,10 @@ export default function ContractorPaymentRequestsPage() {
   const [activityAmount, setActivityAmount] = useState('');
   const [activityEnableHeight, setActivityEnableHeight] = useState(true);
   const [activityEnableWidthQuantity, setActivityEnableWidthQuantity] = useState(true);
+  const [activityDefaultHeight, setActivityDefaultHeight] = useState('');
+  const [activityDefaultWidthQuantity, setActivityDefaultWidthQuantity] = useState('');
+  const [activityUseDefaultHeight, setActivityUseDefaultHeight] = useState(false);
+  const [activityUseDefaultWidthQuantity, setActivityUseDefaultWidthQuantity] = useState(false);
   const [savingActivity, setSavingActivity] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -342,6 +353,10 @@ export default function ContractorPaymentRequestsPage() {
     setActivityAmount('');
     setActivityEnableHeight(true);
     setActivityEnableWidthQuantity(true);
+    setActivityDefaultHeight('');
+    setActivityDefaultWidthQuantity('');
+    setActivityUseDefaultHeight(false);
+    setActivityUseDefaultWidthQuantity(false);
   }
 
   function editActivity(item: LaborCatalogItem) {
@@ -351,6 +366,10 @@ export default function ContractorPaymentRequestsPage() {
     setActivityAmount(String(item.referencePrice ?? item.defaultAmount));
     setActivityEnableHeight(item.enableHeight ?? true);
     setActivityEnableWidthQuantity(item.enableWidthQuantity ?? true);
+    setActivityDefaultHeight(item.defaultHeight ? String(item.defaultHeight) : '');
+    setActivityDefaultWidthQuantity(item.defaultWidthQuantity ? String(item.defaultWidthQuantity) : '');
+    setActivityUseDefaultHeight(item.useDefaultHeight ?? false);
+    setActivityUseDefaultWidthQuantity(item.useDefaultWidthQuantity ?? false);
   }
 
   async function downloadApprovedPlanPdf(plan: PaymentPlan) {
@@ -456,6 +475,14 @@ export default function ContractorPaymentRequestsPage() {
       toast({ title: 'Precio inválido', description: 'El precio debe ser mayor a 0.', variant: 'destructive' });
       return;
     }
+    if (activityEnableHeight && activityUseDefaultHeight && numberValue(activityDefaultHeight) <= 0) {
+      toast({ title: 'Alto por defecto inválido', description: 'El alto por defecto debe ser mayor a 0.', variant: 'destructive' });
+      return;
+    }
+    if (activityEnableWidthQuantity && activityUseDefaultWidthQuantity && numberValue(activityDefaultWidthQuantity) <= 0) {
+      toast({ title: 'Ancho/Cantidad por defecto inválido', description: 'El valor por defecto debe ser mayor a 0.', variant: 'destructive' });
+      return;
+    }
     setSavingActivity(true);
     try {
       const response = await fetch(`${apiBase}/api/contractor-finance/labor-items${editingActivityId ? `/${editingActivityId}` : ''}`, {
@@ -469,6 +496,10 @@ export default function ContractorPaymentRequestsPage() {
           defaultAmount: numberValue(activityAmount),
           enableHeight: activityEnableHeight,
           enableWidthQuantity: activityEnableWidthQuantity,
+          defaultHeight: activityEnableHeight && activityUseDefaultHeight ? numberValue(activityDefaultHeight) : 0,
+          defaultWidthQuantity: activityEnableWidthQuantity && activityUseDefaultWidthQuantity ? numberValue(activityDefaultWidthQuantity) : 0,
+          useDefaultHeight: activityEnableHeight ? activityUseDefaultHeight : false,
+          useDefaultWidthQuantity: activityEnableWidthQuantity ? activityUseDefaultWidthQuantity : false,
           active: 'true',
           sortOrder: editingActivityId ? laborItems.find((item) => item.id === editingActivityId)?.sortOrder ?? 0 : laborItems.length + 1,
         }),
@@ -597,7 +628,7 @@ export default function ContractorPaymentRequestsPage() {
               </DialogHeader>
               <div className="space-y-4 overflow-y-auto px-5 py-4">
                 <div className="rounded-lg border border-border/70 bg-muted/25 p-4">
-                  <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_100px_150px_220px_auto_auto] lg:items-end">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_100px_150px_auto_auto] lg:items-end">
                     <div className="space-y-1.5">
                       <Label>Item</Label>
                       <Input value={activityLabel} onChange={(event) => setActivityLabel(event.target.value)} placeholder="Ej. Armado de cajonería" />
@@ -610,30 +641,102 @@ export default function ContractorPaymentRequestsPage() {
                       <Label>P. unitario Bs.</Label>
                       <Input type="number" value={activityAmount} onChange={(event) => setActivityAmount(event.target.value)} placeholder="0.00" />
                     </div>
-                    <div className="rounded-md border border-border/70 bg-background p-3">
-                      <p className="mb-2 text-xs font-semibold text-muted-foreground">Columnas habilitadas</p>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={activityEnableHeight} onChange={(event) => setActivityEnableHeight(event.target.checked)} />
-                        Alto
-                      </label>
-                      <label className="mt-1 flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={activityEnableWidthQuantity} onChange={(event) => setActivityEnableWidthQuantity(event.target.checked)} />
-                        Ancho/Cantidad
-                      </label>
-                    </div>
                     <Button type="button" variant="outline" onClick={resetActivityForm}>Limpiar</Button>
                     <Button type="button" disabled={savingActivity} onClick={() => void saveActivity()}>
                       {savingActivity ? 'Guardando...' : editingActivityId ? 'Actualizar' : 'Agregar'}
                     </Button>
                   </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-md border border-border/70 bg-background p-3">
+                      <label className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={activityEnableHeight}
+                          onChange={(event) => {
+                            setActivityEnableHeight(event.target.checked);
+                            if (!event.target.checked) setActivityUseDefaultHeight(false);
+                          }}
+                        />
+                        <span>
+                          <span className="block text-sm font-semibold">Mostrar columna Alto</span>
+                          <span className="block text-xs text-muted-foreground">El contratista verá esta medida en su formulario.</span>
+                        </span>
+                      </label>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                        <div className="space-y-1.5">
+                          <Label>Alto por defecto</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            value={activityDefaultHeight}
+                            onChange={(event) => setActivityDefaultHeight(event.target.value)}
+                            placeholder="Ej. 1"
+                            disabled={!activityEnableHeight || !activityUseDefaultHeight}
+                          />
+                        </div>
+                        <label className="flex min-h-10 items-center gap-2 rounded-md border border-border/70 px-3 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={activityUseDefaultHeight}
+                            disabled={!activityEnableHeight}
+                            onChange={(event) => setActivityUseDefaultHeight(event.target.checked)}
+                          />
+                          Dejar fijo
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border border-border/70 bg-background p-3">
+                      <label className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={activityEnableWidthQuantity}
+                          onChange={(event) => {
+                            setActivityEnableWidthQuantity(event.target.checked);
+                            if (!event.target.checked) setActivityUseDefaultWidthQuantity(false);
+                          }}
+                        />
+                        <span>
+                          <span className="block text-sm font-semibold">Mostrar columna Ancho/Cantidad</span>
+                          <span className="block text-xs text-muted-foreground">Úsala para ancho, cantidad o la segunda medida del cálculo.</span>
+                        </span>
+                      </label>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                        <div className="space-y-1.5">
+                          <Label>Ancho/Cantidad por defecto</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            value={activityDefaultWidthQuantity}
+                            onChange={(event) => setActivityDefaultWidthQuantity(event.target.value)}
+                            placeholder="Ej. 1"
+                            disabled={!activityEnableWidthQuantity || !activityUseDefaultWidthQuantity}
+                          />
+                        </div>
+                        <label className="flex min-h-10 items-center gap-2 rounded-md border border-border/70 px-3 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={activityUseDefaultWidthQuantity}
+                            disabled={!activityEnableWidthQuantity}
+                            onChange={(event) => setActivityUseDefaultWidthQuantity(event.target.checked)}
+                          />
+                          Dejar fijo
+                        </label>
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div className="overflow-x-auto rounded-md border border-border/70">
-                  <table className="w-full min-w-[980px] table-fixed text-sm">
+                  <table className="w-full min-w-[1080px] table-fixed text-sm">
                     <thead>
                       <tr className="border-b border-border/70">
                         <th className={`w-[34%] px-3 py-2 text-left font-semibold ${tableItemHeaderClass}`}>ITEM</th>
                         <th className={`w-[12%] px-3 py-2 text-center font-semibold ${tableItemHeaderClass}`}>UNIDAD</th>
-                        <th className={`w-[18%] px-3 py-2 text-left font-semibold ${tableMeasureHeaderClass}`}>MEDIDAS</th>
+                        <th className={`w-[24%] px-3 py-2 text-left font-semibold ${tableMeasureHeaderClass}`}>MEDIDAS</th>
                         <th className={`w-[16%] px-3 py-2 text-right font-semibold ${tableMoneyHeaderClass}`}>P.UNITARIO</th>
                         <th className="w-[14%] px-3 py-2 text-left font-medium text-muted-foreground">Estado</th>
                         <th className="w-[16%] px-3 py-2 text-right font-medium text-muted-foreground">Acciones</th>
@@ -648,8 +751,16 @@ export default function ContractorPaymentRequestsPage() {
                           <td className={`px-3 py-3 text-center font-mono text-xs font-semibold ${tableItemCellClass}`}>{item.unit || 'UND'}</td>
                           <td className={`px-3 py-3 ${tableMeasureCellClass}`}>
                             <div className="flex flex-wrap gap-1">
-                              {item.enableHeight ?? true ? <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100">Alto</Badge> : null}
-                              {item.enableWidthQuantity ?? true ? <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100">Ancho/Cantidad</Badge> : null}
+                              {item.enableHeight ?? true ? (
+                                <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100">
+                                  Alto{item.useDefaultHeight ? ` fijo ${measure(item.defaultHeight)}` : ''}
+                                </Badge>
+                              ) : null}
+                              {item.enableWidthQuantity ?? true ? (
+                                <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100">
+                                  Ancho/Cantidad{item.useDefaultWidthQuantity ? ` fijo ${measure(item.defaultWidthQuantity)}` : ''}
+                                </Badge>
+                              ) : null}
                               {!(item.enableHeight ?? true) && !(item.enableWidthQuantity ?? true) ? <Badge className="bg-zinc-100 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100">Sin medidas</Badge> : null}
                             </div>
                           </td>

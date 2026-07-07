@@ -179,6 +179,10 @@ type LaborCatalogItem = {
   sortOrder: number;
   enableHeight?: boolean;
   enableWidthQuantity?: boolean;
+  defaultHeight?: number;
+  defaultWidthQuantity?: number;
+  useDefaultHeight?: boolean;
+  useDefaultWidthQuantity?: boolean;
 };
 
 type LaborDraftLine = {
@@ -191,6 +195,10 @@ type LaborDraftLine = {
   unitPrice: number;
   enableHeight: boolean;
   enableWidthQuantity: boolean;
+  defaultHeight?: number;
+  defaultWidthQuantity?: number;
+  useDefaultHeight?: boolean;
+  useDefaultWidthQuantity?: boolean;
 };
 
 type LaborScheduleRow = {
@@ -220,6 +228,15 @@ function formatDate(value?: string | Date | null) {
 
 function formatCurrency(amount: number) {
   return `Bs. ${Number(amount || 0).toLocaleString('es-BO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatMeasure(amount?: number) {
+  return Number(amount || 0).toLocaleString('es-BO', { maximumFractionDigits: 3 });
+}
+
+function measureInputValue(amount?: number) {
+  const numeric = Number(amount || 0);
+  return numeric > 0 ? String(numeric) : '';
 }
 
 const tableItemHeaderClass = 'bg-amber-100 text-amber-950 dark:bg-amber-500/20 dark:text-amber-100';
@@ -617,11 +634,15 @@ export default function AssignedJobs() {
           itemKey: item.itemKey,
           label: item.label,
           unit: item.unit || 'UND',
-          width: '',
-          heightQuantity: '',
+          width: item.useDefaultHeight ? measureInputValue(item.defaultHeight) : '',
+          heightQuantity: item.useDefaultWidthQuantity ? measureInputValue(item.defaultWidthQuantity) : '',
           unitPrice: item.referencePrice ?? item.defaultAmount,
           enableHeight: item.enableHeight ?? true,
           enableWidthQuantity: item.enableWidthQuantity ?? true,
+          defaultHeight: item.defaultHeight ?? 0,
+          defaultWidthQuantity: item.defaultWidthQuantity ?? 0,
+          useDefaultHeight: item.useDefaultHeight ?? false,
+          useDefaultWidthQuantity: item.useDefaultWidthQuantity ?? false,
         },
       ];
     });
@@ -638,7 +659,12 @@ export default function AssignedJobs() {
 
   function updateLaborLine(index: number, field: 'width' | 'heightQuantity', value: string) {
     setSelectedLaborLines((current) =>
-      current.map((line, currentIndex) => (currentIndex === index ? { ...line, [field]: value } : line)),
+      current.map((line, currentIndex) => {
+        if (currentIndex !== index) return line;
+        if (field === 'width' && line.useDefaultHeight) return line;
+        if (field === 'heightQuantity' && line.useDefaultWidthQuantity) return line;
+        return { ...line, [field]: value };
+      }),
     );
     setConfirmedLaborLineKeys((current) => {
       const itemKey = selectedLaborLines[index]?.itemKey;
@@ -668,21 +694,51 @@ export default function AssignedJobs() {
     const plan = getPaymentPlan(job);
     const draft = readLaborDraft(job.id);
     const draftLines = draft?.lines?.length ? draft.lines : null;
+    const catalogAwareDraftLines = draftLines?.map((line) => {
+      const catalogItem = laborItems.find((item) => item.itemKey === line.itemKey);
+      const useDefaultHeight = catalogItem?.useDefaultHeight ?? line.useDefaultHeight ?? false;
+      const useDefaultWidthQuantity = catalogItem?.useDefaultWidthQuantity ?? line.useDefaultWidthQuantity ?? false;
+
+      return {
+        ...line,
+        label: catalogItem?.label ?? line.label,
+        unit: catalogItem?.unit ?? line.unit,
+        width: useDefaultHeight ? measureInputValue(catalogItem?.defaultHeight ?? line.defaultHeight) : line.width,
+        heightQuantity: useDefaultWidthQuantity ? measureInputValue(catalogItem?.defaultWidthQuantity ?? line.defaultWidthQuantity) : line.heightQuantity,
+        unitPrice: catalogItem?.defaultAmount ?? line.unitPrice,
+        enableHeight: catalogItem?.enableHeight ?? line.enableHeight,
+        enableWidthQuantity: catalogItem?.enableWidthQuantity ?? line.enableWidthQuantity,
+        defaultHeight: catalogItem?.defaultHeight ?? line.defaultHeight ?? 0,
+        defaultWidthQuantity: catalogItem?.defaultWidthQuantity ?? line.defaultWidthQuantity ?? 0,
+        useDefaultHeight,
+        useDefaultWidthQuantity,
+      };
+    });
     setEditingLaborJobId(job.id);
     setLaborSearch('');
     setConfirmedLaborLineKeys(new Set());
     setSelectedLaborLines(
-      draftLines ?? plan?.lines?.map((line) => ({
-        id: line.id,
-        itemKey: line.phaseKey,
-        label: line.phaseLabel,
-        unit: line.unit || 'UND',
-        width: line.width ? String(line.width) : '',
-        heightQuantity: line.heightQuantity ? String(line.heightQuantity) : '',
-        unitPrice: line.unitPrice ?? laborItems.find((item) => item.itemKey === line.phaseKey)?.defaultAmount ?? 0,
-        enableHeight: line.enableHeight ?? laborItems.find((item) => item.itemKey === line.phaseKey)?.enableHeight ?? true,
-        enableWidthQuantity: line.enableWidthQuantity ?? laborItems.find((item) => item.itemKey === line.phaseKey)?.enableWidthQuantity ?? true,
-      })) ?? [],
+      catalogAwareDraftLines ?? plan?.lines?.map((line) => {
+        const catalogItem = laborItems.find((item) => item.itemKey === line.phaseKey);
+        const useDefaultHeight = catalogItem?.useDefaultHeight ?? false;
+        const useDefaultWidthQuantity = catalogItem?.useDefaultWidthQuantity ?? false;
+
+        return {
+          id: line.id,
+          itemKey: line.phaseKey,
+          label: catalogItem?.label ?? line.phaseLabel,
+          unit: catalogItem?.unit ?? line.unit ?? 'UND',
+          width: useDefaultHeight ? measureInputValue(catalogItem?.defaultHeight) : (line.width ? String(line.width) : ''),
+          heightQuantity: useDefaultWidthQuantity ? measureInputValue(catalogItem?.defaultWidthQuantity) : (line.heightQuantity ? String(line.heightQuantity) : ''),
+          unitPrice: catalogItem?.defaultAmount ?? line.unitPrice ?? 0,
+          enableHeight: catalogItem?.enableHeight ?? line.enableHeight ?? true,
+          enableWidthQuantity: catalogItem?.enableWidthQuantity ?? line.enableWidthQuantity ?? true,
+          defaultHeight: catalogItem?.defaultHeight ?? 0,
+          defaultWidthQuantity: catalogItem?.defaultWidthQuantity ?? 0,
+          useDefaultHeight,
+          useDefaultWidthQuantity,
+        };
+      }) ?? [],
     );
     setLaborScheduleRows(normalizeScheduleRows(draft?.schedule ?? plan?.estimatedSchedule ?? createEmptyLaborSchedule()));
     setLaborDraftSavedAt(draft?.savedAt ?? null);
@@ -1748,7 +1804,10 @@ export default function AssignedJobs() {
                             <p className="text-xs text-muted-foreground">
                               {item.unit || 'UND'} · {formatCurrency(item.referencePrice ?? item.defaultAmount)}
                               {' · '}
-                              {[item.enableHeight ?? true ? 'Alto' : null, item.enableWidthQuantity ?? true ? 'Ancho/Cantidad' : null].filter(Boolean).join(' + ') || 'Sin medidas'}
+                              {[
+                                item.enableHeight ?? true ? `Alto${item.useDefaultHeight ? ` fijo ${formatMeasure(item.defaultHeight)}` : ''}` : null,
+                                item.enableWidthQuantity ?? true ? `Ancho/Cantidad${item.useDefaultWidthQuantity ? ` fijo ${formatMeasure(item.defaultWidthQuantity)}` : ''}` : null,
+                              ].filter(Boolean).join(' + ') || 'Sin medidas'}
                             </p>
                           </div>
                           <Button type="button" size="sm" className="shrink-0" onClick={(event) => { event.stopPropagation(); addLaborLine(item); }}>Agregar</Button>
@@ -1791,28 +1850,44 @@ export default function AssignedJobs() {
                           <td className={`px-3 py-2 text-center font-mono text-xs font-semibold ${tableItemCellClass}`}>{line.unit}</td>
                           <td className={`px-3 py-2 ${tableMeasureCellClass}`}>
                             {line.enableHeight ? (
-                              <Input
-                                type="number"
-                                min="0"
-                                step="0.001"
-                                value={line.width}
-                                onChange={(event) => updateLaborLine(index, 'width', event.target.value)}
-                                className="h-8 text-right font-mono dark:border-zinc-600 dark:bg-zinc-950/40 dark:text-zinc-100"
-                                placeholder="0"
-                              />
+                              <div className="space-y-1">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.001"
+                                  value={line.width}
+                                  disabled={line.useDefaultHeight}
+                                  onChange={(event) => updateLaborLine(index, 'width', event.target.value)}
+                                  className="h-8 text-right font-mono disabled:cursor-not-allowed disabled:opacity-80 dark:border-zinc-600 dark:bg-zinc-950/40 dark:text-zinc-100"
+                                  placeholder="0"
+                                />
+                                {line.useDefaultHeight ? (
+                                  <span className="block text-right text-[10px] font-semibold uppercase text-emerald-700 dark:text-emerald-200">
+                                    Fijo
+                                  </span>
+                                ) : null}
+                              </div>
                             ) : <span className="block text-center text-xs text-muted-foreground">No aplica</span>}
                           </td>
                           <td className={`px-3 py-2 ${tableMeasureCellClass}`}>
                             {line.enableWidthQuantity ? (
-                              <Input
-                                type="number"
-                                min="0"
-                                step="0.001"
-                                value={line.heightQuantity}
-                                onChange={(event) => updateLaborLine(index, 'heightQuantity', event.target.value)}
-                                className="h-8 text-right font-mono dark:border-zinc-600 dark:bg-zinc-950/40 dark:text-zinc-100"
-                                placeholder="0"
-                              />
+                              <div className="space-y-1">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.001"
+                                  value={line.heightQuantity}
+                                  disabled={line.useDefaultWidthQuantity}
+                                  onChange={(event) => updateLaborLine(index, 'heightQuantity', event.target.value)}
+                                  className="h-8 text-right font-mono disabled:cursor-not-allowed disabled:opacity-80 dark:border-zinc-600 dark:bg-zinc-950/40 dark:text-zinc-100"
+                                  placeholder="0"
+                                />
+                                {line.useDefaultWidthQuantity ? (
+                                  <span className="block text-right text-[10px] font-semibold uppercase text-emerald-700 dark:text-emerald-200">
+                                    Fijo
+                                  </span>
+                                ) : null}
+                              </div>
                             ) : <span className="block text-center text-xs text-muted-foreground">No aplica</span>}
                           </td>
                           <td className={`px-3 py-2 text-right font-mono font-semibold ${tableMoneyCellClass}`}>
