@@ -65,7 +65,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       pathname?.startsWith('/production') ||
       pathname?.startsWith('/schedule') ||
       pathname?.startsWith('/contractor-requests') ||
-      pathname?.startsWith('/contractor-payment-requests')
+      pathname?.startsWith('/contractor-payment-requests') ||
+      pathname?.startsWith('/advance-requests')
     ) {
       setOpenProduction(true);
     }
@@ -87,6 +88,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       { id: 'furniture', label: 'Muebles', path: '/furniture', icon: 'Package', roles: ['contractor'] },
       { id: 'schedule', label: 'Cronograma', path: '/schedule', icon: 'Calendar', roles: ['contractor'] },
       { id: 'contractor-requests', label: 'Solicitud de Material', path: '/contractor-requests', icon: 'ShoppingCart', roles: ['contractor'] },
+      { id: 'advance-requests', label: 'Solicitud de anticipo', path: '/advance-requests', icon: 'DollarSign', roles: ['contractor'] },
     ];
   }
 
@@ -101,6 +103,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     { label: 'Cronograma', href: '/schedule' },
     { label: 'Solicitud de Material', href: '/contractor-requests' },
     { label: 'Solicitud mano de obra', href: '/contractor-payment-requests' },
+    { label: 'Solicitud de anticipos', href: '/advance-requests' },
   ].filter((item) => {
     if (currentRole === 'partner') return item.href === '/schedule';
     if (currentRole === 'contractor') return item.href !== '/contractor-payment-requests';
@@ -219,7 +222,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               pathname?.startsWith('/production') ||
               pathname?.startsWith('/schedule') ||
               pathname?.startsWith('/contractor-requests') ||
-              pathname?.startsWith('/contractor-payment-requests');
+              pathname?.startsWith('/contractor-payment-requests') ||
+              pathname?.startsWith('/advance-requests');
 
             return (
               <div key={module.id} className="space-y-0.5">

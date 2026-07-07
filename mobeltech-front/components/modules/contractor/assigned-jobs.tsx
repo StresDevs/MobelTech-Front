@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import {
   ArrowLeft,
@@ -289,6 +290,7 @@ async function loadLogoDataUrl() {
 
 export default function AssignedJobs() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedJobId = searchParams.get('jobId');
@@ -874,8 +876,14 @@ export default function AssignedJobs() {
       if (!response.ok) throw new Error(readApiError(data, 'No se pudo enviar la solicitud de anticipo.'));
       setAdvanceRequests((current) => [data as AdvanceRequestRecord, ...current.filter((entry) => entry.planId !== plan.id)]);
       setAdvanceJobId(null);
+      toast({ title: 'Solicitud de anticipo enviada', description: 'Administracion recibira la notificacion para revisarla.' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error enviando solicitud de anticipo.');
+      toast({
+        title: 'Error enviando solicitud',
+        description: err instanceof Error ? err.message : 'No se pudo enviar la solicitud de anticipo.',
+        variant: 'destructive',
+      });
     } finally {
       setSavingAdvance(false);
     }
@@ -1336,6 +1344,7 @@ export default function AssignedJobs() {
   const advanceJob = jobs.find((job) => job.id === advanceJobId) ?? null;
   const advancePlan = advanceJob ? getPaymentPlan(advanceJob) : undefined;
   const activeAdvanceRequest = advanceJob ? getAdvanceRequest(advanceJob) : undefined;
+  const canSubmitAdvanceRequest = !activeAdvanceRequest || activeAdvanceRequest.status === 'rejected';
   const laborQuery = laborSearch.trim().toLowerCase();
   const availableLaborItems = laborItems.filter((item) => {
     const alreadyAdded = selectedLaborLines.some((line) => line.itemKey === item.itemKey);
@@ -2017,8 +2026,8 @@ export default function AssignedJobs() {
               </div>
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button variant="outline" onClick={() => setAdvanceJobId(null)}>Cerrar</Button>
-                <Button disabled={savingAdvance || Number(advanceAmount) <= 0} onClick={() => void saveAdvanceRequest(advanceJob)}>
-                  {savingAdvance ? 'Enviando...' : activeAdvanceRequest ? 'Reenviar solicitud' : 'Enviar solicitud'}
+                <Button disabled={savingAdvance || Number(advanceAmount) <= 0 || !canSubmitAdvanceRequest} onClick={() => void saveAdvanceRequest(advanceJob)}>
+                  {savingAdvance ? 'Enviando...' : activeAdvanceRequest?.status === 'rejected' ? 'Reenviar solicitud' : activeAdvanceRequest ? 'Solicitud activa' : 'Enviar solicitud'}
                 </Button>
               </div>
             </div>

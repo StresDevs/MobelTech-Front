@@ -25,11 +25,13 @@ export function getNotificationTarget(notification: NotificationLike, role?: Use
     return withJobContext('/contractor-requests', notification.relatedJobId);
   }
 
+  if (message.includes('solicitud de anticipo') || message.includes('anticipo de mano de obra')) {
+    return withJobContext('/advance-requests', notification.relatedJobId);
+  }
+
   if (
     message.includes('solicitud de pago de mano de obra') ||
-    message.includes('solicitud de mano de obra') ||
-    message.includes('solicitud de anticipo') ||
-    message.includes('anticipo de mano de obra')
+    message.includes('solicitud de mano de obra')
   ) {
     return role === 'contractor'
       ? withJobContext('/assigned-jobs', notification.relatedJobId)

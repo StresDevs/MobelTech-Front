@@ -22,6 +22,7 @@ const ROUTE_ACCESS: Array<{ prefix: string; roles: UserRole[] }> = [
   { prefix: '/assigned-jobs', roles: ['contractor'] },
   { prefix: '/contractor-requests', roles: ['admin', 'architect', 'contractor'] },
   { prefix: '/contractor-payment-requests', roles: ['admin', 'architect'] },
+  { prefix: '/advance-requests', roles: ['admin', 'architect', 'contractor'] },
   { prefix: '/my-materials', roles: ['contractor'] },
   { prefix: '/my-finance', roles: ['contractor'] },
 ]
