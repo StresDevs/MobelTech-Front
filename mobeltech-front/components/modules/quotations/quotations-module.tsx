@@ -41,6 +41,7 @@ import {
   Layers3,
   CalendarRange,
   Pencil,
+  Loader2,
 } from 'lucide-react';
 
 type QuotationStatus = Quotation['status'];
@@ -1736,7 +1737,23 @@ function QuotationDetail({
 
       {showEnvironmentBuilder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
-          <Card className="w-full max-w-6xl max-h-[88vh] overflow-y-auto p-6 space-y-5">
+          <Card className="relative w-full max-w-6xl max-h-[88vh] overflow-y-auto p-6 space-y-5">
+            {environmentSaving ? (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/85 backdrop-blur-sm">
+                <div className="w-[min(22rem,calc(100%-2rem))] rounded-xl border border-border bg-card p-5 text-center shadow-2xl">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#eab676]/15">
+                    <Loader2 className="h-7 w-7 animate-spin text-[#d6a85a]" />
+                  </div>
+                  <p className="mt-4 text-sm font-semibold">Creando proyectos por ambiente</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Sincronizando {environmentRows.length} ambiente{environmentRows.length === 1 ? '' : 's'}, órdenes y notificaciones.
+                  </p>
+                  <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div className="h-full w-1/2 animate-pulse rounded-full bg-[#eab676]" />
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-lg font-semibold">Crear proyectos por ambiente</p>
@@ -1937,7 +1954,12 @@ function QuotationDetail({
                   Cancelar
                 </Button>
                 <Button onClick={saveEnvironmentProjects} disabled={environmentSaving || environmentDraftExceeds} style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
-                  {environmentSaving ? 'Guardando...' : 'Crear proyectos'}
+                  {environmentSaving ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Creando...
+                    </span>
+                  ) : 'Crear proyectos'}
                 </Button>
               </div>
             </div>

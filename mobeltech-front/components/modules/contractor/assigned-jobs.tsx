@@ -440,10 +440,16 @@ export default function AssignedJobs() {
 
   function getEnvironment(job: ProductionOrderRecord) {
     const quotation = getQuotation(job);
-    return quotation?.environmentProjects?.find((environment) => (
-      environment.projectId === job.projectId ||
-      (environment.assignedContractorId === job.assignedContractorId && environment.id)
-    )) ?? null;
+    const environments = quotation?.environmentProjects ?? [];
+    const environmentByProject = environments.find((environment) => (
+      Boolean(job.projectId) && environment.projectId === job.projectId
+    ));
+    if (environmentByProject) return environmentByProject;
+
+    const contractorEnvironments = environments.filter((environment) => (
+      environment.assignedContractorId === job.assignedContractorId
+    ));
+    return contractorEnvironments.length === 1 ? contractorEnvironments[0] : null;
   }
 
   function getLeadDescription(job: ProductionOrderRecord) {
@@ -472,19 +478,33 @@ export default function AssignedJobs() {
 
   function getInitialSketchupFiles(job: ProductionOrderRecord) {
     const environment = getEnvironment(job);
+    if (environment?.id) {
+      return sortFurnitureFilesByVersion(furnitureFiles.filter((file) => (
+        file.fileKind !== 'contractor_final' &&
+        file.projectEnvironmentId === environment.id
+      )));
+    }
+
     return sortFurnitureFilesByVersion(furnitureFiles.filter((file) => (
       file.fileKind !== 'contractor_final' &&
-      ((environment?.id && file.projectEnvironmentId === environment.id) ||
-      (file.quotationId === job.quotationId && file.assignedContractorId === job.assignedContractorId))
+      file.quotationId === job.quotationId &&
+      file.assignedContractorId === job.assignedContractorId
     )));
   }
 
   function getFinalSketchupFile(job: ProductionOrderRecord) {
     const environment = getEnvironment(job);
+    if (environment?.id) {
+      return sortFurnitureFilesByVersion(furnitureFiles.filter((file) => (
+        file.fileKind === 'contractor_final' &&
+        file.projectEnvironmentId === environment.id
+      )))[0];
+    }
+
     return sortFurnitureFilesByVersion(furnitureFiles.filter((file) => (
       file.fileKind === 'contractor_final' &&
-      ((environment?.id && file.projectEnvironmentId === environment.id) ||
-      (file.quotationId === job.quotationId && file.assignedContractorId === job.assignedContractorId))
+      file.quotationId === job.quotationId &&
+      file.assignedContractorId === job.assignedContractorId
     )))[0];
   }
 
@@ -1518,7 +1538,24 @@ export default function AssignedJobs() {
                 const plan = getPaymentPlan(job);
                 const advanceRequest = getAdvanceRequest(job);
                 return (
-                  <tr key={job.id} className="border-b border-border/70 last:border-b-0">
+                  <tr
+                    key={job.id}
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer border-b border-border/70 transition-colors last:border-b-0 hover:bg-muted/35 focus-visible:bg-muted/35 focus-visible:outline-none"
+                    onClick={(event) => {
+                      const target = event.target as HTMLElement;
+                      if (target.closest('button,a,input,label,select,textarea')) return;
+                      openJobDetail(job.id);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      const target = event.target as HTMLElement;
+                      if (target.closest('button,a,input,label,select,textarea')) return;
+                      event.preventDefault();
+                      openJobDetail(job.id);
+                    }}
+                  >
                     <td className="px-4 py-3">
                       <p className="font-mono text-xs text-muted-foreground">{job.id.slice(0, 8)}</p>
                       <Button size="sm" variant="ghost" className="mt-1 h-7 px-2 text-xs" onClick={() => openJobDetail(job.id)}>
