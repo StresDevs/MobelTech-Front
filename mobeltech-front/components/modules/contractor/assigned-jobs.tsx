@@ -291,6 +291,7 @@ export default function AssignedJobs() {
   const [editingLaborJobId, setEditingLaborJobId] = useState<string | null>(null);
   const [laborSchedulePromptJobId, setLaborSchedulePromptJobId] = useState<string | null>(null);
   const [selectedLaborLines, setSelectedLaborLines] = useState<LaborDraftLine[]>([]);
+  const [confirmedLaborLineKeys, setConfirmedLaborLineKeys] = useState<Set<string>>(() => new Set());
   const [laborScheduleRows, setLaborScheduleRows] = useState<LaborScheduleRow[]>([]);
   const [laborDraftSavedAt, setLaborDraftSavedAt] = useState<string | null>(null);
   const [laborSearch, setLaborSearch] = useState('');
@@ -627,14 +628,40 @@ export default function AssignedJobs() {
     setLaborSearch('');
   }
 
+  function confirmLaborLine(itemKey: string) {
+    setConfirmedLaborLineKeys((current) => {
+      const next = new Set(current);
+      next.add(itemKey);
+      return next;
+    });
+  }
+
   function updateLaborLine(index: number, field: 'width' | 'heightQuantity', value: string) {
     setSelectedLaborLines((current) =>
       current.map((line, currentIndex) => (currentIndex === index ? { ...line, [field]: value } : line)),
     );
+    setConfirmedLaborLineKeys((current) => {
+      const itemKey = selectedLaborLines[index]?.itemKey;
+      if (!itemKey || !current.has(itemKey)) return current;
+      const next = new Set(current);
+      next.delete(itemKey);
+      return next;
+    });
   }
 
   function removeLaborLine(index: number) {
-    setSelectedLaborLines((current) => current.filter((_, currentIndex) => currentIndex !== index));
+    setSelectedLaborLines((current) => {
+      const removedLine = current[index];
+      if (removedLine) {
+        setConfirmedLaborLineKeys((confirmed) => {
+          if (!confirmed.has(removedLine.itemKey)) return confirmed;
+          const next = new Set(confirmed);
+          next.delete(removedLine.itemKey);
+          return next;
+        });
+      }
+      return current.filter((_, currentIndex) => currentIndex !== index);
+    });
   }
 
   function openLaborForm(job: ProductionOrderRecord) {
@@ -643,6 +670,7 @@ export default function AssignedJobs() {
     const draftLines = draft?.lines?.length ? draft.lines : null;
     setEditingLaborJobId(job.id);
     setLaborSearch('');
+    setConfirmedLaborLineKeys(new Set());
     setSelectedLaborLines(
       draftLines ?? plan?.lines?.map((line) => ({
         id: line.id,
@@ -1661,7 +1689,7 @@ export default function AssignedJobs() {
       </Card>
       )}
 
-      <Dialog open={!!laborJob} onOpenChange={(open) => { if (!open) { setEditingLaborJobId(null); setSelectedLaborLines([]); setLaborScheduleRows([]); setLaborDraftSavedAt(null); setLaborSearch(''); } }}>
+      <Dialog open={!!laborJob} onOpenChange={(open) => { if (!open) { setEditingLaborJobId(null); setSelectedLaborLines([]); setConfirmedLaborLineKeys(new Set()); setLaborScheduleRows([]); setLaborDraftSavedAt(null); setLaborSearch(''); } }}>
         <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] max-w-none overflow-hidden p-0 sm:max-w-none xl:w-[min(1240px,calc(100vw-3rem))]">
           {laborJob ? (
             <div className="flex max-h-[90vh] flex-col">
@@ -1703,7 +1731,18 @@ export default function AssignedJobs() {
                   {availableLaborItems.length > 0 ? (
                     <div className="max-h-36 overflow-auto rounded-md border border-border/70">
                       {availableLaborItems.slice(0, 8).map((item) => (
-                        <div key={item.itemKey} className="flex items-center justify-between gap-3 border-b border-border/60 bg-emerald-50/60 px-3 py-2 text-zinc-900 transition hover:bg-emerald-100/70 last:border-b-0 dark:bg-emerald-500/10 dark:text-zinc-100 dark:hover:bg-emerald-500/15">
+                        <div
+                          key={item.itemKey}
+                          role="button"
+                          tabIndex={0}
+                          className="flex cursor-pointer items-center justify-between gap-3 border-b border-border/60 bg-emerald-50/60 px-3 py-2 text-zinc-900 transition hover:bg-emerald-100/70 focus-visible:bg-emerald-100/70 focus-visible:outline-none last:border-b-0 dark:bg-emerald-500/10 dark:text-zinc-100 dark:hover:bg-emerald-500/15 dark:focus-visible:bg-emerald-500/15"
+                          onClick={() => addLaborLine(item)}
+                          onKeyDown={(event) => {
+                            if (event.key !== 'Enter' && event.key !== ' ') return;
+                            event.preventDefault();
+                            addLaborLine(item);
+                          }}
+                        >
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">{item.label}</p>
                             <p className="text-xs text-muted-foreground">
@@ -1712,7 +1751,7 @@ export default function AssignedJobs() {
                               {[item.enableHeight ?? true ? 'Alto' : null, item.enableWidthQuantity ?? true ? 'Ancho/Cantidad' : null].filter(Boolean).join(' + ') || 'Sin medidas'}
                             </p>
                           </div>
-                          <Button type="button" size="sm" className="shrink-0" onClick={() => addLaborLine(item)}>Agregar</Button>
+                          <Button type="button" size="sm" className="shrink-0" onClick={(event) => { event.stopPropagation(); addLaborLine(item); }}>Agregar</Button>
                         </div>
                       ))}
                     </div>
@@ -1743,8 +1782,10 @@ export default function AssignedJobs() {
                         <tr>
                           <td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">Agrega actividades desde el buscador.</td>
                         </tr>
-                      ) : selectedLaborLines.map((line, index) => (
-                        <tr key={line.itemKey} className="border-b border-border/60 last:border-b-0">
+                      ) : selectedLaborLines.map((line, index) => {
+                        const isLineConfirmed = confirmedLaborLineKeys.has(line.itemKey);
+                        return (
+                        <tr key={line.itemKey} className={`border-b border-border/60 transition-colors last:border-b-0 ${isLineConfirmed ? 'bg-emerald-500/5' : ''}`}>
                           <td className="px-2 py-2 text-center font-mono text-xs text-muted-foreground">{index + 1}</td>
                           <td className={`px-3 py-2 font-medium ${tableItemCellClass}`}><span className="block whitespace-normal leading-snug">{line.label}</span></td>
                           <td className={`px-3 py-2 text-center font-mono text-xs font-semibold ${tableItemCellClass}`}>{line.unit}</td>
@@ -1780,10 +1821,24 @@ export default function AssignedJobs() {
                           <td className={`px-3 py-2 text-right font-mono ${tableMoneyCellClass}`}>{formatCurrency(line.unitPrice)}</td>
                           <td className={`px-3 py-2 text-right font-mono font-semibold ${tableMoneyCellClass}`}>{formatCurrency(getDraftLinePartial(line))}</td>
                           <td className="px-3 py-2 text-right">
-                            <Button type="button" variant="ghost" size="sm" onClick={() => removeLaborLine(index)}>Quitar</Button>
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                type="button"
+                                variant={isLineConfirmed ? 'outline' : 'ghost'}
+                                size="sm"
+                                className={`gap-1.5 ${isLineConfirmed ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100' : ''}`}
+                                onClick={() => confirmLaborLine(line.itemKey)}
+                                aria-label={isLineConfirmed ? `Item ${line.label} confirmado` : `Confirmar item ${line.label}`}
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                <span className="hidden xl:inline">{isLineConfirmed ? 'OK' : 'Confirmar'}</span>
+                              </Button>
+                              <Button type="button" variant="ghost" size="sm" onClick={() => removeLaborLine(index)}>Quitar</Button>
+                            </div>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
