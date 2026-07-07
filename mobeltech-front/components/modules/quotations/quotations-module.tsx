@@ -338,7 +338,7 @@ export function QuotationsModule() {
   const stats = useMemo(() => {
     const total = data.length;
     const approved = data.filter((q) => q.status === 'approved');
-    const pending = data.filter((q) => q.status === 'draft' || q.status === 'adjustment');
+    const pending = data.filter((q) => q.status === 'adjustment');
     const totalAmount = data.reduce((s, q) => s + q.totalAmount, 0);
     const approvedAmount = approved.reduce((s, q) => s + q.totalAmount, 0);
     return {
@@ -555,6 +555,7 @@ export function QuotationsModule() {
         <div className="space-y-3">
           {filtered.map(({ q, client, project, contractors, prequotation }) => {
             const cfg = STATUS_CONFIG[q.status];
+            const showStatusBadge = q.status !== 'draft';
             const itemCount = q.items.reduce((s, i) => s + i.quantity, 0);
             const quotationCode = q.uid ?? prequotation?.uid ?? q.id;
             const quotationHeadline = prequotation?.title ?? q.items[0]?.description ?? `Cotización ${quotationCode}`;
@@ -581,12 +582,14 @@ export function QuotationsModule() {
                         <span className="text-muted-foreground font-normal">·</span>{' '}
                         <span className="font-mono text-xs text-muted-foreground">#{quotationCode}</span>
                       </p>
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${cfg.color}`}
-                      >
-                        {cfg.icon}
-                        {cfg.label}
-                      </span>
+                      {showStatusBadge ? (
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${cfg.color}`}
+                        >
+                          {cfg.icon}
+                          {cfg.label}
+                        </span>
+                      ) : null}
                       {prequotation && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
                           <FileText className="w-3 h-3" />
@@ -706,6 +709,7 @@ function QuotationDetail({
   const currentQuotation = quotation;
   const canCreateEnvironmentProjects = canManageEnvironmentProjects;
   const cfg = STATUS_CONFIG[currentQuotation.status];
+  const showStatusBadge = currentQuotation.status !== 'draft';
   const subtotal = currentQuotation.items.reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0);
   const quotationCode = currentQuotation.uid ?? currentQuotation.prequotation?.uid ?? currentQuotation.id;
   const quotationHeadline = prequotationTitle ?? currentQuotation.items[0]?.description ?? `Cotización #${quotationCode}`;
@@ -1077,12 +1081,14 @@ function QuotationDetail({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-bold truncate">{quotationHeadline}</h1>
-            <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${cfg.color}`}
-            >
-              {cfg.icon}
-              {cfg.label}
-            </span>
+            {showStatusBadge ? (
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${cfg.color}`}
+              >
+                {cfg.icon}
+                {cfg.label}
+              </span>
+            ) : null}
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             Cliente: {clientName ?? 'Cliente'} · Cotización #{quotationCode} · Creada el {formatDate(quotation.createdDate)}

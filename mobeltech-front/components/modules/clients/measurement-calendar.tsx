@@ -843,13 +843,6 @@ export function MeasurementCalendar() {
           {missingPrequotationMeasurement && (
             <div className="px-6 pb-6 space-y-4">
               <div className="rounded-xl border border-border bg-muted/30 p-5 text-center space-y-3">
-                <div className="mx-auto h-14 w-14 rounded-full bg-[#eab676]/15 flex items-center justify-center">
-                  {canUploadDocuments ? (
-                    <FileUp className="h-6 w-6 text-[#d6a85a]" />
-                  ) : (
-                    <FileDown className="h-6 w-6 text-[#d6a85a]" />
-                  )}
-                </div>
                 <p className="text-base font-semibold">No hay precotizaciones ancladas</p>
                 <p className="text-sm text-muted-foreground">
                   Esta medición todavía no tiene una precotización vinculada.

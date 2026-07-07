@@ -100,7 +100,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const productionSubItems = [
     { label: 'Cronograma', href: '/schedule' },
     { label: 'Solicitud de Material', href: '/contractor-requests' },
-    { label: 'Solicitud de Pago Contratistas', href: '/contractor-payment-requests' },
+    { label: 'Solicitud mano de obra', href: '/contractor-payment-requests' },
   ].filter((item) => {
     if (currentRole === 'partner') return item.href === '/schedule';
     if (currentRole === 'contractor') return item.href !== '/contractor-payment-requests';

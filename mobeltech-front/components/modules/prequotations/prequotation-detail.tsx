@@ -81,7 +81,7 @@ const STATUS_TRANSITIONS: Record<PrequotationStatus, PrequotationStatus[]> = {
 };
 
 const NEXT_STATUS_LABEL: Partial<Record<PrequotationStatus, string>> = {
-  'in-review': 'Enviado a cliente',
+  'in-review': 'Enviar a cliente',
   adjustment: 'Cliente solicitó ajuste',
   confirmed: 'Confirmar con Anticipo',
   rejected: 'Rechazar',
@@ -306,7 +306,8 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
       try {
         const next = await persist({ ...p, status: newStatus, updatedAt: new Date(), logs: [...p.logs, log] });
         applyUpdate(next);
-        if (newStatus === 'in-review' || newStatus === 'adjustment') setActiveTab('history');
+        if (newStatus === 'adjustment') setActiveTab('versions');
+        else if (newStatus === 'in-review') setActiveTab('history');
       } finally {
         setStatusAction(null);
       }

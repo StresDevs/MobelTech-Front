@@ -1659,7 +1659,7 @@ export default function AssignedJobs() {
 
                   {laborItems.length === 0 ? (
                     <Card className="border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-                      No hay actividades de mano de obra configuradas. Pide al admin, gerente o arquitecta que las cree en Solicitud de Pago Contratistas.
+                      No hay actividades de mano de obra configuradas. Pide al admin, gerente o arquitecta que las cree en Solicitud mano de obra.
                     </Card>
                   ) : null}
 
