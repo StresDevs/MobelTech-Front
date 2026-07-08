@@ -169,6 +169,15 @@ type AdvanceRequestRecord = {
   requestedAt?: string | Date;
 };
 
+type MaterialRequestRecord = {
+  id: string;
+  contractorId: string;
+  productionOrderId?: string | null;
+  status: 'pending' | 'approved' | 'rejected' | string;
+  rejectionComments?: string | null;
+  requestDate?: string | Date;
+};
+
 type LaborCatalogItem = {
   id: string;
   itemKey: string;
@@ -305,6 +314,7 @@ export default function AssignedJobs() {
   const [furnitureFiles, setFurnitureFiles] = useState<FurnitureFileRecord[]>([]);
   const [paymentPlans, setPaymentPlans] = useState<ContractorPaymentPlan[]>([]);
   const [advanceRequests, setAdvanceRequests] = useState<AdvanceRequestRecord[]>([]);
+  const [materialRequests, setMaterialRequests] = useState<MaterialRequestRecord[]>([]);
   const [laborItems, setLaborItems] = useState<LaborCatalogItem[]>([]);
   const [contractor, setContractor] = useState<ContractorRecord | null>(null);
   const [editingLaborJobId, setEditingLaborJobId] = useState<string | null>(null);
@@ -352,12 +362,13 @@ export default function AssignedJobs() {
         setQuotations([]);
         setPaymentPlans([]);
         setAdvanceRequests([]);
+        setMaterialRequests([]);
         setFurnitureFiles([]);
         setLoading(false);
         return;
       }
 
-      const [jobsResponse, notificationsResponse, clientsResponse, quotationsResponse, plansResponse, furnitureFilesResponse, laborItemsResponse, advanceRequestsResponse] = await Promise.all([
+      const [jobsResponse, notificationsResponse, clientsResponse, quotationsResponse, plansResponse, furnitureFilesResponse, laborItemsResponse, advanceRequestsResponse, materialRequestsResponse] = await Promise.all([
         fetch(`${apiBase}/api/production-orders?contractorId=${encodeURIComponent(activeContractor.id)}`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/notifications?recipientUserId=${encodeURIComponent(user.id)}&unreadOnly=true`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/clients`, { cache: 'no-store' }),
@@ -366,6 +377,7 @@ export default function AssignedJobs() {
         fetch(`${apiBase}/api/furniture-files?contractorId=${encodeURIComponent(activeContractor.id)}`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/contractor-finance/labor-items`, { cache: 'no-store' }),
         fetch(`${apiBase}/api/contractor-finance/advance-requests?contractorId=${encodeURIComponent(activeContractor.id)}`, { cache: 'no-store' }),
+        fetch(`${apiBase}/api/material-requests?contractorId=${encodeURIComponent(activeContractor.id)}`, { cache: 'no-store' }),
       ]);
 
       if (!jobsResponse.ok) throw new Error('No se pudieron cargar los trabajos asignados');
@@ -381,6 +393,7 @@ export default function AssignedJobs() {
       setFurnitureFiles(furnitureFilesResponse.ok ? await furnitureFilesResponse.json() : []);
       setLaborItems(laborItemsResponse.ok ? await laborItemsResponse.json() : []);
       setAdvanceRequests(advanceRequestsResponse.ok ? await advanceRequestsResponse.json() : []);
+      setMaterialRequests(materialRequestsResponse.ok ? await materialRequestsResponse.json() : []);
     } catch (err) {
       if (!silent) setError(err instanceof Error ? err.message : 'Error cargando trabajos del contratista');
     } finally {
@@ -541,6 +554,22 @@ export default function AssignedJobs() {
     const plan = getPaymentPlan(job);
     if (!plan) return undefined;
     return advanceRequests.find((request) => request.planId === plan.id);
+  }
+
+  function getMaterialRequest(job: ProductionOrderRecord) {
+    return materialRequests.find((request) => request.productionOrderId === job.id && request.status !== 'rejected');
+  }
+
+  function getRejectedMaterialRequest(job: ProductionOrderRecord) {
+    return materialRequests.find((request) => request.productionOrderId === job.id && request.status === 'rejected');
+  }
+
+  function hasMaterialRequestReady(job: ProductionOrderRecord) {
+    return Boolean(getMaterialRequest(job));
+  }
+
+  function goToMaterialRequest(job: ProductionOrderRecord) {
+    router.push(`/contractor-requests?jobId=${encodeURIComponent(job.id)}`);
   }
 
   function laborStatusLabel(plan?: ContractorPaymentPlan) {
@@ -923,7 +952,11 @@ export default function AssignedJobs() {
   }
 
   function todayDateString() {
-    return new Date().toISOString().slice(0, 10);
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   function applyRealPhaseUpdate(
@@ -977,6 +1010,16 @@ export default function AssignedJobs() {
 
   async function updateJobRealPhase(jobId: string, phase: ProductionPhase, action: 'start' | 'finish') {
     if (!apiBase) return;
+    const job = jobs.find((entry) => entry.id === jobId);
+    if (job && !hasMaterialRequestReady(job)) {
+      toast({
+        title: 'Solicitud de material requerida',
+        description: 'Antes de iniciar el avance real debes llenar y enviar la solicitud de material de este trabajo.',
+        variant: 'destructive',
+      });
+      goToMaterialRequest(job);
+      return;
+    }
     const updateKey = `${jobId}-${phase}-${action}`;
     const progressDate = todayDateString();
     setUpdatingRealPhaseKey(updateKey);
@@ -1013,6 +1056,8 @@ export default function AssignedJobs() {
 
     const nextStep = getNextRealPhaseStep(job);
     const finishedCount = getFinishedRealPhaseCount(job);
+    const materialReady = hasMaterialRequestReady(job);
+    const rejectedMaterialRequest = getRejectedMaterialRequest(job);
 
     return (
       <div className="min-w-[250px] space-y-2">
@@ -1032,7 +1077,23 @@ export default function AssignedJobs() {
             );
           })}
         </div>
-        {nextStep ? (
+        {!materialReady ? (
+          <div className="space-y-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 border-amber-200 px-2 text-xs text-amber-700 hover:bg-amber-50 dark:border-amber-500/30 dark:text-amber-100 dark:hover:bg-amber-500/10"
+              onClick={() => goToMaterialRequest(job)}
+            >
+              <PackageCheck className="h-3.5 w-3.5" />
+              Llenar solicitud de material
+            </Button>
+            <p className="text-xs text-amber-700 dark:text-amber-200">
+              {rejectedMaterialRequest ? 'Solicitud rechazada: corrígela antes de iniciar avance real.' : 'Requerido antes de iniciar avance real.'}
+            </p>
+          </div>
+        ) : nextStep ? (
           <Button
             type="button"
             size="sm"
@@ -1069,6 +1130,8 @@ export default function AssignedJobs() {
     }
 
     const nextStep = getNextRealPhaseStep(job);
+    const materialReady = hasMaterialRequestReady(job);
+    const rejectedMaterialRequest = getRejectedMaterialRequest(job);
 
     return (
       <div className="rounded-xl border border-border p-4">
@@ -1079,6 +1142,32 @@ export default function AssignedJobs() {
           </div>
           <Badge variant="outline">{getFinishedRealPhaseCount(job)} / {PRODUCTION_PHASE_OPTIONS.length} fases</Badge>
         </div>
+        {!materialReady ? (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex gap-2">
+                <PackageCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <p className="font-semibold">Primero debes llenar la solicitud de material.</p>
+                  <p className="mt-1 text-xs">
+                    {rejectedMaterialRequest
+                      ? 'Tu solicitud anterior fue rechazada. Corrígela y reenvíala antes de iniciar el avance real por etapas.'
+                      : 'El avance real por etapas se habilita después de enviar la solicitud de materiales de este trabajo.'}
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0 border-amber-300 bg-white/70 text-amber-900 hover:bg-white dark:bg-background/20 dark:text-amber-100"
+                onClick={() => goToMaterialRequest(job)}
+              >
+                Ir a solicitud
+              </Button>
+            </div>
+          </div>
+        ) : null}
         <div className="space-y-3">
           {PRODUCTION_PHASE_OPTIONS.map((phase) => {
             const realPhase = getRealPhase(job, phase.value);
@@ -1110,7 +1199,7 @@ export default function AssignedJobs() {
                       size="sm"
                       variant="outline"
                       className="h-8 gap-1.5"
-                      disabled={!isCurrentPhase || started || finished || updatingRealPhaseKey === startKey}
+                      disabled={!materialReady || !isCurrentPhase || started || finished || updatingRealPhaseKey === startKey}
                       onClick={() => void updateJobRealPhase(job.id, phase.value, 'start')}
                     >
                       {updatingRealPhaseKey === startKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarRange className="h-3.5 w-3.5" />}
@@ -1120,7 +1209,7 @@ export default function AssignedJobs() {
                       type="button"
                       size="sm"
                       className="h-8 gap-1.5"
-                      disabled={!isCurrentPhase || !started || finished || updatingRealPhaseKey === finishKey}
+                      disabled={!materialReady || !isCurrentPhase || !started || finished || updatingRealPhaseKey === finishKey}
                       onClick={() => void updateJobRealPhase(job.id, phase.value, 'finish')}
                     >
                       {updatingRealPhaseKey === finishKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}

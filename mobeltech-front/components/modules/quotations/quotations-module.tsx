@@ -780,6 +780,9 @@ function QuotationDetail({
   const environmentDraftTotal = environmentRows.reduce((sum, row) => sum + Number(row.price || 0), 0);
   const environmentProjectedTotal = environmentTotal + environmentDraftTotal;
   const environmentDraftExceeds = environmentProjectedTotal > displayTotal;
+  const environmentUnderAllocated = displayTotal > 0 && environmentRemaining > 0.009;
+  const environmentProjectedRemaining = Math.max(displayTotal - environmentProjectedTotal, 0);
+  const environmentDraftUnderAllocated = displayTotal > 0 && !environmentDraftExceeds && environmentProjectedRemaining > 0.009;
   const environmentBudgetUsed = displayTotal > 0 ? Math.min((environmentTotal / displayTotal) * 100, 100) : 0;
 
   useEffect(() => {
@@ -1280,6 +1283,25 @@ function QuotationDetail({
                 <p className="mt-1 font-mono text-sm font-bold">{formatCurrency(environmentRemaining)}</p>
               </div>
             </div>
+
+            {environmentUnderAllocated ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex gap-2">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <p className="font-semibold">La cotización aún no está completamente distribuida por ambientes.</p>
+                      <p className="mt-1 text-xs">
+                        Falta asignar {formatCurrency(environmentRemaining)} del monto cotizado. Crea o ajusta ambientes hasta usar el total de la cotización.
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="self-start border-amber-300 bg-white/60 text-amber-900 dark:bg-background/20 dark:text-amber-100">
+                    {environmentBudgetUsed.toFixed(0)}% usado
+                  </Badge>
+                </div>
+              </div>
+            ) : null}
 
             {currentQuotation.environmentProjects && currentQuotation.environmentProjects.length > 0 ? (
               <div className="overflow-x-auto rounded-xl border border-border">
@@ -1814,6 +1836,11 @@ function QuotationDetail({
                     <RefreshCw className="h-3.5 w-3.5" />
                     Reajustar a {formatCurrency(environmentProjectedTotal)}
                   </Button>
+                </div>
+              )}
+              {environmentDraftUnderAllocated && (
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                  Con estos ambientes todavía quedarían {formatCurrency(environmentProjectedRemaining)} sin asignar del total cotizado.
                 </div>
               )}
             </div>

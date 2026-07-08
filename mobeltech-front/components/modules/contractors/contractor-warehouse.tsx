@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { AlertCircle, CheckCircle2, Plus, Search, Undo2 } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 
 type Material = {
   id: string;
@@ -72,6 +73,8 @@ const tableMetaCellClass = 'bg-sky-50/80 text-zinc-900 dark:bg-sky-500/10 dark:t
 export function ContractorWarehouse({ contractorId }: { contractorId: string }) {
   const { user } = useAuth();
   const { toast } = useToast();
+  const searchParams = useSearchParams();
+  const requestedJobId = searchParams.get('jobId');
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -123,6 +126,14 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
     }, 12000);
     return () => window.clearInterval(interval);
   }, [apiBase, contractorId]);
+
+  useEffect(() => {
+    if (!requestedJobId || selectedJobId || orders.length === 0) return;
+    if (orders.some((order) => order.id === requestedJobId)) {
+      setSelectedJobId(requestedJobId);
+      setFeedback('Trabajo seleccionado. Completa los materiales y envía la solicitud antes de iniciar avance real.');
+    }
+  }, [orders, requestedJobId, selectedJobId]);
 
   const visibleMaterials = useMemo(() => {
     const normalized = searchQuery.trim().toLowerCase();
