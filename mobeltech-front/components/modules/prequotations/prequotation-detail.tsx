@@ -89,6 +89,8 @@ const NEXT_STATUS_LABEL: Partial<Record<PrequotationStatus, string>> = {
 };
 
 const CLIENT_CONFIRMED_DESCRIPTION = 'Cliente confirmó la precotización para avanzar a cotización.';
+const SENT_TO_CLIENT_DESCRIPTION = 'Precotización mandada a cliente para revisión.';
+const CURRENT_VERSION_PENDING_CLIENT_SEND_DESCRIPTION = 'Nueva versión cargada; debe enviarse al cliente antes de continuar.';
 const MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024;
 const ACCEPTED_FILE_EXTENSIONS = ['.pdf', '.xlsx', '.xls', '.csv'];
 
@@ -118,6 +120,15 @@ function toSafeDate(value: unknown) {
 
 function sortVersionsByNumber(versions: PrequotationVersion[]) {
   return [...versions].sort((a, b) => a.version - b.version);
+}
+
+function getLogTime(log: PrequotationLog) {
+  const date = log.performedAt instanceof Date ? log.performedAt : new Date(log.performedAt as any);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function getLatestLogTime(logs: PrequotationLog[], predicate: (log: PrequotationLog) => boolean) {
+  return logs.reduce((latest, log) => (predicate(log) ? Math.max(latest, getLogTime(log)) : latest), 0);
 }
 
 function getNextVersionNumber(versions: PrequotationVersion[], currentVersion: number) {
@@ -258,7 +269,22 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
     };
   }, [isUploading]);
 
-  const hasClientConfirmation = p.status === 'confirmed' || p.logs.some((log) => log.description === CLIENT_CONFIRMED_DESCRIPTION);
+  const currentVersionUploadAt = getLatestLogTime(
+    p.logs,
+    (log) => log.action === 'file_uploaded' && log.description.includes(`(v${p.currentVersion})`),
+  ) || getLatestLogTime(p.logs, (log) => log.action === 'file_uploaded');
+  const currentVersionSentToClientAt = getLatestLogTime(
+    p.logs,
+    (log) => log.action === 'status_changed' && log.description === SENT_TO_CLIENT_DESCRIPTION,
+  );
+  const effectiveSentToClientAt = currentVersionSentToClientAt || (p.status === 'in-review' ? currentVersionUploadAt : 0);
+  const currentVersionNeedsClientSend = currentVersionUploadAt > effectiveSentToClientAt && p.status !== 'confirmed' && p.status !== 'rejected';
+  const hasClientConfirmation =
+    !currentVersionNeedsClientSend &&
+    (p.status === 'confirmed' || p.logs.some((log) => log.description === CLIENT_CONFIRMED_DESCRIPTION));
+  const availableTransitions: PrequotationStatus[] = currentVersionNeedsClientSend
+    ? ['in-review', 'rejected']
+    : transitions;
 
   function getStatusDescription(status: PrequotationStatus) {
     if (status === 'in-review') return 'Enviado a cliente';
@@ -286,7 +312,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
   }
 
   function getStatusChangeDescription(newStatus: PrequotationStatus) {
-    if (newStatus === 'in-review') return 'Precotización mandada a cliente para revisión.';
+    if (newStatus === 'in-review') return SENT_TO_CLIENT_DESCRIPTION;
     if (newStatus === 'adjustment') return 'Cliente solicitó ajuste en la precotización.';
     if (newStatus === 'rejected') return 'Precotización rechazada.';
     if (newStatus === 'draft') return 'Precotización devuelta a elaboración.';
@@ -387,12 +413,23 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
         performedAt: new Date(),
         description: `Archivo subido: ${file.name} (v${newVersion.version})`,
       };
+      const nextStatus: PrequotationStatus = p.status === 'draft' || p.status === 'rejected' ? 'draft' : 'adjustment';
+      const statusResetLog: PrequotationLog | null = nextStatus !== p.status
+        ? {
+            id: `log-${Date.now()}-status`,
+            action: 'status_changed',
+            performedBy: 'Juan Pérez',
+            performedAt: new Date(),
+            description: CURRENT_VERSION_PENDING_CLIENT_SEND_DESCRIPTION,
+          }
+        : null;
       const versions = sortVersionsByNumber([...p.versions, newVersion as PrequotationVersion]);
       const next = await persist({
         ...p,
+        status: nextStatus,
         currentVersion: newVersion.version,
         versions,
-        logs: [...p.logs, log],
+        logs: [...p.logs, log, ...(statusResetLog ? [statusResetLog] : [])],
         updatedAt: new Date(),
       });
       applyUpdate(next);
@@ -582,12 +619,17 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
                 </div>
               )}
             </div>
+            {currentVersionNeedsClientSend && (
+              <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                Esta versión nueva debe enviarse al cliente antes de habilitar confirmación o conversión.
+              </div>
+            )}
 
             {/* Transition actions */}
-            {transitions.length > 0 && (
+            {availableTransitions.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-border">
                 <p className="text-xs text-muted-foreground w-full">Acciones disponibles:</p>
-                {transitions
+                {availableTransitions
                   .filter((s) => s !== 'confirmed')
                   .map((s) => {
                     const isLoading = statusAction === s;
@@ -605,7 +647,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
                       </Button>
                     );
                   })}
-                {(p.status === 'in-review' || p.status === 'adjustment') && !p.convertedToQuotationId && (
+                {!currentVersionNeedsClientSend && (p.status === 'in-review' || p.status === 'adjustment') && !p.convertedToQuotationId && (
                   <Button
                     size="sm"
                     variant={hasClientConfirmation ? 'default' : 'outline'}
@@ -625,7 +667,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
                       : 'Confirmado por cliente'}
                   </Button>
                 )}
-                {p.status === 'confirmed' && !p.convertedToQuotationId && (
+                {!currentVersionNeedsClientSend && p.status === 'confirmed' && !p.convertedToQuotationId && (
                   <Button
                     size="sm"
                     onClick={() => setShowConvertConfirm(true)}
@@ -639,7 +681,7 @@ export function PrequotationDetail({ prequotation, clientName, onBack, onUpdate 
                 )}
               </div>
             )}
-            {p.status === 'confirmed' && !p.convertedToQuotationId && transitions.length === 0 && (
+            {p.status === 'confirmed' && !p.convertedToQuotationId && availableTransitions.length === 0 && (
               <div className="mt-4 pt-4 border-t border-border">
                 <Button
                   size="sm"
