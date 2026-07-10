@@ -25,7 +25,7 @@ import {
   WalletCards,
   X,
 } from 'lucide-react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 type PhaseName = 'cortado' | 'canteado' | 'ensamblado' | 'instalacion' | 'entregado';
 type ScheduleViewMode = 'mine' | 'global';
@@ -510,8 +510,10 @@ function assignPhaseLanes(rows: SchedulePhase[]) {
 export function GanttSchedule() {
   const { user } = useAuth();
   const { currentRole } = useRole();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const laborJobIdParam = searchParams.get('laborJobId');
+  const scheduleJobIdParam = searchParams.get('jobId');
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -539,6 +541,7 @@ export function GanttSchedule() {
   const [machineAvailabilityView, setMachineAvailabilityView] = useState<MachineAvailabilityView | null>(null);
   const [pendingLaborDrafts, setPendingLaborDrafts] = useState<PendingLaborDraft[]>([]);
   const [openedLaborJobIdParam, setOpenedLaborJobIdParam] = useState<string | null>(null);
+  const [openedScheduleJobIdParam, setOpenedScheduleJobIdParam] = useState<string | null>(null);
 
   const isContractor = currentRole === 'contractor';
   const canManageMachines = currentRole === 'admin' || currentRole === 'architect';
@@ -871,6 +874,16 @@ export function GanttSchedule() {
     startEditing(order);
   }, [laborJobIdParam, myContractor?.id, orders, pendingLaborDrafts, editing, openedLaborJobIdParam]);
 
+  useEffect(() => {
+    if (laborJobIdParam || !scheduleJobIdParam || !myContractor || editing) return;
+    if (openedScheduleJobIdParam === scheduleJobIdParam) return;
+    const order = orders.find((entry) => entry.id === scheduleJobIdParam && entry.assignedContractorId === myContractor.id);
+    if (!order) return;
+    setScheduleViewMode('mine');
+    setOpenedScheduleJobIdParam(scheduleJobIdParam);
+    startEditing(order);
+  }, [laborJobIdParam, scheduleJobIdParam, myContractor?.id, orders, editing, openedScheduleJobIdParam]);
+
   function closeEditing() {
     if (saving) return;
     setEditing(null);
@@ -1018,6 +1031,13 @@ export function GanttSchedule() {
       const hadPendingLaborDraft = Boolean(getPendingLaborDraft(editing.order.id));
       if (hadPendingLaborDraft) {
         await submitLaborPaymentRequest(editing.order, editing.phases);
+        if (isContractor && myContractor?.id === editing.order.assignedContractorId) {
+          const jobId = editing.order.id;
+          setSuccessMessage('Cronograma guardado y solicitud de pago enviada. Continúa con la solicitud de material.');
+          setEditing(null);
+          router.push(`/contractor-requests?jobId=${encodeURIComponent(jobId)}&fromSchedule=1`);
+          return;
+        }
         setSuccessMessage('Cronograma guardado y solicitud de pago enviada a revisión.');
       } else {
         setSuccessMessage('Cronograma guardado correctamente.');

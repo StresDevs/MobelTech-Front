@@ -569,7 +569,18 @@ export default function AssignedJobs() {
   }
 
   function goToMaterialRequest(job: ProductionOrderRecord) {
-    router.push(`/contractor-requests?jobId=${encodeURIComponent(job.id)}`);
+    router.push(`/contractor-requests?jobId=${encodeURIComponent(job.id)}&fromAssignedJob=1`);
+  }
+
+  function goToSchedule(job: ProductionOrderRecord) {
+    router.push(`/schedule?jobId=${encodeURIComponent(job.id)}`);
+  }
+
+  function hasActualScheduleReady(job: ProductionOrderRecord) {
+    const actualPhases = job.schedulePhases?.filter((phase) => phase.type === 'actual') ?? [];
+    return PRODUCTION_PHASE_OPTIONS.every((phase) => (
+      actualPhases.some((entry) => entry.phase === phase.value && Boolean(entry.startDate) && Boolean(entry.endDate))
+    ));
   }
 
   function laborStatusLabel(plan?: ContractorPaymentPlan) {
@@ -1011,6 +1022,15 @@ export default function AssignedJobs() {
   async function updateJobRealPhase(jobId: string, phase: ProductionPhase, action: 'start' | 'finish') {
     if (!apiBase) return;
     const job = jobs.find((entry) => entry.id === jobId);
+    if (job && !hasActualScheduleReady(job)) {
+      toast({
+        title: 'Cronograma requerido',
+        description: 'Antes de iniciar el avance real debes completar el cronograma de este trabajo.',
+        variant: 'destructive',
+      });
+      goToSchedule(job);
+      return;
+    }
     if (job && !hasMaterialRequestReady(job)) {
       toast({
         title: 'Solicitud de material requerida',
@@ -1056,6 +1076,7 @@ export default function AssignedJobs() {
 
     const nextStep = getNextRealPhaseStep(job);
     const finishedCount = getFinishedRealPhaseCount(job);
+    const scheduleReady = hasActualScheduleReady(job);
     const materialReady = hasMaterialRequestReady(job);
     const rejectedMaterialRequest = getRejectedMaterialRequest(job);
 
@@ -1077,7 +1098,23 @@ export default function AssignedJobs() {
             );
           })}
         </div>
-        {!materialReady ? (
+        {!scheduleReady ? (
+          <div className="space-y-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 border-sky-200 px-2 text-xs text-sky-700 hover:bg-sky-50 dark:border-sky-500/30 dark:text-sky-100 dark:hover:bg-sky-500/10"
+              onClick={() => goToSchedule(job)}
+            >
+              <CalendarRange className="h-3.5 w-3.5" />
+              Completar cronograma
+            </Button>
+            <p className="text-xs text-sky-700 dark:text-sky-200">
+              Requerido antes de solicitud de material y avance real.
+            </p>
+          </div>
+        ) : !materialReady ? (
           <div className="space-y-1.5">
             <Button
               type="button"
@@ -1130,6 +1167,7 @@ export default function AssignedJobs() {
     }
 
     const nextStep = getNextRealPhaseStep(job);
+    const scheduleReady = hasActualScheduleReady(job);
     const materialReady = hasMaterialRequestReady(job);
     const rejectedMaterialRequest = getRejectedMaterialRequest(job);
 
@@ -1142,7 +1180,30 @@ export default function AssignedJobs() {
           </div>
           <Badge variant="outline">{getFinishedRealPhaseCount(job)} / {PRODUCTION_PHASE_OPTIONS.length} fases</Badge>
         </div>
-        {!materialReady ? (
+        {!scheduleReady ? (
+          <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex gap-2">
+                <CalendarRange className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <p className="font-semibold">Primero debes completar el cronograma.</p>
+                  <p className="mt-1 text-xs">
+                    Después de guardar el cronograma, el sistema te llevará a la solicitud de material de este trabajo.
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0 border-sky-300 bg-white/70 text-sky-900 hover:bg-white dark:bg-background/20 dark:text-sky-100"
+                onClick={() => goToSchedule(job)}
+              >
+                Ir a cronograma
+              </Button>
+            </div>
+          </div>
+        ) : !materialReady ? (
           <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex gap-2">
@@ -1199,7 +1260,7 @@ export default function AssignedJobs() {
                       size="sm"
                       variant="outline"
                       className="h-8 gap-1.5"
-                      disabled={!materialReady || !isCurrentPhase || started || finished || updatingRealPhaseKey === startKey}
+                      disabled={!scheduleReady || !materialReady || !isCurrentPhase || started || finished || updatingRealPhaseKey === startKey}
                       onClick={() => void updateJobRealPhase(job.id, phase.value, 'start')}
                     >
                       {updatingRealPhaseKey === startKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarRange className="h-3.5 w-3.5" />}
@@ -1209,7 +1270,7 @@ export default function AssignedJobs() {
                       type="button"
                       size="sm"
                       className="h-8 gap-1.5"
-                      disabled={!materialReady || !isCurrentPhase || !started || finished || updatingRealPhaseKey === finishKey}
+                      disabled={!scheduleReady || !materialReady || !isCurrentPhase || !started || finished || updatingRealPhaseKey === finishKey}
                       onClick={() => void updateJobRealPhase(job.id, phase.value, 'finish')}
                     >
                       {updatingRealPhaseKey === finishKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}

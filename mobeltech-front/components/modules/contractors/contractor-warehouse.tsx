@@ -95,6 +95,8 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const requestedJobId = searchParams.get('jobId');
+  const fromSchedule = searchParams.get('fromSchedule') === '1';
+  const fromAssignedJob = searchParams.get('fromAssignedJob') === '1';
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -155,9 +157,13 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
     if (!requestedJobId || selectedJobId || orders.length === 0) return;
     if (orders.some((order) => order.id === requestedJobId)) {
       setSelectedJobId(requestedJobId);
-      setFeedback('Trabajo seleccionado. Completa los materiales y envía la solicitud antes de iniciar avance real.');
+      setFeedback(fromSchedule
+        ? 'Cronograma completado. Ahora envía la solicitud de material de este trabajo antes de iniciar el avance real.'
+        : fromAssignedJob
+        ? 'Antes de iniciar el avance real debes enviar la solicitud de material de este trabajo.'
+        : 'Trabajo seleccionado. Completa los materiales y envía la solicitud antes de iniciar avance real.');
     }
-  }, [orders, requestedJobId, selectedJobId]);
+  }, [fromAssignedJob, fromSchedule, orders, requestedJobId, selectedJobId]);
 
   const visibleMaterials = useMemo(() => {
     const normalized = searchQuery.trim().toLowerCase();
