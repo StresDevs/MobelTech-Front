@@ -218,7 +218,8 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
     ? projectsById.get(selectedHistoryOrder.projectId)
     : null;
   const selectedHistoryRequestEditable = Boolean(
-    selectedHistoryRequest?.status === 'approved' &&
+    selectedHistoryRequest &&
+    ['pending', 'approved'].includes(selectedHistoryRequest.status) &&
     selectedHistoryOrder &&
     selectedHistoryOrder.status !== 'completed' &&
     selectedHistoryProject?.status !== 'delivered',
@@ -420,7 +421,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
       setRequests((current) => current.map((request) => (request.id === body.id ? body : request)));
       setSelectedHistoryRequestId(body.id);
       toast({
-        title: 'Solicitud reajustada',
+        title: selectedHistoryRequest.status === 'pending' ? 'Solicitud actualizada' : 'Solicitud reajustada',
         description: 'Las cantidades fueron actualizadas y el historial quedó registrado.',
         duration: 3000,
       });
@@ -479,11 +480,11 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
           <div className="space-y-4 p-4 sm:p-6">
             {selectedHistoryRequestEditable ? (
               <Card className="border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
-                Este trabajo sigue vigente. Puedes reajustar cantidades de esta solicitud aprobada y quedará registrado en historial.
+                Este trabajo sigue vigente. Puedes reajustar cantidades de esta solicitud y quedará registrado en historial.
               </Card>
             ) : (
               <Card className="border-border/70 bg-muted/30 p-4 text-sm text-muted-foreground">
-                Esta solicitud no está editable porque no está aprobada o pertenece a un trabajo/proyecto cerrado.
+                Esta solicitud no está editable porque fue rechazada o pertenece a un trabajo/proyecto cerrado.
               </Card>
             )}
 
@@ -614,7 +615,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
         <div className="grid gap-6 xl:grid-cols-3">
           <RequestHistoryColumn
             title="Pendientes"
-            description="Requieren aprobación de administración."
+            description="Puedes corregir cantidades antes de aprobación."
             requests={pendingHistoryRequests}
             openRequest={openHistoryDetail}
             getOrderLabel={getOrderLabel}
