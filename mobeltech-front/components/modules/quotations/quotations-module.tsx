@@ -726,6 +726,9 @@ function QuotationDetail({
     [editableItems],
   );
   const displayTotal = currentQuotation.totalAmount || editableTotal || subtotal;
+  const displayedItemsSubtotal = editing ? editableItemsSubtotal : subtotal;
+  const quotationAdjustment = displayTotal - displayedItemsSubtotal;
+  const hasQuotationAdjustment = !editing && Math.abs(quotationAdjustment) > 0.009;
   const displayAdvance = currentQuotation.advanceAmount || editableAdvance || 0;
   const pendingBalance = Math.max(displayTotal - displayAdvance, 0);
   const environmentTotal = (currentQuotation.environmentProjects ?? []).reduce((sum, environment) => sum + getEnvironmentPrice(environment), 0);
@@ -1245,12 +1248,23 @@ function QuotationDetail({
                   ))}
                 </tbody>
                 <tfoot>
+                  {hasQuotationAdjustment ? (
+                    <tr className="border-t border-border bg-amber-50/80 dark:bg-amber-500/10">
+                      <td colSpan={4} className="py-3 px-4 text-right text-sm font-semibold text-muted-foreground">
+                        Reajuste de cotización
+                      </td>
+                      <td className={`py-3 px-4 text-right font-mono font-bold ${quotationAdjustment >= 0 ? 'text-amber-700 dark:text-amber-100' : 'text-rose-700 dark:text-rose-100'}`}>
+                        {quotationAdjustment >= 0 ? '+ ' : '- '}
+                        {formatCurrency(Math.abs(quotationAdjustment))}
+                      </td>
+                    </tr>
+                  ) : null}
                   <tr className="border-t-2 border-border bg-muted/30">
                     <td colSpan={4} className="py-3 px-4 text-right text-sm font-semibold">
                       Total
                     </td>
                     <td className="py-3 px-4 text-right font-mono font-bold text-base">
-                      {formatCurrency(editing ? editableItemsSubtotal : currentQuotation.totalAmount || editableTotal)}
+                      {formatCurrency(editing ? editableItemsSubtotal : displayTotal)}
                     </td>
                   </tr>
                 </tfoot>
