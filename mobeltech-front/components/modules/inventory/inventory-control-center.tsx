@@ -314,14 +314,14 @@ export function InventoryControlCenter() {
     classification: 'reutilizable' as SurplusClass,
   });
 
-  async function loadOverview() {
+  async function loadOverview(options?: { silent?: boolean }) {
     if (!apiBase) {
       setError('Falta configurar NEXT_PUBLIC_API_URL.');
       setLoading(false);
       return;
     }
 
-    setLoading(true);
+    if (!options?.silent) setLoading(true);
     setError(null);
 
     try {
@@ -349,12 +349,17 @@ export function InventoryControlCenter() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error cargando inventario.');
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   }
 
   useEffect(() => {
     void loadOverview();
+    if (!apiBase) return;
+    const interval = window.setInterval(() => {
+      void loadOverview({ silent: true });
+    }, 12000);
+    return () => window.clearInterval(interval);
   }, [apiBase]);
 
   const suppliers = overview.suppliers;

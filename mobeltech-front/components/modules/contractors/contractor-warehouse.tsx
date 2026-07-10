@@ -60,6 +60,7 @@ type MaterialRequest = {
   productionOrderId?: string | null;
   status: 'pending' | 'approved' | 'rejected';
   rejectionComments?: string | null;
+  stockConsumedAt?: string | null;
   requestDate: string;
   items: MaterialRequestItem[];
   adjustments?: MaterialRequestAdjustment[];
