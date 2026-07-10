@@ -748,6 +748,7 @@ function QuotationDetail({
     estimatedEndDate: '',
     assignedContractorId: '',
     modificationNote: '',
+    adjustQuotationTotal: false,
   });
   const [contractorOptions, setContractorOptions] = useState<QuotationContractor[]>([]);
   const [environmentRows, setEnvironmentRows] = useState<Array<{
@@ -784,6 +785,12 @@ function QuotationDetail({
   const environmentProjectedRemaining = Math.max(displayTotal - environmentProjectedTotal, 0);
   const environmentDraftUnderAllocated = displayTotal > 0 && !environmentDraftExceeds && environmentProjectedRemaining > 0.009;
   const environmentBudgetUsed = displayTotal > 0 ? Math.min((environmentTotal / displayTotal) * 100, 100) : 0;
+  const environmentEditPrice = Number(environmentEditForm.price || 0);
+  const environmentEditProjectedTotal = editingEnvironment
+    ? environmentTotal - getEnvironmentPrice(editingEnvironment) + (Number.isFinite(environmentEditPrice) ? environmentEditPrice : 0)
+    : environmentTotal;
+  const environmentEditExceeds = Boolean(editingEnvironment && environmentEditProjectedTotal > displayTotal);
+  const environmentEditRemaining = Math.max(displayTotal - environmentEditProjectedTotal, 0);
 
   useEffect(() => {
     setEditableItems(currentQuotation.items.map((it: any) => ({ ...it })));
@@ -909,6 +916,7 @@ function QuotationDetail({
       estimatedEndDate: environment.estimatedEndDate,
       assignedContractorId: environment.assignedContractorId ?? '',
       modificationNote: '',
+      adjustQuotationTotal: false,
     });
   }
 
@@ -935,9 +943,8 @@ function QuotationDetail({
       return;
     }
 
-    if (projectedTotal > displayTotal) {
-      showEnvironmentBudgetToast(projectedTotal);
-      setEnvironmentError(`La suma de ambientes excede la cotización por ${formatCurrency(projectedTotal - displayTotal)}.`);
+    if (projectedTotal > displayTotal && !environmentEditForm.adjustQuotationTotal) {
+      setEnvironmentError(`La suma de ambientes excede la cotización por ${formatCurrency(projectedTotal - displayTotal)}. Activa el reajuste dentro de este formulario para guardar ambos cambios.`);
       return;
     }
 
@@ -945,6 +952,23 @@ function QuotationDetail({
     setEnvironmentError(null);
 
     try {
+      if (projectedTotal > displayTotal && environmentEditForm.adjustQuotationTotal) {
+        const adjustmentResponse = await fetch(`${apiBase}/api/quotations/${quotation.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            totalAmount: projectedTotal,
+            adjustmentComment: environmentEditForm.modificationNote.trim(),
+            changedBy: userName,
+          }),
+        });
+
+        if (!adjustmentResponse.ok) {
+          const body = await adjustmentResponse.json().catch(() => null);
+          throw new Error(body?.error || 'No se pudo reajustar el monto de la cotización.');
+        }
+      }
+
       const response = await fetch(`${apiBase}/api/quotations/${quotation.id}/environment-projects/${editingEnvironment.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -969,8 +993,10 @@ function QuotationDetail({
       setEditingEnvironment(null);
       onReplaceQuotation(updatedQuotation);
       toast({
-        title: 'Ambiente actualizado',
-        description: 'El proyecto por ambiente y sus montos quedaron sincronizados.',
+        title: environmentEditForm.adjustQuotationTotal && projectedTotal > displayTotal ? 'Ambiente y cotización reajustados' : 'Ambiente actualizado',
+        description: environmentEditForm.adjustQuotationTotal && projectedTotal > displayTotal
+          ? `La cotización ahora cubre ${formatCurrency(projectedTotal)} y el ambiente quedó sincronizado.`
+          : 'El proyecto por ambiente y sus montos quedaron sincronizados.',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo actualizar el ambiente.';
@@ -1733,24 +1759,46 @@ function QuotationDetail({
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Nuevo total ambientes</p>
                   <p className="mt-1 font-mono text-sm font-bold">
-                    {formatCurrency(environmentTotal - getEnvironmentPrice(editingEnvironment) + Number(environmentEditForm.price || 0))}
+                    {formatCurrency(environmentEditProjectedTotal)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Disponible</p>
-                  <p className="mt-1 font-mono text-sm font-bold">
-                    {formatCurrency(Math.max(displayTotal - (environmentTotal - getEnvironmentPrice(editingEnvironment) + Number(environmentEditForm.price || 0)), 0))}
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{environmentEditExceeds ? 'Reajuste necesario' : 'Disponible'}</p>
+                  <p className={`mt-1 font-mono text-sm font-bold ${environmentEditExceeds ? 'text-amber-700 dark:text-amber-200' : ''}`}>
+                    {formatCurrency(environmentEditExceeds ? environmentEditProjectedTotal - displayTotal : environmentEditRemaining)}
                   </p>
                 </div>
               </div>
+              {environmentEditExceeds ? (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={environmentEditForm.adjustQuotationTotal}
+                      onChange={(event) => setEnvironmentEditForm((current) => ({ ...current, adjustQuotationTotal: event.target.checked }))}
+                    />
+                    <span>
+                      <span className="block font-semibold">Reajustar cotización a {formatCurrency(environmentEditProjectedTotal)}</span>
+                      <span className="mt-1 block text-xs">
+                        Se usará la nota de modificación como comentario del reajuste y luego se guardará este ambiente.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              ) : null}
             </div>
 
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button variant="outline" onClick={() => setEditingEnvironment(null)} disabled={environmentSaving}>
                 Cancelar
               </Button>
-              <Button onClick={saveEnvironmentEdit} disabled={environmentSaving} style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}>
-                {environmentSaving ? 'Guardando...' : 'Guardar ambiente'}
+              <Button
+                onClick={saveEnvironmentEdit}
+                disabled={environmentSaving || (environmentEditExceeds && !environmentEditForm.adjustQuotationTotal)}
+                style={{ backgroundColor: '#eab676', color: '#1f1f1f' }}
+              >
+                {environmentSaving ? 'Guardando...' : environmentEditExceeds ? 'Guardar y reajustar cotización' : 'Guardar ambiente'}
               </Button>
             </div>
           </Card>
