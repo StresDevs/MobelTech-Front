@@ -4,12 +4,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { AlertCircle, Check, CheckCircle2, ClipboardList, Clock3, History, Package, Plus, Save, Search, Undo2, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Check, CheckCircle2, ClipboardList, Clock3, History, Package, Plus, Save, Search, Undo2, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 
 type Material = {
@@ -108,7 +107,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
   const [requests, setRequests] = useState<MaterialRequest[]>([]);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showRequests, setShowRequests] = useState(false);
+  const [historyView, setHistoryView] = useState<'form' | 'history' | 'detail'>('form');
   const [historySearch, setHistorySearch] = useState('');
   const [selectedHistoryRequestId, setSelectedHistoryRequestId] = useState<string | null>(null);
   const [historyDraftQuantities, setHistoryDraftQuantities] = useState<Record<string, number>>({});
@@ -336,6 +335,32 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
       })),
     );
     setFeedback('Se cargo la solicitud rechazada para que la ajustes y la vuelvas a enviar.');
+    setSelectedHistoryRequestId(null);
+    setHistoryView('form');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function openHistory() {
+    setSelectedHistoryRequestId(null);
+    setHistoryView('history');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function openHistoryDetail(requestId: string) {
+    setSelectedHistoryRequestId(requestId);
+    setHistoryView('detail');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function closeHistory() {
+    setSelectedHistoryRequestId(null);
+    setHistoryView('form');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function backToHistory() {
+    setSelectedHistoryRequestId(null);
+    setHistoryView('history');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -415,6 +440,214 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
     );
   }
 
+  if (historyView === 'detail' && selectedHistoryRequest) {
+    return (
+      <div className="space-y-6">
+        {feedback ? <Card className="border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">{feedback}</Card> : null}
+        {error ? <Card className="border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</Card> : null}
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Button variant="outline" className="w-fit gap-2" onClick={backToHistory}>
+            <ArrowLeft className="h-4 w-4" />
+            Volver al historial
+          </Button>
+          <Button variant="ghost" className="w-fit" onClick={closeHistory}>
+            Volver a solicitud
+          </Button>
+        </div>
+
+        <Card className="overflow-hidden border-border/70 shadow-sm">
+          <div className="border-b border-border/70 bg-muted/20 px-5 py-4 sm:px-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <Badge className={`${STATUS_STYLES[selectedHistoryRequest.status]} rounded-full px-3 py-1`}>
+                  {STATUS_LABELS[selectedHistoryRequest.status]}
+                </Badge>
+                <h2 className="mt-2 text-xl font-semibold tracking-tight">
+                  {getOrderLabel(selectedHistoryRequest.productionOrderId)}
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Solicitud #{selectedHistoryRequest.id.slice(0, 8)} · {new Date(selectedHistoryRequest.requestDate).toLocaleString('es-BO')}
+                </p>
+              </div>
+              <Badge variant="outline" className="w-fit rounded-full px-3 py-1">
+                {selectedHistoryRequest.items.length} materiales
+              </Badge>
+            </div>
+          </div>
+
+          <div className="space-y-4 p-4 sm:p-6">
+            {selectedHistoryRequestEditable ? (
+              <Card className="border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+                Este trabajo sigue vigente. Puedes reajustar cantidades de esta solicitud aprobada y quedará registrado en historial.
+              </Card>
+            ) : (
+              <Card className="border-border/70 bg-muted/30 p-4 text-sm text-muted-foreground">
+                Esta solicitud no está editable porque no está aprobada o pertenece a un trabajo/proyecto cerrado.
+              </Card>
+            )}
+
+            <Card className="overflow-hidden border-border/70">
+              <div className="border-b border-border/70 px-4 py-3">
+                <p className="text-sm font-semibold">Materiales solicitados</p>
+              </div>
+              <div className="divide-y divide-border/70">
+                {selectedHistoryRequest.items.map((item) => {
+                  const material = materialsById.get(item.materialId);
+                  return (
+                    <div key={item.id} className="grid gap-3 p-4 md:grid-cols-[1fr_10rem] md:items-center">
+                      <div className="min-w-0">
+                        <p className="font-semibold leading-5">{material?.name ?? 'Material no encontrado'}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Unidad: {material?.unit ?? 'u'}{item.notes ? ` · ${item.notes}` : ''}
+                        </p>
+                      </div>
+                      {selectedHistoryRequestEditable ? (
+                        <Input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={historyDraftQuantities[item.id] ?? item.quantity}
+                          onChange={(event) => updateHistoryDraftQuantity(item.id, event.target.value)}
+                          className="h-10 text-right font-mono"
+                        />
+                      ) : (
+                        <p className="text-right font-mono font-semibold">
+                          {item.quantity} {material?.unit ?? 'u'}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card className="border-border/70 p-4">
+              <div className="flex items-center gap-2">
+                <History className="h-4 w-4 text-muted-foreground" />
+                <p className="text-sm font-semibold">Historial de modificaciones</p>
+              </div>
+              <div className="mt-3 space-y-2">
+                {(selectedHistoryRequest.adjustments ?? []).map((adjustment) => {
+                  const material = materialsById.get(adjustment.materialId);
+                  return (
+                    <div key={adjustment.id} className="rounded-xl border border-border/70 bg-muted/20 px-3 py-2 text-sm">
+                      <p className="font-medium">
+                        Se modificó la cantidad de {material?.name ?? 'un material'} de {adjustment.previousQuantity} a {adjustment.newQuantity}.
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {new Date(adjustment.createdAt).toLocaleString('es-BO')}
+                      </p>
+                    </div>
+                  );
+                })}
+                {(selectedHistoryRequest.adjustments ?? []).length === 0 ? (
+                  <EmptyHint icon={<History className="h-5 w-5" />} text="Esta solicitud aún no tiene modificaciones registradas." />
+                ) : null}
+              </div>
+            </Card>
+
+            {selectedHistoryRequest.status === 'rejected' ? (
+              <Card className="border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+                <p className="font-semibold">Motivo de rechazo</p>
+                <p className="mt-2 leading-6">{selectedHistoryRequest.rejectionComments || 'Sin comentario del administrador.'}</p>
+              </Card>
+            ) : null}
+          </div>
+
+          <div className="flex flex-col gap-2 border-t border-border/70 bg-background px-4 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6">
+            <Button variant="outline" onClick={backToHistory}>
+              Volver
+            </Button>
+            {selectedHistoryRequestEditable ? (
+              <Button
+                onClick={saveHistoryRequestAdjustments}
+                disabled={savingHistoryRequest}
+                className="gap-2 bg-[#d6a85a] text-zinc-950 shadow-sm hover:bg-[#c3964b]"
+              >
+                <Save className="h-4 w-4" />
+                {savingHistoryRequest ? 'Guardando...' : 'Guardar reajuste'}
+              </Button>
+            ) : null}
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (historyView === 'history') {
+    return (
+      <div className="space-y-6">
+        {feedback ? <Card className="border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">{feedback}</Card> : null}
+        {error ? <Card className="border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</Card> : null}
+
+        <Card className="overflow-hidden border-none bg-[linear-gradient(135deg,rgba(234,182,118,0.16),rgba(255,255,255,0.92))] p-5 shadow-sm dark:bg-[linear-gradient(135deg,rgba(234,182,118,0.16),rgba(22,22,22,0.96))]">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <Button variant="ghost" className="mb-3 w-fit gap-2 px-0 hover:bg-transparent" onClick={closeHistory}>
+                <ArrowLeft className="h-4 w-4" />
+                Volver a solicitud
+              </Button>
+              <h2 className="text-2xl font-bold">Historial de solicitudes de material</h2>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+                Revisa tus solicitudes por estado. Haz clic en una solicitud para ver el detalle y reajustar cantidades cuando el trabajo siga vigente.
+              </p>
+            </div>
+            <div className="relative w-full max-w-md">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={historySearch}
+                onChange={(event) => setHistorySearch(event.target.value)}
+                placeholder="Buscar por trabajo, material, estado o ID..."
+                className="pl-9"
+              />
+            </div>
+          </div>
+        </Card>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <HistoryMetric icon={<Clock3 className="h-4 w-4" />} label="Pendientes" value={pendingRequests.length} tone="pending" />
+          <HistoryMetric icon={<Check className="h-4 w-4" />} label="Aprobadas" value={approvedRequests.length} tone="approved" />
+          <HistoryMetric icon={<X className="h-4 w-4" />} label="Rechazadas" value={rejectedRequests.length} tone="rejected" />
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-3">
+          <RequestHistoryColumn
+            title="Pendientes"
+            description="Requieren aprobación de administración."
+            requests={pendingHistoryRequests}
+            openRequest={openHistoryDetail}
+            getOrderLabel={getOrderLabel}
+            materialsById={materialsById}
+            emptyIcon={<CheckCircle2 className="h-6 w-6" />}
+            emptyText="No tienes solicitudes pendientes."
+          />
+          <RequestHistoryColumn
+            title="Aprobadas"
+            description="Puedes reajustar cantidades si el trabajo sigue vigente."
+            requests={approvedHistoryRequests}
+            openRequest={openHistoryDetail}
+            getOrderLabel={getOrderLabel}
+            materialsById={materialsById}
+            emptyIcon={<CheckCircle2 className="h-6 w-6" />}
+            emptyText="Aún no tienes solicitudes aprobadas."
+          />
+          <RequestHistoryColumn
+            title="Rechazadas"
+            description="Devueltas para corrección."
+            requests={rejectedHistoryRequests}
+            openRequest={openHistoryDetail}
+            getOrderLabel={getOrderLabel}
+            materialsById={materialsById}
+            onReloadRejected={reloadRejectedRequest}
+            emptyIcon={<AlertCircle className="h-6 w-6" />}
+            emptyText="No hay solicitudes observadas por corregir."
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {feedback ? <Card className="border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">{feedback}</Card> : null}
@@ -433,12 +666,14 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
-                  variant="outline"
-                  onClick={() => setShowRequests(true)}
-                  className="rounded-full border-[#eab676]/35 bg-[#eab676]/15 px-4 text-[#9a6b2f] hover:bg-[#eab676]/25 hover:text-[#8a5d26]"
+                  onClick={openHistory}
+                  className="gap-2 rounded-full bg-[#d6a85a] px-5 text-zinc-950 shadow-md shadow-[#d6a85a]/20 transition hover:bg-[#c3964b] hover:shadow-lg"
                 >
-                  <ClipboardList className="mr-2 h-4 w-4" />
+                  <ClipboardList className="h-4 w-4" />
                   Historial de solicitudes
+                  <span className="rounded-full bg-zinc-950/10 px-2 py-0.5 text-xs font-semibold">
+                    {requests.length}
+                  </span>
                 </Button>
               </div>
             </div>
@@ -588,202 +823,6 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
           </Button>
         </div>
       </Card>
-
-      <Dialog open={showRequests} onOpenChange={setShowRequests}>
-        <DialogContent className="h-[92vh] w-[min(96vw,74rem)] max-w-none overflow-hidden rounded-2xl p-0">
-          <div className="flex h-full min-h-0 flex-col bg-background">
-            <div className="border-b border-border/70 bg-muted/20 px-5 py-5 sm:px-6">
-              <DialogHeader className="space-y-2">
-                <DialogTitle className="text-left text-2xl">Historial de solicitudes de material</DialogTitle>
-                <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                  Revisa tus solicitudes por estado. Haz clic en una solicitud para ver el detalle y reajustar cantidades cuando el trabajo siga vigente.
-                </p>
-              </DialogHeader>
-
-              <div className="mt-5 grid gap-3 lg:grid-cols-3">
-                <HistoryMetric icon={<Clock3 className="h-4 w-4" />} label="Pendientes" value={pendingRequests.length} tone="pending" />
-                <HistoryMetric icon={<Check className="h-4 w-4" />} label="Aprobadas" value={approvedRequests.length} tone="approved" />
-                <HistoryMetric icon={<X className="h-4 w-4" />} label="Rechazadas" value={rejectedRequests.length} tone="rejected" />
-              </div>
-
-              <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto]">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={historySearch}
-                    onChange={(event) => setHistorySearch(event.target.value)}
-                    placeholder="Buscar por trabajo, material, estado o ID..."
-                    className="pl-9"
-                  />
-                </div>
-                <Button type="button" variant="outline" onClick={() => setHistorySearch('')}>
-                  Limpiar
-                </Button>
-              </div>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-              <div className="grid gap-5 xl:grid-cols-3">
-                <RequestHistoryColumn
-                  title="Pendientes"
-                  description="Requieren aprobación de administración."
-                  requests={pendingHistoryRequests}
-                  openRequest={setSelectedHistoryRequestId}
-                  getOrderLabel={getOrderLabel}
-                  materialsById={materialsById}
-                  emptyIcon={<CheckCircle2 className="h-6 w-6" />}
-                  emptyText="No tienes solicitudes pendientes."
-                />
-                <RequestHistoryColumn
-                  title="Aprobadas"
-                  description="Puedes reajustar cantidades si el trabajo sigue vigente."
-                  requests={approvedHistoryRequests}
-                  openRequest={setSelectedHistoryRequestId}
-                  getOrderLabel={getOrderLabel}
-                  materialsById={materialsById}
-                  emptyIcon={<CheckCircle2 className="h-6 w-6" />}
-                  emptyText="Aún no tienes solicitudes aprobadas."
-                />
-                <RequestHistoryColumn
-                  title="Rechazadas"
-                  description="Devueltas para corrección."
-                  requests={rejectedHistoryRequests}
-                  openRequest={setSelectedHistoryRequestId}
-                  getOrderLabel={getOrderLabel}
-                  materialsById={materialsById}
-                  onReloadRejected={reloadRejectedRequest}
-                  emptyIcon={<AlertCircle className="h-6 w-6" />}
-                  emptyText="No hay solicitudes observadas por corregir."
-                />
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={Boolean(selectedHistoryRequest)} onOpenChange={(open) => !open && setSelectedHistoryRequestId(null)}>
-        <DialogContent className="h-[90vh] w-[min(96vw,54rem)] max-w-none overflow-hidden rounded-2xl p-0">
-          {selectedHistoryRequest ? (
-            <div className="flex h-full min-h-0 flex-col bg-background">
-              <div className="border-b border-border/70 bg-muted/20 px-5 py-4 sm:px-6">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <Badge className={`${STATUS_STYLES[selectedHistoryRequest.status]} rounded-full px-3 py-1`}>
-                      {STATUS_LABELS[selectedHistoryRequest.status]}
-                    </Badge>
-                    <DialogTitle className="mt-2 text-left text-xl font-semibold">
-                      {getOrderLabel(selectedHistoryRequest.productionOrderId)}
-                    </DialogTitle>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Solicitud #{selectedHistoryRequest.id.slice(0, 8)} · {new Date(selectedHistoryRequest.requestDate).toLocaleString('es-BO')}
-                    </p>
-                  </div>
-                  <Badge variant="outline" className="w-fit rounded-full px-3 py-1">
-                    {selectedHistoryRequest.items.length} materiales
-                  </Badge>
-                </div>
-              </div>
-
-              <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-                <div className="space-y-4">
-                  {selectedHistoryRequestEditable ? (
-                    <Card className="border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
-                      Este trabajo sigue vigente. Puedes reajustar cantidades de esta solicitud aprobada y quedará registrado en historial.
-                    </Card>
-                  ) : (
-                    <Card className="border-border/70 bg-muted/30 p-4 text-sm text-muted-foreground">
-                      Esta solicitud no está editable porque no está aprobada o pertenece a un trabajo/proyecto cerrado.
-                    </Card>
-                  )}
-
-                  <Card className="overflow-hidden border-border/70">
-                    <div className="border-b border-border/70 px-4 py-3">
-                      <p className="text-sm font-semibold">Materiales solicitados</p>
-                    </div>
-                    <div className="divide-y divide-border/70">
-                      {selectedHistoryRequest.items.map((item) => {
-                        const material = materialsById.get(item.materialId);
-                        return (
-                          <div key={item.id} className="grid gap-3 p-4 md:grid-cols-[1fr_9rem] md:items-center">
-                            <div className="min-w-0">
-                              <p className="font-semibold leading-5">{material?.name ?? 'Material no encontrado'}</p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                Unidad: {material?.unit ?? 'u'}{item.notes ? ` · ${item.notes}` : ''}
-                              </p>
-                            </div>
-                            {selectedHistoryRequestEditable ? (
-                              <Input
-                                type="number"
-                                min="1"
-                                step="1"
-                                value={historyDraftQuantities[item.id] ?? item.quantity}
-                                onChange={(event) => updateHistoryDraftQuantity(item.id, event.target.value)}
-                                className="h-10 text-right font-mono"
-                              />
-                            ) : (
-                              <p className="text-right font-mono font-semibold">
-                                {item.quantity} {material?.unit ?? 'u'}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </Card>
-
-                  <Card className="border-border/70 p-4">
-                    <div className="flex items-center gap-2">
-                      <History className="h-4 w-4 text-muted-foreground" />
-                      <p className="text-sm font-semibold">Historial de modificaciones</p>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {(selectedHistoryRequest.adjustments ?? []).map((adjustment) => {
-                        const material = materialsById.get(adjustment.materialId);
-                        return (
-                          <div key={adjustment.id} className="rounded-xl border border-border/70 bg-muted/20 px-3 py-2 text-sm">
-                            <p className="font-medium">
-                              Se modificó la cantidad de {material?.name ?? 'un material'} de {adjustment.previousQuantity} a {adjustment.newQuantity}.
-                            </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {new Date(adjustment.createdAt).toLocaleString('es-BO')}
-                            </p>
-                          </div>
-                        );
-                      })}
-                      {(selectedHistoryRequest.adjustments ?? []).length === 0 ? (
-                        <EmptyHint icon={<History className="h-5 w-5" />} text="Esta solicitud aún no tiene modificaciones registradas." />
-                      ) : null}
-                    </div>
-                  </Card>
-
-                  {selectedHistoryRequest.status === 'rejected' ? (
-                    <Card className="border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
-                      <p className="font-semibold">Motivo de rechazo</p>
-                      <p className="mt-2 leading-6">{selectedHistoryRequest.rejectionComments || 'Sin comentario del administrador.'}</p>
-                    </Card>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2 border-t border-border/70 bg-background px-4 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6">
-                <Button variant="outline" onClick={() => setSelectedHistoryRequestId(null)}>
-                  Cerrar
-                </Button>
-                {selectedHistoryRequestEditable ? (
-                  <Button
-                    onClick={saveHistoryRequestAdjustments}
-                    disabled={savingHistoryRequest}
-                    className="gap-2 bg-[#d6a85a] text-white hover:bg-[#c3964b]"
-                  >
-                    <Save className="h-4 w-4" />
-                    {savingHistoryRequest ? 'Guardando...' : 'Guardar reajuste'}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
 
     </div>
   );
