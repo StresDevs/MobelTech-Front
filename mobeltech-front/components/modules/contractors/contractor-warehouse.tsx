@@ -11,7 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { AlertCircle, CheckCircle2, Plus, Search, Undo2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ClipboardList, Plus, Search, Undo2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 
 type Material = {
@@ -88,6 +88,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showRequests, setShowRequests] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
 
   async function loadData() {
     if (!apiBase) {
@@ -154,6 +155,34 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
   );
+  const materialsById = useMemo(
+    () => new Map(materials.map((material) => [material.id, material])),
+    [materials],
+  );
+
+  const historyRequests = useMemo(() => {
+    const normalized = historySearch.trim().toLowerCase();
+    if (!normalized) return requests;
+
+    return requests.filter((request) => {
+      const orderLabel = getOrderLabel(request.productionOrderId);
+      const statusLabel = {
+        pending: 'pendiente',
+        approved: 'aprobada',
+        rejected: 'rechazada observada',
+      }[request.status];
+      const materialNames = request.items
+        .map((item) => materialsById.get(item.materialId)?.name ?? '')
+        .join(' ');
+
+      return [request.id, orderLabel, statusLabel, materialNames, request.rejectionComments ?? '']
+        .some((value) => value.toLowerCase().includes(normalized));
+    });
+  }, [historySearch, materialsById, requests, orders, projectsById]);
+
+  const pendingHistoryRequests = historyRequests.filter((request) => request.status === 'pending');
+  const approvedHistoryRequests = historyRequests.filter((request) => request.status === 'approved');
+  const rejectedHistoryRequests = historyRequests.filter((request) => request.status === 'rejected');
 
   function getOrderLabel(orderId?: string | null) {
     const order = orders.find((entry) => entry.id === orderId);
@@ -289,7 +318,8 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
                   onClick={() => setShowRequests(true)}
                   className="rounded-full border-[#eab676]/35 bg-[#eab676]/15 px-4 text-[#9a6b2f] hover:bg-[#eab676]/25 hover:text-[#8a5d26]"
                 >
-                  Estado de solicitudes
+                  <ClipboardList className="mr-2 h-4 w-4" />
+                  Historial de solicitudes
                 </Button>
               </div>
             </div>
@@ -444,37 +474,64 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
         <DialogContent className="h-[92vh] w-[min(96vw,60rem)] overflow-hidden rounded-3xl p-0">
           <div className="border-b border-border/70 bg-[linear-gradient(135deg,rgba(234,182,118,0.16),rgba(255,255,255,0.98))] px-5 py-5 sm:px-6 dark:bg-[linear-gradient(135deg,rgba(234,182,118,0.12),rgba(20,20,20,0.98))]">
             <DialogHeader className="space-y-2">
-              <DialogTitle className="text-left text-2xl">Estado de solicitudes</DialogTitle>
+              <DialogTitle className="text-left text-2xl">Historial de solicitudes de material</DialogTitle>
               <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-                Revisa aquí todas tus solicitudes por estado. Puedes ver las pendientes, aprobadas o las que necesitan corrección sin salir de la pantalla de trabajo.
+                Revisa tus solicitudes pendientes, aprobadas y observadas sin salir de la pantalla de trabajo.
               </p>
             </DialogHeader>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+            <div className="mb-4 grid gap-3 sm:grid-cols-3">
+              <HistoryMetric label="Pendientes" value={pendingRequests.length} tone="pending" />
+              <HistoryMetric label="Aprobadas" value={approvedRequests.length} tone="approved" />
+              <HistoryMetric label="Observadas" value={rejectedRequests.length} tone="rejected" />
+            </div>
+
+            <div className="mb-4 grid gap-2 sm:grid-cols-[1fr_auto]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={historySearch}
+                  onChange={(event) => setHistorySearch(event.target.value)}
+                  placeholder="Buscar por trabajo, material, estado o ID..."
+                  className="pl-9"
+                />
+              </div>
+              <Button type="button" variant="outline" onClick={() => setHistorySearch('')}>
+                Limpiar
+              </Button>
+            </div>
+
             <Tabs defaultValue="pending" className="w-full">
               <TabsList className="grid h-auto w-full grid-cols-3 rounded-2xl bg-muted/60 p-1">
                 <TabsTrigger value="pending" className="rounded-xl py-2.5">
                   Pendientes
-                  <span className="ml-1 rounded-full bg-background/80 px-2 py-0.5 text-xs">{pendingRequests.length}</span>
+                  <span className="ml-1 rounded-full bg-background/80 px-2 py-0.5 text-xs">{pendingHistoryRequests.length}</span>
                 </TabsTrigger>
                 <TabsTrigger value="approved" className="rounded-xl py-2.5">
                   Aprobadas
-                  <span className="ml-1 rounded-full bg-background/80 px-2 py-0.5 text-xs">{approvedRequests.length}</span>
+                  <span className="ml-1 rounded-full bg-background/80 px-2 py-0.5 text-xs">{approvedHistoryRequests.length}</span>
                 </TabsTrigger>
                 <TabsTrigger value="rejected" className="rounded-xl py-2.5">
                   Observadas
-                  <span className="ml-1 rounded-full bg-background/80 px-2 py-0.5 text-xs">{rejectedRequests.length}</span>
+                  <span className="ml-1 rounded-full bg-background/80 px-2 py-0.5 text-xs">{rejectedHistoryRequests.length}</span>
                 </TabsTrigger>
               </TabsList>
 
               <TabsContent value="pending" className="mt-4">
                 <ScrollArea className="h-[58vh] pr-2">
                   <div className="space-y-3">
-                    {pendingRequests.map((request) => (
-                      <StatusCard key={request.id} request={request} title={getOrderLabel(request.productionOrderId)} tone="pending" />
+                    {pendingHistoryRequests.map((request) => (
+                      <StatusCard
+                        key={request.id}
+                        request={request}
+                        title={getOrderLabel(request.productionOrderId)}
+                        tone="pending"
+                        materialsById={materialsById}
+                      />
                     ))}
-                    {pendingRequests.length === 0 ? (
+                    {pendingHistoryRequests.length === 0 ? (
                       <EmptyHint icon={<CheckCircle2 className="h-5 w-5" />} text="No tienes solicitudes pendientes." />
                     ) : null}
                   </div>
@@ -484,10 +541,16 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
               <TabsContent value="approved" className="mt-4">
                 <ScrollArea className="h-[58vh] pr-2">
                   <div className="space-y-3">
-                    {approvedRequests.map((request) => (
-                      <StatusCard key={request.id} request={request} title={getOrderLabel(request.productionOrderId)} tone="approved" />
+                    {approvedHistoryRequests.map((request) => (
+                      <StatusCard
+                        key={request.id}
+                        request={request}
+                        title={getOrderLabel(request.productionOrderId)}
+                        tone="approved"
+                        materialsById={materialsById}
+                      />
                     ))}
-                    {approvedRequests.length === 0 ? (
+                    {approvedHistoryRequests.length === 0 ? (
                       <EmptyHint icon={<CheckCircle2 className="h-5 w-5" />} text="Aún no tienes solicitudes aprobadas." />
                     ) : null}
                   </div>
@@ -497,18 +560,15 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
               <TabsContent value="rejected" className="mt-4">
                 <ScrollArea className="h-[58vh] pr-2">
                   <div className="space-y-3">
-                    {rejectedRequests.map((request) => (
+                    {rejectedHistoryRequests.map((request) => (
                       <Card key={request.id} className="border-rose-200 bg-rose-50/70 p-4 shadow-sm dark:border-rose-900/60 dark:bg-rose-950/30">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate font-semibold">{getOrderLabel(request.productionOrderId)}</p>
-                            <p className="text-xs text-muted-foreground">{new Date(request.requestDate).toLocaleString('es-BO')}</p>
-                          </div>
-                          <Badge className={STATUS_STYLES.rejected}>Rechazada</Badge>
-                        </div>
-                        <div className="mt-3 rounded-2xl border border-rose-200/70 bg-background/80 p-3 text-sm leading-6 text-rose-700 dark:border-rose-900/60 dark:text-rose-200">
-                          {request.rejectionComments || 'Sin comentario del administrador.'}
-                        </div>
+                        <StatusCard
+                          request={request}
+                          title={getOrderLabel(request.productionOrderId)}
+                          tone="rejected"
+                          materialsById={materialsById}
+                          compact
+                        />
                         <Button
                           variant="outline"
                           className="mt-3 w-full gap-2 rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:border-rose-900/60 dark:text-rose-200 dark:hover:bg-rose-950/40"
@@ -519,7 +579,7 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
                         </Button>
                       </Card>
                     ))}
-                    {rejectedRequests.length === 0 ? (
+                    {rejectedHistoryRequests.length === 0 ? (
                       <EmptyHint icon={<AlertCircle className="h-5 w-5" />} text="No hay solicitudes observadas por corregir." />
                     ) : null}
                   </div>
@@ -534,25 +594,99 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
   );
 }
 
-function StatusCard({ request, title, tone }: { request: MaterialRequest; title: string; tone: MaterialRequest['status'] }) {
+function HistoryMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: MaterialRequest['status'];
+}) {
+  return (
+    <Card className="border-border/70 p-3 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+        <Badge className={`${STATUS_STYLES[tone]} rounded-full px-2.5 py-1`}>{value}</Badge>
+      </div>
+    </Card>
+  );
+}
+
+function StatusCard({
+  request,
+  title,
+  tone,
+  materialsById,
+  compact = false,
+}: {
+  request: MaterialRequest;
+  title: string;
+  tone: MaterialRequest['status'];
+  materialsById: Map<string, Material>;
+  compact?: boolean;
+}) {
   const toneLabel = {
     pending: 'Pendiente',
     approved: 'Aprobada',
     rejected: 'Rechazada',
   }[tone];
 
-  return (
-    <Card className="border-border/70 p-4 shadow-sm">
+  const content = (
+    <>
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="font-semibold">{title}</p>
-          <p className="text-xs text-muted-foreground">{new Date(request.requestDate).toLocaleString('es-BO')}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Solicitud #{request.id.slice(0, 8)} · {new Date(request.requestDate).toLocaleString('es-BO')}
+          </p>
         </div>
         <Badge className={`${STATUS_STYLES[tone]} rounded-full px-3 py-1`}>{toneLabel}</Badge>
       </div>
-      <p className="mt-2 text-sm text-muted-foreground">
-        {request.items.length} materiales · {tone === 'rejected' ? 'requiere corrección' : 'en seguimiento'}
-      </p>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {request.items.map((item) => {
+          const material = materialsById.get(item.materialId);
+          return (
+            <div
+              key={`${request.id}-${item.materialId}`}
+              className="rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-sm"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <p className="min-w-0 font-medium leading-5">{material?.name ?? 'Material no encontrado'}</p>
+                <span className="shrink-0 font-mono text-xs font-semibold">
+                  {item.quantity} {material?.unit ?? 'u'}
+                </span>
+              </div>
+              {item.notes ? (
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.notes}</p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {tone === 'rejected' ? (
+        <div className="mt-3 rounded-2xl border border-rose-200/70 bg-background/80 p-3 text-sm leading-6 text-rose-700 dark:border-rose-900/60 dark:text-rose-200">
+          {request.rejectionComments || 'Sin comentario del administrador.'}
+        </div>
+      ) : null}
+
+      {tone !== 'rejected' ? (
+        <p className="mt-3 text-sm text-muted-foreground">
+          {tone === 'approved'
+            ? 'Solicitud aprobada por administración.'
+            : 'Solicitud enviada y pendiente de revisión.'}
+        </p>
+      ) : null}
+    </>
+  );
+
+  if (compact) return <div>{content}</div>;
+
+  return (
+    <Card className="border-border/70 p-4 shadow-sm">
+      {content}
     </Card>
   );
 }
