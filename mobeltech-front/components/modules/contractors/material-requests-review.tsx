@@ -31,9 +31,23 @@ type ProductionOrder = {
 };
 
 type MaterialRequestItem = {
+  id?: string;
   materialId: string;
   quantity: number;
   notes?: string | null;
+};
+
+type MaterialRequestAdjustment = {
+  id: string;
+  materialRequestId: string;
+  materialRequestItemId: string;
+  materialId: string;
+  previousQuantity: number;
+  newQuantity: number;
+  status?: 'pending' | 'approved' | 'rejected' | string;
+  note?: string | null;
+  reviewComments?: string | null;
+  createdAt: string;
 };
 
 type MaterialRequest = {
@@ -46,6 +60,7 @@ type MaterialRequest = {
   rejectionComments?: string | null;
   requestDate: string;
   items: MaterialRequestItem[];
+  adjustments?: MaterialRequestAdjustment[];
 };
 
 const STATUS_META = {
@@ -53,6 +68,14 @@ const STATUS_META = {
   approved: { label: 'Aprobada', className: 'bg-emerald-100 text-emerald-800' },
   rejected: { label: 'Rechazada', className: 'bg-rose-100 text-rose-800' },
 } as const;
+
+function getPendingAdjustments(request: MaterialRequest) {
+  return (request.adjustments ?? []).filter((adjustment) => adjustment.status === 'pending');
+}
+
+function hasPendingAdjustment(request: MaterialRequest) {
+  return getPendingAdjustments(request).length > 0;
+}
 
 export function MaterialRequestsReview() {
   const { user } = useAuth();
@@ -154,6 +177,13 @@ export function MaterialRequestsReview() {
   function getRequestClientName(request: MaterialRequest) {
     const order = ordersById.get(request.productionOrderId ?? '');
     return request.clientName?.trim() || order?.clientName?.trim() || 'Cliente sin detalle';
+  }
+
+  function getRequestStatusMeta(request: MaterialRequest) {
+    if (request.status === 'pending' && hasPendingAdjustment(request)) {
+      return { label: 'Reajuste pendiente', className: 'bg-sky-100 text-sky-800' };
+    }
+    return STATUS_META[request.status];
   }
 
   function getMaterial(materialId: string) {
@@ -299,8 +329,8 @@ export function MaterialRequestsReview() {
                 <div className="flex flex-col gap-4 pr-8 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge className={`${STATUS_META[selectedRequest.status].className} rounded-full px-3 py-1 text-xs font-semibold`}>
-                        {STATUS_META[selectedRequest.status].label}
+                      <Badge className={`${getRequestStatusMeta(selectedRequest).className} rounded-full px-3 py-1 text-xs font-semibold`}>
+                        {getRequestStatusMeta(selectedRequest).label}
                       </Badge>
                       <Badge variant="outline" className="gap-1.5 rounded-full border-border/70 bg-background/80 px-3 py-1 text-xs">
                         <Hash className="h-3.5 w-3.5" />
@@ -323,7 +353,7 @@ export function MaterialRequestsReview() {
                     </div>
                     <div className="rounded-xl border border-border/70 bg-background/75 px-4 py-3">
                       <p className="text-xs text-muted-foreground">Estado</p>
-                      <p className="mt-1 text-sm font-semibold">{STATUS_META[selectedRequest.status].label}</p>
+                      <p className="mt-1 text-sm font-semibold">{getRequestStatusMeta(selectedRequest).label}</p>
                     </div>
                   </div>
                 </div>
@@ -356,10 +386,62 @@ export function MaterialRequestsReview() {
                       <InfoRow
                         icon={<Check className="h-4 w-4" />}
                         label="Estado"
-                        value={STATUS_META[selectedRequest.status].label}
+                        value={getRequestStatusMeta(selectedRequest).label}
                       />
                     </div>
                   </Card>
+
+                  {getPendingAdjustments(selectedRequest).length > 0 ? (
+                    <Card className="border-sky-200 bg-sky-50/80 p-4 shadow-sm dark:border-sky-900/60 dark:bg-sky-950/35">
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-800 dark:text-sky-200">
+                            Reajuste solicitado
+                          </p>
+                          <p className="mt-1 text-sm text-sky-800/80 dark:text-sky-100/75">
+                            El contratista cambió cantidades. Aprueba para aplicar stock y actualizar la solicitud.
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="w-fit rounded-full bg-background/70">
+                          {getPendingAdjustments(selectedRequest).length} cambio{getPendingAdjustments(selectedRequest).length === 1 ? '' : 's'}
+                        </Badge>
+                      </div>
+                      <div className="mt-4 grid gap-3">
+                        {getPendingAdjustments(selectedRequest).map((adjustment) => {
+                          const material = getMaterial(adjustment.materialId);
+                          const difference = adjustment.newQuantity - adjustment.previousQuantity;
+                          return (
+                            <div key={adjustment.id} className="rounded-xl border border-sky-200/80 bg-background p-4 dark:border-sky-900/60">
+                              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                <div className="min-w-0">
+                                  <p className="font-semibold leading-5">{material?.name ?? 'Material no encontrado'}</p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    Unidad: {material?.unit ?? 'u'} · Solicitado {new Date(adjustment.createdAt).toLocaleString('es-BO')}
+                                  </p>
+                                </div>
+                                <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[28rem]">
+                                  <div className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2">
+                                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Actual</p>
+                                    <p className="mt-1 font-mono text-sm font-semibold">{adjustment.previousQuantity}</p>
+                                  </div>
+                                  <div className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2">
+                                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Solicitado</p>
+                                    <p className="mt-1 font-mono text-sm font-semibold">{adjustment.newQuantity}</p>
+                                  </div>
+                                  <div className={`rounded-lg border px-3 py-2 ${difference >= 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
+                                    <p className="text-[10px] uppercase tracking-wide opacity-80">Diferencia</p>
+                                    <p className="mt-1 font-mono text-sm font-semibold">
+                                      {difference > 0 ? '+' : ''}{difference}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </Card>
+                  ) : null}
 
                   <Card className="border-border/70 p-4 shadow-sm">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -511,6 +593,17 @@ function RequestsColumn({
   getRequestClientName: (request: MaterialRequest) => string;
   materialsById: Map<string, Material>;
 }) {
+  const pageSize = 4;
+  const [visibleCount, setVisibleCount] = useState(pageSize);
+  const requestSignature = requests.map((request) => request.id).join('|');
+
+  useEffect(() => {
+    setVisibleCount(pageSize);
+  }, [requestSignature]);
+
+  const visibleRequests = requests.slice(0, visibleCount);
+  const remainingCount = Math.max(requests.length - visibleRequests.length, 0);
+
   return (
     <Card className="p-5">
       <div className="flex items-center justify-between gap-3">
@@ -522,7 +615,7 @@ function RequestsColumn({
       </div>
 
       <div className="mt-4 space-y-3">
-        {requests.map((request) => (
+        {visibleRequests.map((request) => (
           <Card
             key={request.id}
             className="cursor-pointer border-border/70 p-4 transition hover:shadow-sm"
@@ -537,7 +630,9 @@ function RequestsColumn({
                   {request.items.length} materiales · {new Date(request.requestDate).toLocaleDateString('es-BO')}
                 </p>
               </div>
-              <Badge className={STATUS_META[request.status].className}>{STATUS_META[request.status].label}</Badge>
+              <Badge className={hasPendingAdjustment(request) ? 'bg-sky-100 text-sky-800' : STATUS_META[request.status].className}>
+                {hasPendingAdjustment(request) ? 'Reajuste pendiente' : STATUS_META[request.status].label}
+              </Badge>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               {request.items.slice(0, 3).map((item) => {
@@ -565,6 +660,17 @@ function RequestsColumn({
             <ClipboardList className="mx-auto mb-3 h-8 w-8 opacity-60" />
             <p>No hay solicitudes en esta bandeja.</p>
           </div>
+        ) : null}
+
+        {remainingCount > 0 ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-1 w-full"
+            onClick={() => setVisibleCount((current) => Math.min(current + pageSize, requests.length))}
+          >
+            Cargar más ({remainingCount})
+          </Button>
         ) : null}
       </div>
     </Card>

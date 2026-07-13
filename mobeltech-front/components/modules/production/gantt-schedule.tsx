@@ -525,6 +525,7 @@ export function GanttSchedule() {
   const searchParams = useSearchParams();
   const laborJobIdParam = searchParams.get('laborJobId');
   const scheduleJobIdParam = searchParams.get('jobId');
+  const embedded = searchParams.get('embedded') === '1';
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1049,7 +1050,7 @@ export function GanttSchedule() {
           const jobId = editing.order.id;
           setSuccessMessage('Cronograma guardado y solicitud de pago enviada. Continúa con la solicitud de material.');
           setEditing(null);
-          router.push(`/contractor-requests?jobId=${encodeURIComponent(jobId)}&fromSchedule=1`);
+          router.push(`/contractor-requests?jobId=${encodeURIComponent(jobId)}&fromSchedule=1${embedded ? '&embedded=1' : ''}`);
           return;
         }
         setSuccessMessage('Cronograma guardado y solicitud de pago enviada a revisión.');

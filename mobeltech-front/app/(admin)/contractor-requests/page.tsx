@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { AppLayout } from '@/components/layout/app-layout';
 import { MaterialRequestsReview } from '@/components/modules/contractors/material-requests-review';
@@ -7,13 +8,24 @@ import { ContractorWarehouse } from '@/components/modules/contractors/contractor
 import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { useRole } from '@/hooks/use-role-context';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useSearchParams } from 'next/navigation';
 
 export default function ContractorRequestsPage() {
   const { currentRole } = useRole();
   const { user } = useAuth();
+  const searchParams = useSearchParams();
+  const embedded = searchParams.get('embedded') === '1';
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
   const [contractorId, setContractorId] = useState<string | null>(null);
   const [loadingContractor, setLoadingContractor] = useState(currentRole === 'contractor');
+
+  const wrapPage = (content: ReactNode) => {
+    if (embedded) {
+      return <div className="min-h-screen bg-background p-4 md:p-5">{content}</div>;
+    }
+
+    return <AppLayout>{content}</AppLayout>;
+  };
 
   useEffect(() => {
     if (currentRole !== 'contractor' || !user || !apiBase) {
@@ -46,41 +58,35 @@ export default function ContractorRequestsPage() {
 
   if (currentRole === 'contractor' && user) {
     if (loadingContractor) {
-      return (
-        <AppLayout>
-          <div className="p-6">
-            <PageLoadingState
-              title="Cargando solicitudes"
-              description="Buscando tu perfil de contratista y tus materiales."
-            />
-          </div>
-        </AppLayout>
+      return wrapPage(
+        <div className="p-6">
+          <PageLoadingState
+            title="Cargando solicitudes"
+            description="Buscando tu perfil de contratista y tus materiales."
+          />
+        </div>,
       );
     }
 
-    return (
-      <AppLayout>
-        <div className="p-6 space-y-6">
-          <div>
-            <h1 className="text-3xl font-bold">Solicitud de Material</h1>
-            <p className="text-muted-foreground mt-2">Selecciona el trabajo dentro del formulario y solicita los materiales que necesites.</p>
-          </div>
-
-          {contractorId ? <ContractorWarehouse contractorId={contractorId} /> : <p>No se encontró tu registro de contratista.</p>}
+    return wrapPage(
+      <div className={`${embedded ? 'space-y-5' : 'p-6 space-y-6'}`}>
+        <div>
+          <h1 className={embedded ? 'text-2xl font-bold' : 'text-3xl font-bold'}>Solicitud de Material</h1>
+          <p className="text-muted-foreground mt-2">Selecciona el trabajo dentro del formulario y solicita los materiales que necesites.</p>
         </div>
-      </AppLayout>
+
+        {contractorId ? <ContractorWarehouse contractorId={contractorId} /> : <p>No se encontró tu registro de contratista.</p>}
+      </div>,
     );
   }
 
-  return (
-    <AppLayout>
-      <div className="p-6 space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold">Solicitudes de Contratistas</h1>
-          <p className="text-muted-foreground mt-2">Revisa y aprueba las solicitudes de materiales de los contratistas</p>
-        </div>
-        <MaterialRequestsReview />
+  return wrapPage(
+    <div className={`${embedded ? 'space-y-5' : 'p-6 space-y-6'}`}>
+      <div>
+        <h1 className={embedded ? 'text-2xl font-bold' : 'text-3xl font-bold'}>Solicitudes de Contratistas</h1>
+        <p className="text-muted-foreground mt-2">Revisa y aprueba las solicitudes de materiales de los contratistas</p>
       </div>
-    </AppLayout>
+      <MaterialRequestsReview />
+    </div>,
   );
 }

@@ -48,7 +48,9 @@ type MaterialRequestAdjustment = {
   materialId: string;
   previousQuantity: number;
   newQuantity: number;
+  status?: 'pending' | 'approved' | 'rejected' | string;
   note?: string | null;
+  reviewComments?: string | null;
   changedByUserId?: string | null;
   createdAt: string;
 };
@@ -89,6 +91,14 @@ const tableMeasureHeaderClass = 'bg-emerald-100 text-emerald-950 dark:bg-emerald
 const tableMeasureCellClass = 'bg-emerald-50/80 text-zinc-900 dark:bg-emerald-500/10 dark:text-zinc-100';
 const tableMetaHeaderClass = 'bg-sky-100 text-sky-950 dark:bg-sky-500/20 dark:text-sky-100';
 const tableMetaCellClass = 'bg-sky-50/80 text-zinc-900 dark:bg-sky-500/10 dark:text-zinc-100';
+
+function getPendingAdjustments(request: MaterialRequest) {
+  return (request.adjustments ?? []).filter((adjustment) => adjustment.status === 'pending');
+}
+
+function hasPendingAdjustment(request: MaterialRequest) {
+  return getPendingAdjustments(request).length > 0;
+}
 
 export function ContractorWarehouse({ contractorId }: { contractorId: string }) {
   const { user } = useAuth();
@@ -226,10 +236,12 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
   const selectedHistoryRequestEditable = Boolean(
     selectedHistoryRequest &&
     ['pending', 'approved'].includes(selectedHistoryRequest.status) &&
+    !hasPendingAdjustment(selectedHistoryRequest) &&
     selectedHistoryOrder &&
     selectedHistoryOrder.status !== 'completed' &&
     selectedHistoryProject?.status !== 'delivered',
   );
+  const selectedHistoryRequestHasPendingAdjustment = Boolean(selectedHistoryRequest && hasPendingAdjustment(selectedHistoryRequest));
 
   useEffect(() => {
     if (!selectedHistoryRequest) {
@@ -427,8 +439,10 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
       setRequests((current) => current.map((request) => (request.id === body.id ? body : request)));
       setSelectedHistoryRequestId(body.id);
       toast({
-        title: selectedHistoryRequest.status === 'pending' ? 'Solicitud actualizada' : 'Solicitud reajustada',
-        description: 'Las cantidades fueron actualizadas y el historial quedó registrado.',
+        title: selectedHistoryRequest.status === 'pending' ? 'Solicitud actualizada' : 'Reajuste enviado a aprobación',
+        description: selectedHistoryRequest.status === 'pending'
+          ? 'Las cantidades fueron actualizadas antes de la revisión.'
+          : 'El administrador debe aprobar el cambio antes de aplicar cantidades y stock.',
         duration: 3000,
       });
     } catch (err) {
@@ -484,9 +498,13 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
           </div>
 
           <div className="space-y-4 p-4 sm:p-6">
-            {selectedHistoryRequestEditable ? (
+            {selectedHistoryRequestHasPendingAdjustment ? (
+              <Card className="border-sky-200 bg-sky-50/80 p-4 text-sm text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-100">
+                Hay un reajuste pendiente de aprobación. Cuando administración lo apruebe se actualizarán cantidades y stock.
+              </Card>
+            ) : selectedHistoryRequestEditable ? (
               <Card className="border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
-                Este trabajo sigue vigente. Puedes reajustar cantidades de esta solicitud y quedará registrado en historial.
+                Este trabajo sigue vigente. Si reajustas una solicitud aprobada, el cambio se enviará a administración para aprobación.
               </Card>
             ) : (
               <Card className="border-border/70 bg-muted/30 p-4 text-sm text-muted-foreground">
@@ -537,14 +555,31 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
               <div className="mt-3 space-y-2">
                 {(selectedHistoryRequest.adjustments ?? []).map((adjustment) => {
                   const material = materialsById.get(adjustment.materialId);
+                  const status = adjustment.status ?? 'approved';
+                  const statusLabel = status === 'pending' ? 'Pendiente de aprobación' : status === 'rejected' ? 'Rechazada' : 'Aprobada';
+                  const statusClass = status === 'pending'
+                    ? 'bg-sky-100 text-sky-800'
+                    : status === 'rejected'
+                    ? 'bg-rose-100 text-rose-800'
+                    : 'bg-emerald-100 text-emerald-800';
                   return (
                     <div key={adjustment.id} className="rounded-xl border border-border/70 bg-muted/20 px-3 py-2 text-sm">
-                      <p className="font-medium">
-                        Se modificó la cantidad de {material?.name ?? 'un material'} de {adjustment.previousQuantity} a {adjustment.newQuantity}.
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {new Date(adjustment.createdAt).toLocaleString('es-BO')}
-                      </p>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="font-medium">
+                            Se solicitó modificar {material?.name ?? 'un material'} de {adjustment.previousQuantity} a {adjustment.newQuantity}.
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {new Date(adjustment.createdAt).toLocaleString('es-BO')}
+                          </p>
+                        </div>
+                        <Badge className={`${statusClass} w-fit`}>{statusLabel}</Badge>
+                      </div>
+                      {adjustment.reviewComments ? (
+                        <p className="mt-2 rounded-lg bg-background/70 px-3 py-2 text-xs text-muted-foreground">
+                          {adjustment.reviewComments}
+                        </p>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -573,7 +608,11 @@ export function ContractorWarehouse({ contractorId }: { contractorId: string }) 
                 className="gap-2 bg-[#d6a85a] text-zinc-950 shadow-sm hover:bg-[#c3964b]"
               >
                 <Save className="h-4 w-4" />
-                {savingHistoryRequest ? 'Guardando...' : 'Guardar reajuste'}
+                {savingHistoryRequest
+                  ? 'Enviando...'
+                  : selectedHistoryRequest.status === 'approved'
+                  ? 'Enviar reajuste a aprobación'
+                  : 'Guardar cambios'}
               </Button>
             ) : null}
           </div>
@@ -926,6 +965,9 @@ function RequestHistoryCard({
   onReloadRejected?: (request: MaterialRequest) => void;
 }) {
   const lastAdjustment = request.adjustments?.[0] ?? null;
+  const pendingAdjustment = hasPendingAdjustment(request);
+  const statusLabel = pendingAdjustment ? 'Reajuste pendiente' : STATUS_LABELS[request.status];
+  const statusClass = pendingAdjustment ? 'bg-sky-100 text-sky-800' : STATUS_STYLES[request.status];
 
   return (
     <div
@@ -947,8 +989,8 @@ function RequestHistoryCard({
             {request.items.length} materiales · {new Date(request.requestDate).toLocaleDateString('es-BO')}
           </p>
         </div>
-        <Badge className={`${STATUS_STYLES[request.status]} shrink-0 rounded-full px-3 py-1`}>
-          {STATUS_LABELS[request.status]}
+        <Badge className={`${statusClass} shrink-0 rounded-full px-3 py-1`}>
+          {statusLabel}
         </Badge>
       </div>
 

@@ -178,6 +178,14 @@ type MaterialRequestRecord = {
   requestDate?: string | Date;
 };
 
+type EmbeddedFlow = {
+  kind: 'schedule' | 'materials';
+  job: ProductionOrderRecord;
+  title: string;
+  description: string;
+  url: string;
+};
+
 type LaborCatalogItem = {
   id: string;
   itemKey: string;
@@ -331,6 +339,7 @@ export default function AssignedJobs() {
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [advanceNotes, setAdvanceNotes] = useState('');
   const [savingAdvance, setSavingAdvance] = useState(false);
+  const [embeddedFlow, setEmbeddedFlow] = useState<EmbeddedFlow | null>(null);
 
   async function loadAssignedData(options?: { silent?: boolean }) {
     if (!apiBase || !user) {
@@ -569,11 +578,26 @@ export default function AssignedJobs() {
   }
 
   function goToMaterialRequest(job: ProductionOrderRecord) {
-    router.push(`/contractor-requests?jobId=${encodeURIComponent(job.id)}&fromAssignedJob=1`);
+    const client = getClient(job);
+    setEmbeddedFlow({
+      kind: 'materials',
+      job,
+      title: 'Solicitud de material',
+      description: `${getLeadDescription(job)}${client?.name ? ` · Cliente: ${client.name}` : ''}`,
+      url: `/contractor-requests?jobId=${encodeURIComponent(job.id)}&fromAssignedJob=1&embedded=1`,
+    });
   }
 
-  function goToSchedule(job: ProductionOrderRecord) {
-    router.push(`/schedule?jobId=${encodeURIComponent(job.id)}`);
+  function goToSchedule(job: ProductionOrderRecord, options?: { fromLaborDraft?: boolean }) {
+    const client = getClient(job);
+    const queryKey = options?.fromLaborDraft ? 'laborJobId' : 'jobId';
+    setEmbeddedFlow({
+      kind: 'schedule',
+      job,
+      title: options?.fromLaborDraft ? 'Cronograma tentativo' : 'Cronograma del trabajo',
+      description: `${getLeadDescription(job)}${client?.name ? ` · Cliente: ${client.name}` : ''}`,
+      url: `/schedule?${queryKey}=${encodeURIComponent(job.id)}&embedded=1`,
+    });
   }
 
   function hasActualScheduleReady(job: ProductionOrderRecord) {
@@ -1721,9 +1745,13 @@ export default function AssignedJobs() {
                         <Download className="h-4 w-4" />
                         Descargar mano de obra PDF
                       </Button>
-                      <Button variant="outline" className="justify-start gap-2" onClick={() => window.location.assign('/schedule')}>
+                      <Button variant="outline" className="justify-start gap-2" onClick={() => goToSchedule(selectedJob)}>
                         <CalendarRange className="h-4 w-4" />
-                        Ver cronograma
+                        Llenar cronograma tentativo
+                      </Button>
+                      <Button variant="outline" className="justify-start gap-2" onClick={() => goToMaterialRequest(selectedJob)}>
+                        <PackageCheck className="h-4 w-4" />
+                        Solicitud de material
                       </Button>
                     </div>
                   </div>
@@ -1849,7 +1877,7 @@ export default function AssignedJobs() {
                     <td className="px-4 py-3">
                       <p>{formatDate(job.startDate)}</p>
                       <p className="text-xs text-muted-foreground">{formatDate(job.estimatedDeliveryDate)}</p>
-                      <Button size="sm" variant="ghost" className="mt-1 h-7 gap-1 px-2 text-xs" onClick={() => window.location.assign('/schedule')}>
+                      <Button size="sm" variant="ghost" className="mt-1 h-7 gap-1 px-2 text-xs" onClick={() => goToSchedule(job)}>
                         <CalendarRange className="h-3.5 w-3.5" />
                         Definir cronograma
                       </Button>
@@ -2082,7 +2110,7 @@ export default function AssignedJobs() {
                 <div className="flex items-center justify-between rounded-lg bg-sky-50 px-3 py-2 text-sm dark:bg-sky-500/10 sm:min-w-80">
                   <div>
                     <span className="font-medium text-sky-800 dark:text-sky-100">Total mano de obra</span>
-                    <p className="text-xs font-normal text-muted-foreground">El cronograma se completa en la página de cronograma.</p>
+                    <p className="text-xs font-normal text-muted-foreground">El cronograma se completa después de guardar este borrador.</p>
                   </div>
                   <span className="font-mono font-semibold text-sky-800 dark:text-sky-100">{formatCurrency(laborTotal)}</span>
                 </div>
@@ -2112,16 +2140,16 @@ export default function AssignedJobs() {
                 <p className="text-sm font-semibold">{getLeadDescription(laborSchedulePromptJob)}</p>
                 <p className="mt-1 text-xs text-muted-foreground">Trabajo {laborSchedulePromptJob.id.slice(0, 8)}</p>
                 <p className="mt-3 text-sm text-muted-foreground">
-                  En cronograma verás este formulario pendiente y podrás terminar el proceso desde ahí.
+                  Abriremos el cronograma sobre esta ficha para que completes las fases sin salir del trabajo asignado.
                 </p>
               </div>
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button variant="outline" onClick={() => setLaborSchedulePromptJobId(null)}>Después</Button>
                 <Button
                   onClick={() => {
-                    const jobId = laborSchedulePromptJob.id;
+                    const job = laborSchedulePromptJob;
                     setLaborSchedulePromptJobId(null);
-                    router.push(`/schedule?laborJobId=${encodeURIComponent(jobId)}`);
+                    goToSchedule(job, { fromLaborDraft: true });
                   }}
                   className="gap-2"
                 >
@@ -2130,6 +2158,44 @@ export default function AssignedJobs() {
                 </Button>
               </div>
             </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!embeddedFlow}
+        onOpenChange={(open) => {
+          if (open) return;
+          setEmbeddedFlow(null);
+          void loadAssignedData({ silent: true });
+        }}
+      >
+        <DialogContent className="flex h-[92vh] w-[min(1180px,96vw)] max-w-none flex-col overflow-hidden p-0">
+          {embeddedFlow ? (
+            <>
+              <DialogHeader className="border-b border-border bg-muted/30 px-5 py-4 text-left">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <DialogTitle className="flex items-center gap-2">
+                      {embeddedFlow.kind === 'schedule' ? <CalendarRange className="h-5 w-5 text-primary" /> : <PackageCheck className="h-5 w-5 text-primary" />}
+                      {embeddedFlow.title}
+                    </DialogTitle>
+                    <DialogDescription className="mt-1 truncate">
+                      {embeddedFlow.description}
+                    </DialogDescription>
+                  </div>
+                  <Badge variant="outline" className="w-fit shrink-0">Trabajo #{embeddedFlow.job.id.slice(0, 8)}</Badge>
+                </div>
+              </DialogHeader>
+              <div className="min-h-0 flex-1 bg-background">
+                <iframe
+                  key={embeddedFlow.url}
+                  title={embeddedFlow.title}
+                  src={embeddedFlow.url}
+                  className="h-full w-full border-0"
+                />
+              </div>
+            </>
           ) : null}
         </DialogContent>
       </Dialog>
