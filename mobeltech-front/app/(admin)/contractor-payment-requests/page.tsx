@@ -182,8 +182,14 @@ function getScheduleView(phases?: EstimatedScheduleRow[]) {
 }
 
 function SchedulePhaseTooltip({ phase }: { phase: SchedulePhaseView }) {
+  const alignClass = phase.left < 18
+    ? 'left-0 translate-x-0'
+    : phase.left > 72
+      ? 'right-0 translate-x-0'
+      : 'left-1/2 -translate-x-1/2';
+
   return (
-    <span className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-2 hidden w-64 -translate-x-1/2 rounded-lg border border-border bg-popover p-3 text-left text-popover-foreground shadow-xl ring-1 ring-black/5 group-hover:block">
+    <span className={`pointer-events-none absolute top-full z-40 mt-2 hidden w-[min(18rem,calc(100vw-4rem))] rounded-lg border border-border bg-popover p-3 text-left text-popover-foreground shadow-xl ring-1 ring-black/5 group-hover:block ${alignClass}`}>
       <span className="block text-xs font-semibold text-foreground">{phase.label}</span>
       <span className="mt-1 block text-[11px] font-medium text-muted-foreground">
         {formatDate(phase.startDate)} - {formatDate(phase.endDate)}
@@ -243,7 +249,7 @@ function ScheduleTimelinePreview({ plan }: { plan: PaymentPlan | null }) {
           </div>
 
           <div
-            className="relative mt-4 min-h-[155px] rounded-lg bg-[linear-gradient(to_right,rgba(148,163,184,0.22)_1px,transparent_1px)] dark:bg-[linear-gradient(to_right,rgba(148,163,184,0.18)_1px,transparent_1px)]"
+            className="relative mt-4 min-h-[210px] rounded-lg bg-[linear-gradient(to_right,rgba(148,163,184,0.22)_1px,transparent_1px)] dark:bg-[linear-gradient(to_right,rgba(148,163,184,0.18)_1px,transparent_1px)]"
             style={{ backgroundSize: `${100 / Math.max(view.days.length, 1)}% 100%` }}
           >
             <div className="absolute left-0 right-0 top-3 h-7 rounded-md bg-zinc-300 px-3 text-[11px] font-semibold leading-7 text-zinc-700 shadow-sm dark:bg-zinc-700 dark:text-zinc-100">
@@ -255,7 +261,7 @@ function ScheduleTimelinePreview({ plan }: { plan: PaymentPlan | null }) {
                 className="group absolute h-7 rounded-md px-2 text-[11px] font-semibold leading-7 text-white shadow-sm ring-1 ring-black/10"
                 style={{
                   left: `${phase.left}%`,
-                  top: `${54 + ((index % 3) * 32)}px`,
+                  top: `${48 + ((index % 3) * 42)}px`,
                   width: `${Math.min(phase.width, 100 - phase.left)}%`,
                   backgroundColor: phase.color,
                 }}

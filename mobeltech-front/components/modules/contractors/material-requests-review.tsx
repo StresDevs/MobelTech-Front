@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { PageLoadingState } from '@/components/ui/page-loading-state';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { AlertCircle, CalendarDays, Check, ClipboardList, Hash, Package, Search, ShoppingBag, X } from 'lucide-react';
+import { AlertCircle, CalendarDays, Check, ClipboardList, Hash, Package, Search, ShoppingBag, User, X } from 'lucide-react';
 
 type Material = {
   id: string;
@@ -26,6 +26,7 @@ type Contractor = {
 type ProductionOrder = {
   id: string;
   projectName?: string | null;
+  clientName?: string | null;
   items?: Array<{ description: string; quantity: number }>;
 };
 
@@ -40,6 +41,7 @@ type MaterialRequest = {
   contractorId: string;
   productionOrderId?: string | null;
   jobName?: string | null;
+  clientName?: string | null;
   status: 'pending' | 'approved' | 'rejected';
   rejectionComments?: string | null;
   requestDate: string;
@@ -113,7 +115,8 @@ export function MaterialRequestsReview() {
       const contractorName = contractors.find((entry) => entry.id === request.contractorId)?.name ?? '';
       const order = orders.find((entry) => entry.id === request.productionOrderId);
       const orderName = request.jobName?.trim() || order?.projectName?.trim() || order?.items?.[0]?.description || '';
-      return [contractorName, orderName, request.id].some((value) => value.toLowerCase().includes(normalized));
+      const clientName = request.clientName?.trim() || order?.clientName?.trim() || '';
+      return [contractorName, orderName, clientName, request.id].some((value) => value.toLowerCase().includes(normalized));
     });
   }, [contractors, orders, requests, searchQuery]);
 
@@ -146,6 +149,11 @@ export function MaterialRequestsReview() {
 
   function getRequestJobName(request: MaterialRequest) {
     return request.jobName?.trim() || getOrderName(request.productionOrderId);
+  }
+
+  function getRequestClientName(request: MaterialRequest) {
+    const order = ordersById.get(request.productionOrderId ?? '');
+    return request.clientName?.trim() || order?.clientName?.trim() || 'Cliente sin detalle';
   }
 
   function getMaterial(materialId: string) {
@@ -258,6 +266,7 @@ export function MaterialRequestsReview() {
           openRequest={setSelectedRequestId}
           getContractorName={getContractorName}
           getRequestJobName={getRequestJobName}
+          getRequestClientName={getRequestClientName}
           materialsById={materialsById}
         />
         <RequestsColumn
@@ -267,6 +276,7 @@ export function MaterialRequestsReview() {
           openRequest={setSelectedRequestId}
           getContractorName={getContractorName}
           getRequestJobName={getRequestJobName}
+          getRequestClientName={getRequestClientName}
           materialsById={materialsById}
         />
         <RequestsColumn
@@ -276,6 +286,7 @@ export function MaterialRequestsReview() {
           openRequest={setSelectedRequestId}
           getContractorName={getContractorName}
           getRequestJobName={getRequestJobName}
+          getRequestClientName={getRequestClientName}
           materialsById={materialsById}
         />
       </div>
@@ -301,10 +312,14 @@ export function MaterialRequestsReview() {
                     </DialogTitle>
                     <p className="text-sm text-muted-foreground">{getRequestSummary(selectedRequest)}</p>
                   </div>
-                  <div className="grid w-full gap-2 sm:grid-cols-2 lg:w-auto lg:min-w-80">
+                  <div className="grid w-full gap-2 sm:grid-cols-3 lg:w-auto lg:min-w-[34rem]">
                     <div className="rounded-xl border border-border/70 bg-background/75 px-4 py-3">
                       <p className="text-xs text-muted-foreground">Contratista</p>
                       <p className="mt-1 truncate text-sm font-semibold">{getContractorName(selectedRequest.contractorId)}</p>
+                    </div>
+                    <div className="rounded-xl border border-border/70 bg-background/75 px-4 py-3">
+                      <p className="text-xs text-muted-foreground">Cliente</p>
+                      <p className="mt-1 truncate text-sm font-semibold">{getRequestClientName(selectedRequest)}</p>
                     </div>
                     <div className="rounded-xl border border-border/70 bg-background/75 px-4 py-3">
                       <p className="text-xs text-muted-foreground">Estado</p>
@@ -327,6 +342,11 @@ export function MaterialRequestsReview() {
                         icon={<Package className="h-4 w-4" />}
                         label="Trabajo"
                         value={getRequestJobName(selectedRequest)}
+                      />
+                      <InfoRow
+                        icon={<User className="h-4 w-4" />}
+                        label="Cliente"
+                        value={getRequestClientName(selectedRequest)}
                       />
                       <InfoRow
                         icon={<CalendarDays className="h-4 w-4" />}
@@ -479,6 +499,7 @@ function RequestsColumn({
   openRequest,
   getContractorName,
   getRequestJobName,
+  getRequestClientName,
   materialsById,
 }: {
   title: string;
@@ -487,6 +508,7 @@ function RequestsColumn({
   openRequest: (requestId: string) => void;
   getContractorName: (contractorId: string) => string;
   getRequestJobName: (request: MaterialRequest) => string;
+  getRequestClientName: (request: MaterialRequest) => string;
   materialsById: Map<string, Material>;
 }) {
   return (
@@ -510,6 +532,7 @@ function RequestsColumn({
               <div>
                 <p className="font-semibold">{getContractorName(request.contractorId)}</p>
                 <p className="text-sm text-muted-foreground">{getRequestJobName(request)}</p>
+                <p className="text-xs text-muted-foreground">Cliente: {getRequestClientName(request)}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {request.items.length} materiales · {new Date(request.requestDate).toLocaleDateString('es-BO')}
                 </p>
