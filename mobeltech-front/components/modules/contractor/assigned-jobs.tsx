@@ -433,6 +433,18 @@ export default function AssignedJobs() {
     return () => window.clearTimeout(timeout);
   }, [editingLaborJobId, selectedLaborLines, laborScheduleRows, user?.id, contractor?.id]);
 
+  useEffect(() => {
+    function handleEmbeddedFlowMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== 'mobeltech:embedded-flow-close') return;
+      setEmbeddedFlow(null);
+      void loadAssignedData({ silent: true });
+    }
+
+    window.addEventListener('message', handleEmbeddedFlowMessage);
+    return () => window.removeEventListener('message', handleEmbeddedFlowMessage);
+  }, [apiBase, user?.id, contractor?.id]);
+
   async function markNotificationAsRead(notificationId: string) {
     if (!apiBase) return;
     try {

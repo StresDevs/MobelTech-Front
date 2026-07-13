@@ -897,8 +897,21 @@ export function GanttSchedule() {
     startEditing(order);
   }, [laborJobIdParam, scheduleJobIdParam, myContractor?.id, orders, editing, openedScheduleJobIdParam]);
 
+  function closeEmbeddedFlow() {
+    if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'mobeltech:embedded-flow-close' }, window.location.origin);
+      return;
+    }
+
+    setEditing(null);
+  }
+
   function closeEditing() {
     if (saving) return;
+    if (embedded) {
+      closeEmbeddedFlow();
+      return;
+    }
     setEditing(null);
   }
 
@@ -1056,6 +1069,10 @@ export function GanttSchedule() {
         setSuccessMessage('Cronograma guardado y solicitud de pago enviada a revisión.');
       } else {
         setSuccessMessage('Cronograma guardado correctamente.');
+      }
+      if (embedded) {
+        closeEmbeddedFlow();
+        return;
       }
       setEditing(null);
     } catch (err) {
