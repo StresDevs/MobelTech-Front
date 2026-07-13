@@ -45,11 +45,14 @@ type EstimatedScheduleRow = {
   phaseLabel: string;
   startDate: string;
   endDate: string;
+  cuttingMachine?: string | null;
+  machineLabel?: string | null;
 };
 
 type SchedulePhaseView = EstimatedScheduleRow & {
   color: string;
   label: string;
+  machine: string;
   left: number;
   width: number;
   start: Date;
@@ -151,6 +154,7 @@ function getScheduleView(phases?: EstimatedScheduleRow[]) {
       return {
         ...phase,
         label: phase.phaseLabel || `Etapa ${index + 1}`,
+        machine: phase.machineLabel || phase.cuttingMachine || 'No asignada',
         color: getPhaseColor(phase, index),
         start,
         end,
@@ -175,6 +179,20 @@ function getScheduleView(phases?: EstimatedScheduleRow[]) {
   });
 
   return { phases: phasesWithPlacement, days, start, end, totalDays };
+}
+
+function SchedulePhaseTooltip({ phase }: { phase: SchedulePhaseView }) {
+  return (
+    <span className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-2 hidden w-64 -translate-x-1/2 rounded-lg border border-border bg-popover p-3 text-left text-popover-foreground shadow-xl ring-1 ring-black/5 group-hover:block">
+      <span className="block text-xs font-semibold text-foreground">{phase.label}</span>
+      <span className="mt-1 block text-[11px] font-medium text-muted-foreground">
+        {formatDate(phase.startDate)} - {formatDate(phase.endDate)}
+      </span>
+      <span className="mt-2 inline-flex max-w-full items-center rounded-full border border-border/70 bg-muted/40 px-2 py-1 text-[11px] font-medium text-foreground">
+        <span className="truncate">Máquina: {phase.machine}</span>
+      </span>
+    </span>
+  );
 }
 
 function slugifyLaborKey(value: string) {
@@ -234,15 +252,16 @@ function ScheduleTimelinePreview({ plan }: { plan: PaymentPlan | null }) {
             {view.phases.map((phase, index) => (
               <div
                 key={`${phase.phaseKey}-${index}`}
-                className="absolute h-7 rounded-md px-2 text-[11px] font-semibold leading-7 text-white shadow-sm ring-1 ring-black/10"
+                className="group absolute h-7 rounded-md px-2 text-[11px] font-semibold leading-7 text-white shadow-sm ring-1 ring-black/10"
                 style={{
                   left: `${phase.left}%`,
                   top: `${54 + ((index % 3) * 32)}px`,
                   width: `${Math.min(phase.width, 100 - phase.left)}%`,
                   backgroundColor: phase.color,
                 }}
-                title={`${phase.label}: ${formatDate(phase.startDate)} - ${formatDate(phase.endDate)}`}
+                title={`${phase.label}: ${formatDate(phase.startDate)} - ${formatDate(phase.endDate)} · Máquina: ${phase.machine}`}
               >
+                <SchedulePhaseTooltip phase={phase} />
                 <span className="block truncate">{phase.label}</span>
               </div>
             ))}
@@ -268,6 +287,10 @@ function ScheduleTimelinePreview({ plan }: { plan: PaymentPlan | null }) {
               <div>
                 <p className="text-xs text-muted-foreground">Fin</p>
                 <p className="font-medium">{formatDate(phase.endDate)}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-xs text-muted-foreground">Máquina</p>
+                <p className="truncate font-medium">{phase.machine}</p>
               </div>
             </div>
           </div>

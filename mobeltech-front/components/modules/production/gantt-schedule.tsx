@@ -90,6 +90,7 @@ type Project = {
   id: string;
   name: string;
   clientId: string;
+  status?: string | null;
   startDate: string;
   estimatedDeliveryDate: string;
 };
@@ -127,6 +128,8 @@ type LaborScheduleRow = {
   phaseLabel: string;
   startDate: string;
   endDate: string;
+  cuttingMachine?: string | null;
+  machineLabel?: string | null;
 };
 
 type LaborDraftSnapshot = {
@@ -199,6 +202,14 @@ function formatDisplayDate(value?: string | Date | null) {
 function formatRangeLabel(startDate?: string | null, endDate?: string | null) {
   if (!startDate || !endDate) return 'Sin rango';
   return `${formatShortDate(startDate)} - ${formatShortDate(endDate)}`;
+}
+
+function normalizeStatus(value?: string | null) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function isFinishedStatus(value?: string | null) {
+  return ['completed', 'delivered', 'entregado', 'terminado', 'finalizado', 'done'].includes(normalizeStatus(value));
 }
 
 function formatCurrency(amount: number) {
@@ -657,11 +668,12 @@ export function GanttSchedule() {
   }, [user?.id, myContractor?.id, orders.length]);
 
   const visibleOrders = useMemo(() => {
-    if (!isContractor) return orders;
+    const activeOrders = orders.filter((order) => !isFinishedStatus(order.status) && !isFinishedStatus(getProject(order)?.status));
+    if (!isContractor) return activeOrders;
     if (!myContractor) return [];
-    if (scheduleViewMode === 'global') return orders;
-    return orders.filter((order) => order.assignedContractorId === myContractor.id);
-  }, [isContractor, myContractor, orders, scheduleViewMode]);
+    if (scheduleViewMode === 'global') return activeOrders;
+    return activeOrders.filter((order) => order.assignedContractorId === myContractor.id);
+  }, [isContractor, myContractor, orders, projects, scheduleViewMode]);
 
   function getQuotation(order: ProductionOrder) {
     return quotations.find((quotation) => quotation.id === order.quotationId);
@@ -921,6 +933,8 @@ export function GanttSchedule() {
       phaseLabel: PHASES.find((item) => item.key === phase.phase)?.label ?? phase.phase,
       startDate: phase.startDate,
       endDate: phase.endDate,
+      cuttingMachine: phase.cuttingMachine,
+      machineLabel: phase.cuttingMachine ? getMachineLabel(phase.cuttingMachine) : null,
     }));
   }
 
@@ -1068,6 +1082,23 @@ export function GanttSchedule() {
     };
   }
 
+  function renderPhaseTooltip(options: {
+    title: string;
+    range: string;
+    machineLabel?: string | null;
+    typeLabel: string;
+  }) {
+    return (
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-2 hidden w-64 -translate-x-1/2 rounded-lg border border-border bg-popover p-3 text-left text-popover-foreground shadow-xl ring-1 ring-black/5 group-hover:block">
+        <span className="block text-xs font-semibold text-foreground">{options.title}</span>
+        <span className="mt-1 block text-[11px] font-medium text-muted-foreground">{options.typeLabel} · {options.range}</span>
+        <span className="mt-2 inline-flex max-w-full items-center rounded-full border border-border/70 bg-muted/40 px-2 py-1 text-[11px] font-medium text-foreground">
+          <span className="truncate">Máquina: {options.machineLabel || 'No asignada'}</span>
+        </span>
+      </span>
+    );
+  }
+
   function renderTentativeBar(order: ProductionOrder) {
     const placement = getTimelinePlacement(order.startDate, order.estimatedDeliveryDate);
     if (!placement) {
@@ -1115,21 +1146,28 @@ export function GanttSchedule() {
           if (!placement) return null;
 
           const machineLabel = row.cuttingMachine ? getMachineLabel(row.cuttingMachine) : null;
+          const phaseLabel = phaseConfig?.label ?? row.phase;
 
           return (
             <div
               key={`actual-${row.phase}-${row.id ?? `${row.startDate}-${row.endDate}`}`}
-              className="absolute h-6 rounded-md px-2 text-[11px] font-semibold leading-6 text-white shadow-sm"
+              className="group absolute h-6 rounded-md px-2 text-[11px] font-semibold leading-6 text-white shadow-sm"
               style={{
                 left: `${placement.left}%`,
                 width: `${Math.min(placement.width, 100 - placement.left)}%`,
                 top: `${lane * 30 + 4}px`,
                 backgroundColor: phaseConfig?.color ?? '#eab676',
               }}
-              title={`${phaseConfig?.label}: ${formatRangeLabel(row.startDate, row.endDate)}${machineLabel ? ` · ${machineLabel}` : ''}`}
+              title={`${phaseLabel}: ${formatRangeLabel(row.startDate, row.endDate)} · Máquina: ${machineLabel || 'No asignada'}`}
             >
+              {renderPhaseTooltip({
+                title: phaseLabel,
+                range: formatRangeLabel(row.startDate, row.endDate),
+                machineLabel,
+                typeLabel: 'Cronograma estimado',
+              })}
               <span className="block truncate">
-                {phaseConfig?.label}
+                {phaseLabel}
                 {machineLabel ? ` · ${machineLabel}` : ''}
               </span>
             </div>
@@ -1160,19 +1198,27 @@ export function GanttSchedule() {
           const phaseConfig = PHASES.find((phase) => phase.key === row.phase);
           const placement = getTimelinePlacement(row.startDate, row.endDate);
           if (!placement) return null;
+          const machineLabel = row.cuttingMachine ? getMachineLabel(row.cuttingMachine) : null;
+          const phaseLabel = phaseConfig?.label ?? row.phase;
 
           return (
             <div
               key={`real-${row.phase}-${row.id ?? `${row.startDate}-${row.endDate}`}`}
-              className="absolute h-6 rounded-md bg-emerald-600 px-2 text-[11px] font-semibold leading-6 text-white shadow-sm ring-1 ring-emerald-300/30"
+              className="group absolute h-6 rounded-md bg-emerald-600 px-2 text-[11px] font-semibold leading-6 text-white shadow-sm ring-1 ring-emerald-300/30"
               style={{
                 left: `${placement.left}%`,
                 width: `${Math.min(placement.width, 100 - placement.left)}%`,
                 top: `${lane * 30 + 4}px`,
               }}
-              title={`Avance real ${phaseConfig?.label}: ${formatRangeLabel(row.startDate, row.endDate)}`}
+              title={`Avance real ${phaseLabel}: ${formatRangeLabel(row.startDate, row.endDate)} · Máquina: ${machineLabel || 'No asignada'}`}
             >
-              <span className="block truncate">Real · {phaseConfig?.label}</span>
+              {renderPhaseTooltip({
+                title: phaseLabel,
+                range: formatRangeLabel(row.startDate, row.endDate),
+                machineLabel,
+                typeLabel: 'Avance real',
+              })}
+              <span className="block truncate">Real · {phaseLabel}</span>
             </div>
           );
         })}
@@ -1384,7 +1430,7 @@ export function GanttSchedule() {
         <div className="max-h-[68vh] overflow-auto">
           <div className="min-w-max">
             <div className="sticky top-0 z-20 grid border-b border-border bg-muted/30 text-xs font-semibold text-muted-foreground shadow-sm" style={{ gridTemplateColumns: `320px ${timelineColumnWidth}` }}>
-              <div className="border-r border-border bg-muted/30 px-4 py-3">Mueble / Cliente / Contratista</div>
+              <div className="sticky left-0 z-30 border-r border-border bg-muted px-4 py-3 shadow-[8px_0_16px_-14px_rgba(15,23,42,0.8)]">Mueble / Cliente / Contratista</div>
               <div>
                 <div className="grid border-b border-border/50" style={{ gridTemplateColumns: `repeat(${visibleDayColumns.length}, minmax(32px, 1fr))` }}>
                   {monthGroups.map((group) => (
@@ -1430,7 +1476,7 @@ export function GanttSchedule() {
 
               return (
                 <div key={order.id} className="grid border-b border-border" style={{ gridTemplateColumns: `320px ${timelineColumnWidth}` }}>
-                  <div className="border-r border-border px-4 py-4 text-left">
+                  <div className="sticky left-0 z-10 border-r border-border bg-card px-4 py-4 text-left shadow-[8px_0_16px_-14px_rgba(15,23,42,0.75)]">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold">{getFurnitureName(order)}</p>

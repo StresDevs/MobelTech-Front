@@ -273,12 +273,12 @@ export function MaterialRequestsReview() {
       </div>
 
       <Dialog open={Boolean(selectedRequest)} onOpenChange={(open) => !open && setSelectedRequestId(null)}>
-        <DialogContent className="h-auto max-h-[88vh] w-[95vw] max-w-5xl overflow-hidden rounded-2xl p-0 shadow-2xl">
+        <DialogContent className="h-auto max-h-[90vh] w-[min(96vw,72rem)] !max-w-none overflow-hidden rounded-2xl border-border/70 p-0 shadow-2xl sm:!max-w-none">
           {selectedRequest ? (
-            <div className="flex max-h-[88vh] min-h-0 flex-col bg-background">
-              <div className="border-b border-border/60 bg-[linear-gradient(135deg,rgba(214,168,90,0.16),rgba(255,255,255,0.02))] px-5 py-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
+            <div className="flex max-h-[90vh] min-h-0 flex-col bg-background">
+              <div className="border-b border-border/60 bg-[linear-gradient(135deg,rgba(214,168,90,0.16),rgba(255,255,255,0.02))] px-5 py-5 sm:px-6">
+                <div className="flex flex-col gap-4 pr-8 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge className={`${STATUS_META[selectedRequest.status].className} rounded-full px-3 py-1 text-xs font-semibold`}>
                         {STATUS_META[selectedRequest.status].label}
@@ -288,18 +288,28 @@ export function MaterialRequestsReview() {
                         Solicitud #{selectedRequest.id.slice(0, 8)}
                       </Badge>
                     </div>
-                    <DialogTitle className="mt-2 text-left text-xl font-semibold tracking-tight text-foreground">
+                    <DialogTitle className="text-left text-2xl font-semibold tracking-tight text-foreground">
                       Detalle de solicitud
                     </DialogTitle>
-                    <p className="mt-1 text-sm text-muted-foreground">{getRequestSummary(selectedRequest)}</p>
+                    <p className="text-sm text-muted-foreground">{getRequestSummary(selectedRequest)}</p>
+                  </div>
+                  <div className="grid w-full gap-2 sm:grid-cols-2 lg:w-auto lg:min-w-80">
+                    <div className="rounded-xl border border-border/70 bg-background/75 px-4 py-3">
+                      <p className="text-xs text-muted-foreground">Contratista</p>
+                      <p className="mt-1 truncate text-sm font-semibold">{getContractorName(selectedRequest.contractorId)}</p>
+                    </div>
+                    <div className="rounded-xl border border-border/70 bg-background/75 px-4 py-3">
+                      <p className="text-xs text-muted-foreground">Estado</p>
+                      <p className="mt-1 text-sm font-semibold">{STATUS_META[selectedRequest.status].label}</p>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
-                <div className="space-y-4">
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+                <div className="space-y-5">
                   <Card className="overflow-hidden border-border/70 bg-card/95 p-4 shadow-sm">
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="grid gap-3 lg:grid-cols-2">
                       <InfoRow
                         icon={<ShoppingBag className="h-4 w-4" />}
                         label="Contratista"
@@ -324,32 +334,36 @@ export function MaterialRequestsReview() {
                   </Card>
 
                   <Card className="border-border/70 p-4 shadow-sm">
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                         Materiales solicitados
                       </p>
+                      <Badge variant="outline" className="w-fit rounded-full">
+                        {selectedRequest.items.length} {selectedRequest.items.length === 1 ? 'ítem' : 'ítems'}
+                      </Badge>
                     </div>
 
-                    <div className="mt-4 overflow-hidden rounded-xl border border-border/70">
+                    <div className="mt-4 grid gap-3">
                       {selectedRequest.items.map((item, index) => {
                         const material = getMaterial(item.materialId);
                         const materialInfo = getMaterialLabel(item);
                         return (
                           <div
                             key={`${selectedRequest.id}-${item.materialId}`}
-                            className="border-b border-border/70 bg-background/95 p-4 last:border-b-0"
+                            className="rounded-xl border border-border/70 bg-background/95 p-4 shadow-sm"
                           >
-                            <div className="flex items-start gap-3">
-                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#eab676]/15 text-[#9a6b2f]">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#eab676]/15 text-[#9a6b2f]">
                                 <span className="text-sm font-bold">{index + 1}</span>
                               </div>
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                                   <div className="min-w-0">
                                     <p className="font-semibold leading-5 text-foreground">{materialInfo.name}</p>
-                                    <p className="mt-0.5 text-sm font-semibold text-foreground">{materialInfo.quantityLabel}</p>
+                                    <p className="mt-1 text-sm text-muted-foreground">Cantidad solicitada</p>
+                                    <p className="mt-0.5 text-lg font-semibold text-foreground">{materialInfo.quantityLabel}</p>
                                   </div>
-                                  <Badge variant="outline" className="w-fit shrink-0 rounded-full bg-muted/40 text-xs">
+                                  <Badge variant="outline" className="w-fit shrink-0 rounded-full bg-muted/40 px-3 py-1 text-xs">
                                     {material?.unit ? `Unidad: ${material.unit}` : 'Sin unidad'}
                                   </Badge>
                                 </div>
@@ -528,13 +542,13 @@ function RequestsColumn({
 
 function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="flex h-full min-h-[84px] items-start gap-3 rounded-xl border border-border/70 bg-background/90 p-3.5 shadow-sm">
-      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#eab676]/15 text-[#9a6b2f]">
+    <div className="flex min-h-[76px] items-start gap-3 rounded-xl border border-border/70 bg-background/90 p-4 shadow-sm">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#eab676]/15 text-[#9a6b2f]">
         {icon}
       </div>
-      <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
-        <p className="mt-1 whitespace-normal text-sm font-semibold leading-5 text-foreground">{value}</p>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
+        <p className="mt-1 break-words text-base font-semibold leading-6 text-foreground">{value}</p>
       </div>
     </div>
   );
