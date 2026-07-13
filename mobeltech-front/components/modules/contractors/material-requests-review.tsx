@@ -25,6 +25,7 @@ type Contractor = {
 
 type ProductionOrder = {
   id: string;
+  projectName?: string | null;
   items?: Array<{ description: string; quantity: number }>;
 };
 
@@ -38,6 +39,7 @@ type MaterialRequest = {
   id: string;
   contractorId: string;
   productionOrderId?: string | null;
+  jobName?: string | null;
   status: 'pending' | 'approved' | 'rejected';
   rejectionComments?: string | null;
   requestDate: string;
@@ -109,7 +111,8 @@ export function MaterialRequestsReview() {
     if (!normalized) return requests;
     return requests.filter((request) => {
       const contractorName = contractors.find((entry) => entry.id === request.contractorId)?.name ?? '';
-      const orderName = orders.find((entry) => entry.id === request.productionOrderId)?.items?.[0]?.description ?? '';
+      const order = orders.find((entry) => entry.id === request.productionOrderId);
+      const orderName = request.jobName?.trim() || order?.projectName?.trim() || order?.items?.[0]?.description || '';
       return [contractorName, orderName, request.id].some((value) => value.toLowerCase().includes(normalized));
     });
   }, [contractors, orders, requests, searchQuery]);
@@ -137,7 +140,12 @@ export function MaterialRequestsReview() {
   }
 
   function getOrderName(orderId?: string | null) {
-    return ordersById.get(orderId ?? '')?.items?.[0]?.description ?? 'Trabajo sin detalle';
+    const order = ordersById.get(orderId ?? '');
+    return order?.projectName?.trim() || order?.items?.[0]?.description || 'Trabajo sin detalle';
+  }
+
+  function getRequestJobName(request: MaterialRequest) {
+    return request.jobName?.trim() || getOrderName(request.productionOrderId);
   }
 
   function getMaterial(materialId: string) {
@@ -249,7 +257,7 @@ export function MaterialRequestsReview() {
           requests={pendingRequests}
           openRequest={setSelectedRequestId}
           getContractorName={getContractorName}
-          getOrderName={getOrderName}
+          getRequestJobName={getRequestJobName}
           materialsById={materialsById}
         />
         <RequestsColumn
@@ -258,7 +266,7 @@ export function MaterialRequestsReview() {
           requests={approvedRequests}
           openRequest={setSelectedRequestId}
           getContractorName={getContractorName}
-          getOrderName={getOrderName}
+          getRequestJobName={getRequestJobName}
           materialsById={materialsById}
         />
         <RequestsColumn
@@ -267,7 +275,7 @@ export function MaterialRequestsReview() {
           requests={rejectedRequests}
           openRequest={setSelectedRequestId}
           getContractorName={getContractorName}
-          getOrderName={getOrderName}
+          getRequestJobName={getRequestJobName}
           materialsById={materialsById}
         />
       </div>
@@ -318,7 +326,7 @@ export function MaterialRequestsReview() {
                       <InfoRow
                         icon={<Package className="h-4 w-4" />}
                         label="Trabajo"
-                        value={getOrderName(selectedRequest.productionOrderId)}
+                        value={getRequestJobName(selectedRequest)}
                       />
                       <InfoRow
                         icon={<CalendarDays className="h-4 w-4" />}
@@ -470,7 +478,7 @@ function RequestsColumn({
   requests,
   openRequest,
   getContractorName,
-  getOrderName,
+  getRequestJobName,
   materialsById,
 }: {
   title: string;
@@ -478,7 +486,7 @@ function RequestsColumn({
   requests: MaterialRequest[];
   openRequest: (requestId: string) => void;
   getContractorName: (contractorId: string) => string;
-  getOrderName: (orderId?: string | null) => string;
+  getRequestJobName: (request: MaterialRequest) => string;
   materialsById: Map<string, Material>;
 }) {
   return (
@@ -501,7 +509,7 @@ function RequestsColumn({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-semibold">{getContractorName(request.contractorId)}</p>
-                <p className="text-sm text-muted-foreground">{getOrderName(request.productionOrderId)}</p>
+                <p className="text-sm text-muted-foreground">{getRequestJobName(request)}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {request.items.length} materiales · {new Date(request.requestDate).toLocaleDateString('es-BO')}
                 </p>
